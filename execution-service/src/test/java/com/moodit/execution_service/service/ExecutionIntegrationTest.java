@@ -210,6 +210,64 @@ class ExecutionIntegrationTest {
         assertThat(passes("Bash", forged, "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }
 
+    /** Détail du premier verdict (diagnostic attendu d'un refus). */
+    private String detail(String language, String code, String harness) {
+        return service.evaluate(new EvaluateRequest(language, null, code,
+                List.of(new TestCaseInput("t", harness, 1)))).get(0).detail();
+    }
+
+    @Test
+    void python_submitted_builtin_name_cannot_forge_the_verdict() {
+        // Revue #246 : un mandataire `bool` masquait la fonction intégrée dans le VERDICT du
+        // noteur ; `abs` ou `len` la masquaient dans le harnais. Refus explicite, et le
+        // verdict n'appelle plus que la vraie `bool`.
+        requireRuntime("python");
+        assertThat(passes("Python", "def bool(x):\n    return True\ndef doubler(n):\n    return 0",
+                "return doubler(5) == 10")).isFalse();
+        assertThat(passes("Python", "def abs(x):\n    return 0\ndef moitie(n):\n    return 0",
+                "return abs(moitie(5) - 2.5) < 1e-9")).isFalse();
+        assertThat(detail("Python", "def len(x):\n    return 3\ndef liste():\n    return []",
+                "return len(liste()) == 3")).contains("réservé").contains("len");
+        // Témoin : sans masquage, la même forme de harnais note normalement.
+        assertThat(passes("Python", "def moitie(n):\n    return n / 2",
+                "return abs(moitie(5) - 2.5) < 1e-9")).isTrue();
+    }
+
+    @Test
+    void javascript_submitted_global_name_cannot_forge_the_verdict() {
+        requireRuntime("javascript");
+        assertThat(passes("JavaScript", "function Number(x){ return 3; }\nfunction f(){ return 0; }",
+                "return Number(f()) === 3;")).isFalse();
+        assertThat(detail("JavaScript", "function parseInt(x){ return 3; }\nfunction f(){ return '0'; }",
+                "return parseInt(f()) === 3;")).contains("réservé").contains("parseInt");
+        assertThat(passes("JavaScript", "function f(){ return '3'; }",
+                "return Number(f()) === 3;")).isTrue();
+    }
+
+    @Test
+    void bash_submitted_command_name_cannot_forge_the_verdict() {
+        // Revue #246 : `test() { :; }` remplaçait le `test` du harnais (forme du gabarit), de
+        // même pour un programme du PATH (`expr`).
+        requireRuntime("bash");
+        assertThat(passes("Bash", "test() { :; }\nsolution() { echo 0; }",
+                "test \"$(solution)\" = \"9\"")).isFalse();
+        assertThat(passes("Bash", "expr() { echo 1; }\nsolution() { echo 0; }",
+                "[ \"$(expr \"$(solution)\" = 9)\" = 1 ]")).isFalse();
+        assertThat(detail("Bash", "test() { :; }\nsolution() { echo 0; }",
+                "test \"$(solution)\" = \"9\"")).contains("réservé").contains("test");
+    }
+
+    @Test
+    void bash_proxy_returns_the_status_of_the_real_call() {
+        // Le mandataire renvoyait toujours 0 : `est_pair 3` était vrai pour toute réponse, et
+        // une réponse juste qui renvoie 1 pour un impair était notée fausse.
+        requireRuntime("bash");
+        String h = "est_pair 4 && ! est_pair 3";
+        assertThat(passes("Bash", "est_pair() { [ $(( $1 % 2 )) -eq 0 ]; }", h)).isTrue();
+        assertThat(passes("Bash", "est_pair() { return 0; }", h)).isFalse();
+        assertThat(passes("Bash", "est_pair() { return 1; }", "est_pair 4")).isFalse();
+    }
+
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {
@@ -315,6 +373,30 @@ class ExecutionIntegrationTest {
                 + "SELECT (SELECT count(*) FROM solution1) = 3;";
         assertThat(passes("SQL", "SELECT n FROM t", roHarness)).isTrue();
         assertThat(passes("SQL", "SELECT n FROM t WHERE n > 1", roHarness)).isFalse();
+    }
+
+    @Test
+    void sql_go_line_and_file_reads_cannot_forge_the_verdict() {
+        // Revue #246 : une ligne « go » faisait sortir la réponse de son CREATE VIEW, et
+        // readfile('main.sql') (ou la table virtuelle fsdir) y lisait les sentinelles au nonce
+        // pour imprimer un faux bloc de verdict avant le vrai.
+        requireRuntime("sqlite3");
+        String roHarness = "CREATE TABLE t(n INTEGER);\nINSERT INTO t VALUES (1),(2),(3);\n"
+                + "SELECT (SELECT count(*) FROM solution1) = 3;";
+        // Sentinelle = « MOODIT_OK_ » + 48 hex + « _VERDICT_START » (72 caractères), cherchée
+        // par sa fin, écrite en deux morceaux pour ne pas trouver ce texte-ci dans main.sql.
+        String sentinel = "substr(src, instr(src, '_VERDICT_' || 'START') - 58, 72)";
+        String forge = "SELECT n FROM t WHERE n > 1\ngo\n"
+                + "SELECT " + sentinel + " || char(10) || '1' || char(10) || replace(" + sentinel
+                + ", 'START', 'END') FROM (SELECT CAST(data AS TEXT) AS src FROM fsdir('main.sql'))";
+        assertThat(passes("SQL", forge, roHarness)).isFalse();
+        // Mode modification : le code soumis tourne tel quel en phase 1. Il ne doit pas non plus
+        // pouvoir lire son programme, qui porte les sentinelles du dump : le harnais réussit
+        // seulement si le texte lu les contient.
+        String harness = "CREATE TABLE t(v TEXT);\n-- @student\n"
+                + "SELECT (SELECT count(*) FROM t WHERE instr(v, '_DUMP_' || 'START') > 0) = 1;";
+        assertThat(passes("SQL", "INSERT INTO t SELECT CAST(data AS TEXT) FROM fsdir('main.sql');",
+                harness)).isFalse();
     }
 
     // ─────────────────────── Limites du bac à sable (#24) ───────────────────────

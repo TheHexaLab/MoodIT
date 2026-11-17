@@ -175,14 +175,17 @@ public class CodeAssembler {
      */
     private Assembled assemblePython(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(PY_DEF, studentCode)) {
             if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
+            names.add(f);
             proxies.append("def ").append(f).append("(*a):\n")
                     .append("    return __moodit_rpc({\"op\": \"call\", \"name\": \"").append(f)
                     .append("\", \"args\": list(a)})[\"value\"]\n");
         }
         for (String c : matchAll(PY_CLASS, studentCode)) {
             if (c.startsWith("__moodit")) continue;
+            names.add(c);
             // NB : dans un corps de classe, un identifiant `__x` subit le name mangling Python
             // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
             proxies.append("class ").append(c).append(":\n")
@@ -199,7 +202,23 @@ public class CodeAssembler {
         String grader = "import os as __moodit_os\n"
                 + "try:\n    __moodit_os.remove('grader.py')\nexcept Exception:\n    pass\n"
                 + "import sys as __moodit_sys, subprocess as __moodit_subprocess, json as __moodit_json\n"
-                + "import secrets as __moodit_secrets\n"
+                + "import secrets as __moodit_secrets, builtins as __moodit_builtins\n"
+                // `bool` du VERDICT pris à la source : un mandataire `bool` le masquait au niveau
+                // du module, et le verdict appelait alors le code soumis.
+                + "__moodit_bool = __moodit_builtins.bool\n"
+                // REFUS d'un nom qui masque une fonction INTÉGRÉE : le mandataire généré pour
+                // `def len` ou `class abs` remplaçait, dans le harnais, la fonction intégrée du
+                // même nom par le code soumis (`abs(f(x) - 3) < 1e-9` passait avec un `abs`
+                // qui renvoie 0). Même règle que les noms réservés des langages compilés.
+                + "__moodit_shadow = [__n for __n in " + pythonStringList(names)
+                + " if hasattr(__moodit_builtins, __n)]\n"
+                + "if __moodit_shadow:\n"
+                + "    __moodit_sys.stderr.write(" + pythonStringLiteral(SHADOW_PREFIX)
+                + " + __moodit_shadow[0] + " + pythonStringLiteral(
+                        " » est réservé : il masque une fonction intégrée de Python, que le "
+                                + "harnais peut appeler. Renommer cette fonction ou cette classe, "
+                                + "puis resoumettre.\n") + ")\n"
+                + "    __moodit_sys.exit(1)\n"
                 + "__moodit_p = __moodit_subprocess.Popen([__moodit_sys.executable, 'student_server.py'],"
                 + " stdin=__moodit_subprocess.PIPE, stdout=__moodit_subprocess.PIPE, text=True)\n"
                 + "def __moodit_rpc(payload):\n"
@@ -224,7 +243,7 @@ public class CodeAssembler {
                 + proxies
                 + "def __moodit_harness():\n"
                 + indent(harnessCode, "    ")
-                + "\ntry:\n    __moodit_r = bool(__moodit_harness())\nexcept BaseException:\n    __moodit_r = False\n"
+                + "\ntry:\n    __moodit_r = __moodit_bool(__moodit_harness())\nexcept BaseException:\n    __moodit_r = False\n"
                 + "if __moodit_r:\n    __moodit_sys.stderr.write(\"" + nonce + "\")\n"
                 + "try:\n    __moodit_p.stdin.close()\nexcept Exception:\n    pass\n"
                 + "__moodit_sys.exit(0 if __moodit_r else 1)\n";
@@ -259,6 +278,38 @@ public class CodeAssembler {
         return new Assembled("python", List.of(
                 new RunnerExec.File("grader.py", grader),
                 new RunnerExec.File("student_server.py", server)));
+    }
+
+    /** Début du diagnostic d'un nom soumis qui masque une fonction intégrée (suivi du nom). */
+    static final String SHADOW_PREFIX = "Nom réservé : « ";
+
+    /** Liste de chaînes littérale (Python ou JavaScript) ; les noms viennent de motifs {@code \w}. */
+    private static String pythonStringList(java.util.Collection<String> names) {
+        return names.stream().map(CodeAssembler::pythonStringLiteral)
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    /**
+     * Littéral chaîne entre guillemets doubles, valable en Python comme en JavaScript : barre
+     * oblique inverse, guillemet, sauts de ligne et tout caractère non ASCII sont échappés.
+     */
+    private static String pythonStringLiteral(String text) {
+        StringBuilder out = new StringBuilder("\"");
+        for (char ch : text.toCharArray()) {
+            switch (ch) {
+                case '\\' -> out.append("\\\\");
+                case '"' -> out.append("\\\"");
+                case '\n' -> out.append("\\n");
+                default -> {
+                    if (ch < 0x20 || ch > 0x7E) {
+                        out.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        out.append(ch);
+                    }
+                }
+            }
+        }
+        return out.append('"').toString();
     }
 
     /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
@@ -312,8 +363,25 @@ public class CodeAssembler {
                     .append(" const h=__moodit_rpc({op:'new',cls:'").append(c).append("',args}).handle;")
                     .append(" return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n");
         }
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>(callables);
+        names.addAll(classes);
         // Tous les identifiants internes sont préfixés __moodit_ → aucune collision avec un symbole étudiant.
         String grader = header
+                // REFUS d'un nom qui masque un GLOBAL (Number, parseInt, isNaN, Boolean…) ou une
+                // variable du module (require…) : le mandataire, déclaré au niveau du module et
+                // hissé, remplaçait dans le harnais la fonction du même nom par le code soumis
+                // (`Number(f()) === 3` passait avec un `Number` qui renvoie 3). EN TÊTE, avant
+                // tout usage d'un nom que le mandataire hissé pourrait déjà masquer.
+                + "const __moodit_shadow=" + pythonStringList(names) + ".filter(function(n){"
+                + " return (n in globalThis) || [\"require\",\"module\",\"exports\",\"__filename\","
+                + "\"__dirname\",\"globalThis\"].indexOf(n)>=0; });\n"
+                + "if(__moodit_shadow.length){ const __moodit_msg=" + pythonStringLiteral(SHADOW_PREFIX)
+                + "+__moodit_shadow[0]+" + pythonStringLiteral(
+                        " » est réservé : il masque une fonction ou un objet global de JavaScript, "
+                                + "que le harnais peut appeler. Renommer cette fonction ou cette "
+                                + "classe, puis resoumettre.\n")
+                + "; try{ process.stderr.write(__moodit_msg); process.exit(1); }catch(e){}"
+                + " throw __moodit_msg; }\n"
                 + "const __moodit_cp=require('child_process'), __moodit_fs=require('fs');\n"
                 + "try { __moodit_fs.unlinkSync('grader.js'); } catch(e) {}\n"    // hors de portée du serveur
                 + "try { __moodit_fs.unlinkSync('grader.ts'); } catch(e) {}\n"    // (source TS, si présente)
@@ -482,10 +550,24 @@ public class CodeAssembler {
      */
     private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(BASH_FUNC, studentCode)) {
             if (f.startsWith("__moodit")) continue;
+            names.add(f);
             proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
         }
+        // REFUS d'un nom qui masque une commande : en bash, une fonction passe avant les
+        // commandes internes et les programmes du PATH. Le mandataire `test() { … }` remplaçait
+        // donc, dans le harnais, le `test` de `test "$(f)" = 9` par le code soumis — de même
+        // `expr`, `grep`, `bc`… Vérifié AVANT de définir les mandataires, par `type -t` dans
+        // l'image même : la liste est exactement celle des commandes que le harnais peut appeler.
+        String shadowCheck = names.isEmpty() ? "" : "for __moodit_n in " + String.join(" ", names)
+                + "; do if [ -n \"$(type -t \"$__moodit_n\")\" ]; then printf '%s%s%s\\n' "
+                + shellSingleQuote(SHADOW_PREFIX) + " \"$__moodit_n\" "
+                + shellSingleQuote(" » est réservé : il masque une commande de bash ou du "
+                        + "système, que le harnais peut appeler. Renommer cette fonction, puis "
+                        + "resoumettre.")
+                + " >&2; exit 1; fi; done\n";
         // CADRAGE PAR IDENTIFIANT : la valeur rendue est la ligne « <id>|valeur », et seule
         // celle-ci est retenue. Un `echo` de premier niveau du code étudiant ne vaut donc plus
         // réponse — c'était la forge naïve (imprimer l'attendu, ne rien imprimer dans sa
@@ -506,11 +588,15 @@ public class CodeAssembler {
                 + "__moodit_val=$(unset __moodit_id;"
                 + " . ./solution.sh >/dev/null 2>&1;"
                 + " $__moodit_name $__moodit_rest)\n"
+                // STATUT de l'appel réel (celui de la substitution) : il voyage avec la valeur.
+                // Le mandataire renvoyait toujours 0 — `if est_pair 3` était vrai pour toute
+                // réponse, et une réponse juste qui renvoie 1 était notée fausse.
+                + "__moodit_st=$?\n"
                 // La valeur part en HEXADÉCIMAL sur UNE ligne : le noteur ne retient que la ligne
                 // « id|… », une valeur multi-ligne perdait donc tout sauf sa première — réponse
                 // juste notée fausse. `-v` est OBLIGATOIRE : sans lui, od compresse les répétitions
                 // en « * » et la valeur décodée serait fausse.
-                + "printf '%s|%s\\n' \"$__moodit_id\" "
+                + "printf '%s|%s|%s\\n' \"$__moodit_id\" \"$__moodit_st\" "
                 + "\"$(printf '%s' \"$__moodit_val\" | od -An -vtx1 | tr -d ' \n')\"\n";
         // Le noteur entier est UN SEUL bloc `{ … }` : bash le lit et l'analyse en entier avant
         // d'en exécuter la première commande. Il peut donc VIDER son propre fichier avant tout
@@ -523,11 +609,17 @@ public class CodeAssembler {
                 + "__moodit_rpc() { local __n=\"$1\"; shift;"
                 + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
                 + " printf '%s\\n' \"$__id $__n $*\" | bash -c \"$__moodit_srv\" 2>/dev/null"
-                + " | while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
-                + " __moodit_dec \"${__l#*|}\"; break;; esac; done; }\n"
+                // Ligne « id|statut|hex » : la valeur est décodée, puis le dernier élément du
+                // tube SORT avec le statut de l'appel réel — c'est celui du tube, donc du
+                // mandataire. Statut illisible ou réponse absente → 1, jamais 0.
+                + " | { while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
+                + " __l=\"${__l#*|}\"; __moodit_dec \"${__l#*|}\";"
+                + " case \"${__l%%|*}\" in ''|*[!0-9]*) exit 1;; esac; exit \"${__l%%|*}\";;"
+                + " esac; done; exit 1; }; }\n"
                 // Décodage en bash pur (pas de xxd dans l'image) : deux hexas → un octet,
                 // puis le saut de ligne que la ligne unique du protocole avait absorbé.
                 + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
+                + shadowCheck
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
                 + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n"
@@ -757,6 +849,12 @@ public class CodeAssembler {
      * Le découpage suit la même lexique que SQLite pour le {@code ;} : c'est ce qui garantit qu'aucun
      * fragment étudiant ne « déborde » de son {@code CREATE VIEW}. Les segments vides (blancs ou
      * commentaires seuls) sont ignorés.
+     *
+     * <p>Une ligne qui ne contient que {@code go} ou {@code /} (hors chaîne et commentaire) est
+     * AUSSI une fin d'instruction : l'interpréteur {@code sqlite3} la traite comme un {@code ;}
+     * (héritage SQL Server / Oracle). Sans cette règle, une telle ligne faisait sortir la
+     * réponse de son {@code CREATE VIEW} : la suite s'exécutait au premier niveau, commandes
+     * point comprises, et pouvait imprimer un bloc de verdict avant le vrai.
      */
     static List<String> splitSqlStatements(String sql) {
         List<String> statements = new ArrayList<>();
@@ -769,6 +867,16 @@ public class CodeAssembler {
         while (i < n) {
             char c = sql.charAt(i);
             char next = i + 1 < n ? sql.charAt(i + 1) : '\0';
+            if (i == 0 || sql.charAt(i - 1) == '\n') { // début de ligne : terminateur go ou / ?
+                int eol = sql.indexOf('\n', i);
+                int lineEnd = eol < 0 ? n : eol;
+                if (isShellTerminatorLine(sql.substring(i, lineEnd))) {
+                    addStatement(statements, current);
+                    current.setLength(0);
+                    i = eol < 0 ? n : eol + 1;
+                    continue;
+                }
+            }
             if (c == '-' && next == '-') { // commentaire de ligne
                 int end = sql.indexOf('\n', i + 2);
                 end = end < 0 ? n : end + 1; // inclut le saut de ligne
@@ -800,6 +908,57 @@ public class CodeAssembler {
         }
         addStatement(statements, current);
         return statements;
+    }
+
+    /**
+     * Vrai si la ligne est un terminateur d'instruction pour l'interpréteur {@code sqlite3} :
+     * {@code go} (casse indifférente) ou {@code /}, entourés seulement de blancs et de
+     * commentaires fermés — même règle que {@code line_is_command_terminator} du shell SQLite.
+     * Plus large que lui au besoin (découper davantage ne laisse rien déborder), jamais plus
+     * étroite.
+     */
+    static boolean isShellTerminatorLine(String line) {
+        int i = 0;
+        int n = line.length();
+        while (i < n && isSqlShellSpace(line.charAt(i))) {
+            i++;
+        }
+        if (i < n && line.charAt(i) == '/') {
+            return onlyBlanksOrComments(line, i + 1);
+        }
+        if (i + 1 < n && Character.toLowerCase(line.charAt(i)) == 'g'
+                && Character.toLowerCase(line.charAt(i + 1)) == 'o') {
+            return onlyBlanksOrComments(line, i + 2);
+        }
+        return false;
+    }
+
+    /** Reste de ligne fait uniquement de blancs, de {@code -- …} et de {@code /* … *}{@code /} fermés. */
+    private static boolean onlyBlanksOrComments(String line, int from) {
+        int i = from;
+        int n = line.length();
+        while (i < n) {
+            char c = line.charAt(i);
+            if (isSqlShellSpace(c)) {
+                i++;
+            } else if (c == '-' && i + 1 < n && line.charAt(i + 1) == '-') {
+                return true; // commentaire jusqu'à la fin de la ligne
+            } else if (c == '/' && i + 1 < n && line.charAt(i + 1) == '*') {
+                int close = line.indexOf("*/", i + 2);
+                if (close < 0) {
+                    return false; // commentaire ouvert : l'instruction n'est pas complète
+                }
+                i = close + 2;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Blancs au sens de {@code isspace} du C (ce qu'utilise le shell SQLite). */
+    private static boolean isSqlShellSpace(char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\u000B' || c == '\f';
     }
 
     /** Position APRÈS le délimiteur fermant d'un littéral ouvert en {@code start} par {@code quote}

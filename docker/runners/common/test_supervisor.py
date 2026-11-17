@@ -1915,5 +1915,17 @@ class Review246Test(unittest.TestCase):
         self.assertEqual(server.count("Signe(m.GetParameters(), nom, parts.Length - 2)"), 1)
 
 
+class SqliteExecTest(unittest.TestCase):
+    """Revue #246 : le programme SQL porte les sentinelles au nonce, et le code soumis tourne
+    dans le meme processus sqlite3. Mode -safe, et programme livre par stdin (root l'ouvre)."""
+
+    def test_sqlite_runs_in_safe_mode_and_reads_its_program_from_stdin(self):
+        compile_cmd, run_cmd = supervisor.exec_commands("sqlite3", "main.sql")
+        self.assertIsNone(compile_cmd)
+        self.assertEqual(run_cmd, ["sqlite3", "-safe", "-bail", "-batch", ":memory:"])
+        # Le fichier n'est plus ouvert par le processus lui-meme (redirection d'un sh).
+        self.assertNotIn("main.sql", " ".join(run_cmd))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

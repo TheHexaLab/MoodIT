@@ -236,6 +236,96 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void sql_go_or_slash_line_cannot_take_the_answer_out_of_its_view() {
+        // Revue #246 : sqlite3 traite une ligne « go » ou « / » seule comme un `;`. Le
+        // découpage ne coupait que sur `;` : la suite de la réponse sortait du CREATE VIEW et
+        // s'exécutait au premier niveau (commandes point comprises), où elle pouvait imprimer
+        // un faux bloc de verdict. Elle est désormais enfermée dans sa propre vue.
+        var a = assembler.assemble("SQL", "SELECT 0\ngo\n.print evade\n/\nSELECT 2",
+                "SELECT 1;", "N");
+        String content = onlyFileContent(a);
+        assertThat(content)
+                .contains("CREATE VIEW solution1 AS\nSELECT 0\n;")
+                .contains("CREATE VIEW solution2 AS\n.print evade\n;")
+                .contains("CREATE VIEW solution3 AS\nSELECT 2\n;")
+                .doesNotContain("\ngo\n");
+    }
+
+    @Test
+    void splitSqlStatements_go_and_slash_lines_are_terminators_like_the_sqlite_shell() {
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\n  GO  \nSELECT 2\n/\nSELECT 3"))
+                .containsExactly("SELECT 1", "SELECT 2", "SELECT 3");
+        // Blancs et commentaires fermés autour : toujours un terminateur (règle du shell).
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngo -- fin\nSELECT 2\n\t/ /* x */\r\nSELECT 3"))
+                .containsExactly("SELECT 1", "SELECT 2", "SELECT 3");
+        // Première ligne du texte, et dernière sans saut de ligne final.
+        assertThat(CodeAssembler.splitSqlStatements("go\nSELECT 1\ngo")).containsExactly("SELECT 1");
+        // Dans une chaîne, un identifiant ou un commentaire : PAS un terminateur.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 'a\ngo\nb'")).containsExactly("SELECT 'a\ngo\nb'");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1 /*\ngo\n*/")).containsExactly("SELECT 1 /*\ngo\n*/");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT \"a\n/\nb\"")).containsExactly("SELECT \"a\n/\nb\"");
+        // Ni « go » collé à autre chose, ni une ligne qui ne fait que commencer par go.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngoal\nFROM t\ngo;")).hasSize(1);
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\n/ 2\nFROM t")).hasSize(1);
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngo /* ouvert\n*/ FROM t")).hasSize(1);
+    }
+
+    @Test
+    void filterDumpToData_a_go_line_cannot_smuggle_a_statement_into_phase_2() {
+        String dump = "CREATE TABLE t(v);\nINSERT INTO t VALUES(1)\ngo\nSELECT 'forge';\n";
+        assertThat(CodeAssembler.filterDumpToData(dump, java.util.Set.of("t")))
+                .contains("INSERT INTO t VALUES(1)")
+                .doesNotContain("forge");
+    }
+
+    @Test
+    void python_verdict_uses_the_real_bool_and_refuses_shadowed_builtins() {
+        // Revue #246 : un mandataire `bool` masquait la fonction intégrée dans le VERDICT
+        // (`bool(__moodit_harness())`), et tout harnais passait.
+        var a = assembler.assemble("Python", "def bool(x):\n    return True\ndef f():\n    return 0",
+                "return f() == 1", "N");
+        String grader = a.files().get(0).content();
+        assertThat(grader)
+                .contains("__moodit_bool = __moodit_builtins.bool")
+                .contains("__moodit_r = __moodit_bool(__moodit_harness())")
+                .doesNotContain("= bool(__moodit_harness())")
+                // Refus vérifié AVANT le lancement du processus étudiant.
+                .contains("[\"bool\", \"f\"] if hasattr(__moodit_builtins, __n)");
+        assertThat(grader.indexOf("if __moodit_shadow:"))
+                .isLessThan(grader.indexOf("__moodit_subprocess.Popen"));
+    }
+
+    @Test
+    void javascript_refuses_names_that_shadow_a_global_before_any_use() {
+        var a = assembler.assemble("JavaScript", "function Number(x){ return 3; }\nconst f = () => 0;",
+                "return Number(f()) === 3;", "N");
+        String grader = a.files().get(0).content();
+        assertThat(grader)
+                .startsWith("const __moodit_shadow=[\"Number\", \"f\"]")
+                .contains("(n in globalThis)")
+                .contains("\"require\"");
+        var ts = assembler.assemble("TypeScript", "function parseInt(x: string): number { return 3; }",
+                "return parseInt('1') === 3;", "N");
+        assertThat(ts.files().get(0).content())
+                .startsWith("// @ts-nocheck\nconst __moodit_shadow=[\"parseInt\"]");
+    }
+
+    @Test
+    void bash_refuses_names_that_shadow_a_command_and_propagates_the_status() {
+        var a = assembler.assemble("Bash", "test() { :; }\nest_pair() { return 1; }",
+                "test \"$(est_pair 4)\" = 9", "N");
+        String grader = a.files().get(0).content();
+        // Refus par `type -t` dans l'image, AVANT de définir les mandataires.
+        assertThat(grader).contains("for __moodit_n in test est_pair; do if [ -n \"$(type -t");
+        assertThat(grader.indexOf("type -t")).isLessThan(grader.indexOf("test() { __moodit_rpc"));
+        // Le statut de l'appel réel voyage avec la valeur et devient celui du mandataire.
+        assertThat(grader).contains("__moodit_st=$?").contains("exit \"${__l%%|*}\"");
+        // Sans fonction soumise : pas de boucle de refus (une liste vide serait inutile).
+        assertThat(assembler.assemble("Bash", "x=1", "true", "N").files().get(0).content())
+                .doesNotContain("for __moodit_n in");
+    }
+
+    @Test
     void splitSqlStatements_ignores_comments_and_blank_segments() {
         // Un commentaire de fin seul après le ; ne compte pas comme une instruction.
         assertThat(CodeAssembler.splitSqlStatements("SELECT 1; -- fini\n")).containsExactly("SELECT 1");

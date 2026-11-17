@@ -4592,7 +4592,6 @@ EXEC_DEFAULT_TIMEOUT_S = 3
 
 def exec_commands(runtime, entry):
     """(commande de compilation ou None, commande d'exécution) pour un runtime donné."""
-    quoted = "'" + entry.replace("'", "'\\''") + "'"
     if runtime == "python":
         return None, ["python3", entry]
     if runtime == "javascript":
@@ -4610,7 +4609,11 @@ def exec_commands(runtime, entry):
         return None, ["bash", entry]
     if runtime == "sqlite3":
         # -bail : une erreur SQL arrête le script avec un exit non nul (verdict « erreur SQL »).
-        return None, ["sh", "-c", "exec sqlite3 -bail -batch :memory: < " + quoted]
+        # -safe : coupe .shell/.system/.read/.import/.output, ATTACH, readfile/writefile… Le
+        # programme arrive par STDIN, ouvert par root sur un fichier root 0600 (cf.
+        # exec_main) : il porte les sentinelles au nonce, et la table virtuelle fsdir, que
+        # -safe laisse passer, lisait encore main.sql quand l'étudiant en était propriétaire.
+        return None, ["sqlite3", "-safe", "-bail", "-batch", ":memory:"]
     if runtime == "c":
         return ["gcc", "-O2", entry, "-o", "prog", "-lm"], ["./prog"]
     if runtime == "c++":
@@ -4711,7 +4714,15 @@ def exec_main(job):
     env = exec_env(work)
 
     stdin_path = None
-    if job.get("stdin"):
+    if runtime == "sqlite3":
+        # Le programme SQL porte les sentinelles au nonce : il doit rester ILLISIBLE pour le
+        # code soumis, qui tourne dans le même processus sqlite3 (sous l'UID étudiant). Root
+        # le verrouille en 0600 AVANT tout lancement, puis l'ouvre lui-même comme stdin
+        # (run_proc) : le processus reçoit le descripteur sans pouvoir rouvrir le fichier.
+        # Le stdin éventuel du job est ignoré : pour SQL, stdin EST le programme.
+        stdin_path = os.path.join(src, entry)
+        set_owner_mode(stdin_path, 0, 0, 0o600)
+    elif job.get("stdin"):
         stdin_path = os.path.join(BOX, "stdin.txt")
         with open(stdin_path, "w", encoding="utf-8") as f:
             f.write(job["stdin"])
