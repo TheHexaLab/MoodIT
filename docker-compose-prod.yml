@@ -201,7 +201,7 @@ services:
       # (docker-outside-of-docker — un montage hôte ne marcherait pas, les fichiers passent par
       # l'API). Accès ROOT-ÉQUIVALENT à l'hôte : ce service est joignable depuis Internet
       # (/exec/** via le gateway), un défaut d'exécution de code y vaudrait donc l'hôte entier.
-      # Assumé en attendant un proxy de socket restreint ; cf. deploy/DEPLOY.md. Les images
+      # Assumé en attendant son durcissement (#271) ; cf. deploy/DEPLOY.md. Les images
       # runner sont construites par docker/runners/build.sh.
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

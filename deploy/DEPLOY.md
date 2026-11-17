@@ -171,7 +171,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > AVEC le code de l'étudiant, donc le processus qui détenait le secret était celui que l'étudiant
 > contrôle. Un harnais qui en porte le marqueur est désormais refusé avec un diagnostic, avant
 > toute prise de place sandbox. Le format framework n'a jamais été déployé (la production était
-> à `V2`), donc aucune question n'est à convertir DE ce format. **Mais attention aux questions
+> à `V3`), donc aucune question n'est à convertir DE ce format. **Mais attention aux questions
 > compilées antérieures à #116** : écrites pour l'époque où le harnais était compilé avec le code
 > de l'étudiant, elles pouvaient échanger n'importe quel type. Le chemin booléen ne transporte
 > que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
@@ -346,17 +346,21 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
     incohérents (falsification) l'emportent toujours : jamais de 502 dans ce cas. Cette variable est lue par execution-service **et**
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
   la changer pour un seul des deux ferait abandonner des corrections encore en cours.
-  **Le débit de correction
-  est en réalité plafonné par le pool `quizExecutor` de core-service** (`AsyncConfig`,
-  `corePoolSize=2`, file de 100) : un `ThreadPoolTaskExecutor` ne dépasse son cœur qu'une fois
-  la file pleine, donc **deux corrections en vol au maximum**, quel que soit
-  `EXEC_MAX_CONCURRENT` — relever l'un sans l'autre ne change rien. Le bouton « Tester » d'un
+  **Côté core, les quiz à harnais ont leur propre pool** (`AsyncConfig.quizCodeExecutor`) : autant
+  de corrections en parallèle que `QUIZ_CODE_GRADING_THREADS` (3 par défaut), à garder **égal**
+  à `EXEC_MAX_CONCURRENT` — moins laisse des places vides, plus fait attendre des corrections
+  dans la file d'execution-service jusqu'à leur abandon. Les deux se règlent dans
+  `docker-compose-hetzner.yml`, l'un dans le bloc de core-service, l'autre dans celui
+  d'execution-service. Les quiz SANS harnais passent par un autre pool (`quizExecutor`) et
+  n'attendent jamais derrière une correction compilée. Au-delà de la file du pool de code
+  (`QUIZ_CODE_GRADING_QUEUE`, 500), une soumission est refusée proprement : tentative supprimée,
+  `quiz:attempt-failed` poussé, l'étudiant resoumet. Le bouton « Tester » d'un
   prof sur une question compilée pèse autant qu'une correction (même conteneur, même place).
   Une CLASSE ENTIÈRE qui soumet un quiz compilé dans la même minute (fin de créneau, examen)
-  dépassera cette capacité : avant ce scénario, relever **ensemble** `quizExecutor.corePoolSize`
-  et `EXEC_MAX_CONCURRENT` à la mesure du groupe (`nb_étudiants × durée_correction / places`,
-  la RAM suit — voir « coût / dimensionnement »), étaler les soumissions, ou attendre le
-  rejouage automatique côté core (suivi ouvert — il n'existe pas encore).
+  attendra longtemps ses résultats : avant ce scénario, relever **ensemble**
+  `QUIZ_CODE_GRADING_THREADS` et `EXEC_MAX_CONCURRENT` à la mesure du groupe
+  (`nb_étudiants × durée_correction / places`, la RAM suit — voir « coût / dimensionnement »),
+  ou étaler les soumissions. Rejouage automatique et dimensionnement pour un examen : #272.
 - **`strace` n'est plus utilisé, et la capacité `SYS_PTRACE` n'est plus accordée.** Elles
   servaient à tracer le code soumis pour détecter une lecture du harnais — nécessaire quand le
   harnais vivait dans un fichier qu'il pouvait ouvrir, c'est-à-dire sur le format « vraie classe
@@ -376,8 +380,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   des conteneurs. Un défaut d'exécution de code dans ce service ne se paierait donc plus par un
   conteneur sandbox compromis, mais par l'hôte entier (Postgres et Caddy compris). Les appels
   restent authentifiés (gateway, `X-Internal-Token`), `/exec/evaluate` est réservé aux éditeurs
-  de quiz et le service n'expose aucune route d'administration. Le durcissement attendu, suivi
-  ouvert avant tout usage à plus grande échelle, **ne peut pas être un simple filtre de routes**
+  de quiz et le service n'expose aucune route d'administration. Le durcissement attendu (#271), à faire
+  avant tout usage à plus grande échelle, **ne peut pas être un simple filtre de routes**
   (du type `tecnativa/docker-socket-proxy` réglé sur `containers/create|start|wait|logs|delete`
   et `images/inspect`) : un tel filtre ne regarde pas le CORPS de `POST /containers/create`, où
   `Privileged`, `Binds: ["/:/host"]`, `Mounts` ou `Devices` passeraient encore — il laisserait
@@ -391,7 +395,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 
   En complément, faire tourner `execution-service` sous un utilisateur non root (`USER` dans son
   `Dockerfile`, `group_add` sur le GID du socket de l'hôte dans le compose) : ce GID dépend de
-  l'hôte, d'où son report dans ce suivi. Les images sont construites par
+  l'hôte, d'où son report dans ce suivi (#271). Les images sont construites par
   `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
   fait automatiquement). En prod, `update.sh` les tague par **commit** — le dernier qui touche
   `docker/runners/` ou `execution-service/`, pour qu'un déploiement qui ne les change pas ne

@@ -1,7 +1,7 @@
 // Test d'intégration : valide l'isolation SQL 2 phases DIRECTEMENT contre un sqlite3 réel.
 // Rejoue la même logique que ExecutionService.runSqlIsolated (setup -> code etudiant -> .dump ->
 // filtre tables de travail -> verdict encadre par nonce), avec la même commande que le mode
-// exec du runner (sqlite3 -bail -batch :memory:). Nécessite node ET sqlite3 dans le PATH.
+// exec du runner (sqlite3 -safe -bail -batch :memory:). Nécessite node ET sqlite3 dans le PATH.
 // Cf. scripts/README.md. Aucun effet de bord (base en mémoire, jetable).
 const { spawnSync } = require('child_process');
 const NONCE = 'MOODIT_TEST_NONCE';
@@ -14,7 +14,7 @@ const VERDICT = "SELECT (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 3;
 const WORKING_TABLES = ['utilisateurs']; // liste blanche = tables du setup (cf. sqlWorkingTables)
 
 function run(sql) {
-  const r = spawnSync('sqlite3', ['-bail', '-batch', ':memory:'],
+  const r = spawnSync('sqlite3', ['-safe', '-bail', '-batch', ':memory:'],
     { input: sql, encoding: 'utf8', timeout: 3000 });
   if (r.error) return Promise.reject(r.error);
   return Promise.resolve({ code: r.status === null ? -1 : r.status,

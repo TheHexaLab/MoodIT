@@ -16,7 +16,7 @@
 -- sont proxifiés par POIGNÉE (l'instance vit chez l'étudiant).
 --
 -- Portée : seuls les GABARITS changent (questions futures). Le format framework a ensuite été
--- RETIRÉ dans cette même PR : il n'avait jamais été déployé (main était à V2), donc aucune
+-- RETIRÉ dans cette même PR : il n'avait jamais été déployé (main était à V3), donc aucune
 -- question existante n'en dépendait, et le garder laissait un prof choisir sans le savoir un
 -- chemin dont le verdict était contournable. Un harnais qui en porte le marqueur est désormais
 -- refusé avec un diagnostic, et le corps booléen est la seule forme notée.
