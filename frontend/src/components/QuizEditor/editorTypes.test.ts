@@ -63,6 +63,17 @@ describe('defaultHarness', () => {
     expect(out).toContain('vrai');
   });
 
+  // Compilés (#116) : seule la forme « corps booléen » est notée par le runner isolé. Les
+  // anciens gabarits (exception, panique, code de retour 0) décrivaient une forme refusée.
+  it.each(['Java', 'C', 'C++', 'C#', 'Go', 'Rust'])(
+    'le gabarit de repli %s décrit un harnais booléen',
+    (name) => {
+      const out = defaultHarness({ id: 1, name }, undefined);
+      expect(out).toMatch(/true|vrai|booléenne/);
+      expect(out).not.toMatch(/exception|panique|erreur|renvoie 0/);
+    }
+  );
+
   it('renvoie une chaîne vide si rien de connu', () => {
     expect(defaultHarness(undefined, undefined)).toBe('');
     expect(defaultHarness({ id: 1, name: 'Inconnu' }, undefined)).toBe('');
