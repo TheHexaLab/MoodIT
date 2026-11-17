@@ -21,7 +21,8 @@ execution-service (DockerEvaluator)
               1. compile (root)          le HARNAIS + le nonce dans un programme (le noteur),
                                          le CODE SOUMIS seul dans un autre (le serveur)
               2. verrouille les sources  chown root, chmod 700 → EACCES pour l'étudiant
-              3. lance le COUPLE         noteur sous l'UID 1301, serveur sous l'UID 1300,
+              3. lance le COUPLE         serveur sous l'UID étudiant (tiré au sort par
+                                         conteneur, 1300 dans l'image), noteur sous cet UID + 1,
                                          tubes croisés, le noteur mène
               4. verdict FAIL-CLOSED     le nonce du cas sur le stderr DU NOTEUR, rien d'autre
             → un JSON unique sur stdout (verdicts + événements d'infrastructure)

@@ -376,10 +376,22 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   des conteneurs. Un défaut d'exécution de code dans ce service ne se paierait donc plus par un
   conteneur sandbox compromis, mais par l'hôte entier (Postgres et Caddy compris). Les appels
   restent authentifiés (gateway, `X-Internal-Token`), `/exec/evaluate` est réservé aux éditeurs
-  de quiz et le service n'expose aucune route d'administration — mais **le durcissement attendu
-  est un proxy de socket restreint** (du type `tecnativa/docker-socket-proxy`, n'autorisant que
-  `containers/create|start|wait|logs|delete` et `images/inspect`) : c'est le suivi ouvert avant
-  tout usage à plus grande échelle. Les images sont construites par
+  de quiz et le service n'expose aucune route d'administration. Le durcissement attendu, suivi
+  ouvert avant tout usage à plus grande échelle, **ne peut pas être un simple filtre de routes**
+  (du type `tecnativa/docker-socket-proxy` réglé sur `containers/create|start|wait|logs|delete`
+  et `images/inspect`) : un tel filtre ne regarde pas le CORPS de `POST /containers/create`, où
+  `Privileged`, `Binds: ["/:/host"]`, `Mounts` ou `Devices` passeraient encore — il laisserait
+  donc l'hôte entier à portée. Il faut l'une de ces deux mesures :
+  - un intermédiaire qui **valide le corps** de chaque création et refuse tout ce qui s'écarte de
+    ce que `DockerSandbox` demande : image `moodit-runner-*` seulement, `NetworkMode=none`, ni
+    `Privileged`, ni `Binds`/`Mounts`/`Devices`, capacités limitées à la liste du sandbox,
+    `no-new-privileges` présent ;
+  - ou un **démon Docker rootless dédié** aux runners, dont le socket seul est monté : une
+    évasion n'y donne que l'utilisateur non privilégié de ce démon.
+
+  En complément, faire tourner `execution-service` sous un utilisateur non root (`USER` dans son
+  `Dockerfile`, `group_add` sur le GID du socket de l'hôte dans le compose) : ce GID dépend de
+  l'hôte, d'où son report dans ce suivi. Les images sont construites par
   `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
   fait automatiquement). En prod, `update.sh` les tague par **commit** — le dernier qui touche
   `docker/runners/` ou `execution-service/`, pour qu'un déploiement qui ne les change pas ne
