@@ -419,12 +419,45 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_graded_function_named_like_libc() {
-        // Le bouchon `static int abs(int)` suivait <stdlib.h> : redeclaration refusee. Le cas
-        // faux prouve que le harnais appelle bien la fonction de l'etudiant, pas celle de la libc.
+    void c_graded_function_named_like_libc_is_refused() {
+        // Une fonction soumise au nom d'une fonction de la libc fournie au harnais prendrait sa
+        // place dans le noteur : le harnais ne peut pas distinguer l'outil de la fonction notee.
+        // Refus explicite, meme pour une reponse juste.
         String h = "return abs(-5) == 5;";
-        assertThat(note("C", h, "int abs(int n) { return n < 0 ? -n : n; }").passed()).isTrue();
-        assertThat(note("C", h, "int abs(int n) { return n; }").passed()).isFalse();
+        TestResult r = note("C", h, "int abs(int n) { return n < 0 ? -n : n; }");
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("abs");
+    }
+
+    @Test
+    void submitted_library_function_cannot_forge_a_floating_point_harness() {
+        // Forge corrigee : une `fabs` soumise qui renvoie 0 faisait passer
+        // `fabs(f(x) - attendu) < 1e-9` quel que soit f, canaris compris.
+        String h = "return fabs(moitie(5) - 2.5) < 1e-9;";
+        String forged = """
+                double fabs(double x) { return 0; }
+                double moitie(int n) { return 0; }
+                """;
+        for (String language : List.of("C", "C++")) {
+            TestResult r = note(language, h, forged);
+            assertThat(r.passed()).as(language).isFalse();
+            assertThat(r.detail()).as(language).contains("réservé").contains("fabs");
+        }
+        // Meme chose par une macro de <math.h>.
+        TestResult macro = note("C", "return !isnan(moitie(5)) && moitie(5) == 2.5;",
+                "int isnan(double x) { return 0; }\ndouble moitie(int n) { return 2.5; }\n");
+        assertThat(macro.passed()).isFalse();
+        assertThat(macro.detail()).contains("réservé").contains("isnan");
+    }
+
+    @Test
+    void go_submitted_function_cannot_shadow_a_builtin() {
+        // En Go, `func max` au niveau du paquet masquait la fonction INTEGREE max du harnais.
+        TestResult r = note("Go", "return max(doubler(2), 0) == 4",
+                "package main\n\nfunc doubler(n int) int { return 0 }\n\n"
+                        + "func max(a, b int) int { return 4 }\n");
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("max");
     }
 
     @Test
@@ -571,13 +604,12 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_harness_with_fabs_true_and_function_named_round() {
-        // Le prof ne peut pas ecrire d'#include : <math.h> et <stdbool.h> lui sont fournis. Une
-        // fonction notee `int round(int)` ne heurte plus la declaration de <math.h>.
-        String h = "return fabs(moitie(5) - 2.5) < 1e-9 && round(7) == 7 && true;";
+    void c_harness_with_fabs_true_and_round() {
+        // Le prof ne peut pas ecrire d'#include : <math.h> et <stdbool.h> lui sont fournis, et
+        // ses outils (fabs, round) restent ceux de la libc.
+        String h = "return fabs(moitie(5) - 2.5) < 1e-9 && round(2.6) == 3 && true;";
         String code = """
                 double moitie(int n) { return n / 2.0; }
-                int round(int n) { return n; }
                 """;
         assertThat(note("C", h, code).passed()).isTrue();
         assertThat(note("C", h, code.replace("n / 2.0", "n / 3.0")).passed()).isFalse();

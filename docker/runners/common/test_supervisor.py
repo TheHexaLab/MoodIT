@@ -17,6 +17,7 @@ import sys
 import tempfile
 import io
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import supervisor  # noqa: E402
@@ -1779,15 +1780,57 @@ class Review31Test(unittest.TestCase):
         self.assertEqual(supervisor.cpp_object_api(src), [("A", [["int"]], [("int", "f", [])])])
 
     def test_c_grader_provides_math_and_bool_and_renames_stubs(self):
-        grader_dir = supervisor.c_grader_source([("int", "round", ["int"]), ("double", "f", ["double"]),
+        grader_dir = supervisor.c_grader_source([("int", "arrondi", ["int"]), ("double", "f", ["double"]),
                                              ("double", "f", ["int"])],
                                             "return fabs(f(1.0) - 2.5) < 1e-9 && true;", "1",
                                             cpp=True)
         self.assertTrue(grader_dir.startswith("#include <math.h>" + self.NL + "#include <stdbool.h>"))
-        self.assertIn("int moodit_f_round(int a0) {", grader_dir)
+        self.assertIn("int moodit_f_arrondi(int a0) {", grader_dir)
         # Un seul #define par nom, meme surcharge ; place AVANT le harnais.
         self.assertEqual(grader_dir.count("#define f moodit_f_f"), 1)
-        self.assertLess(grader_dir.index("#define round moodit_f_round"), grader_dir.index("moodit_harnais(void)"))
+        self.assertLess(grader_dir.index("#define arrondi moodit_f_arrondi"), grader_dir.index("moodit_harnais(void)"))
+
+
+class ReservedNamesTest(unittest.TestCase):
+    """Une fonction soumise au nom d'un OUTIL du harnais (fabs, isnan, max en Go…) prenait sa
+    place dans le noteur : une `fabs` qui renvoie 0 faisait passer tout harnais flottant."""
+
+    def test_c_probe_uses_the_grader_headers_and_catches_macros(self):
+        probe = supervisor.c_probe_source(["fabs", "isnan"])
+        self.assertTrue(probe.startswith(supervisor.C_GRADER_HEADER))
+        for header in ("<stdio.h>", "<stdlib.h>", "<string.h>"):
+            self.assertIn("#include " + header, probe)
+        self.assertIn("#ifdef isnan\n#error moodit_reserve\n#endif\nint isnan;\n", probe)
+        self.assertIn("int fabs;\n", probe)
+
+    def test_c_reserved_names_with_the_real_compilers(self):
+        # run_proc vide /tmp et tue les processus etudiants entre deux cas : neutralises ici,
+        # sinon la sonde effacait son propre dossier temporaire (et le /tmp de la machine de CI).
+        self.addCleanup(unittest.mock.patch.stopall)
+        unittest.mock.patch.object(supervisor, "purge_shared_dirs", lambda: None).start()
+        unittest.mock.patch.object(supervisor, "kill_student_survivors", lambda: None).start()
+        compilers = [c for c in (("gcc", "-std=gnu17"), ("g++", "-std=c++20")) if shutil.which(c[0])]
+        if not compilers:
+            self.skipTest("gcc et g++ absents")
+        for compiler, std in compilers:
+            with self.subTest(compiler=compiler), tempfile.TemporaryDirectory() as d:
+                found = supervisor.c_reserved_names(
+                    ["moitie", "fabs", "sqrt", "isnan", "abs", "true", "f", "fabs"],
+                    compiler, std, d, dict(os.environ))
+                self.assertEqual(found, ["fabs", "sqrt", "isnan", "abs", "true"])
+                self.assertEqual(supervisor.c_reserved_names(["moitie", "f"], compiler, std, d,
+                                                             dict(os.environ)), [])
+
+    def test_go_predeclared_names(self):
+        self.assertEqual(supervisor.go_reserved_names(["doubler", "max", "min", "len", "max"]),
+                         ["max", "min", "len"])
+        self.assertEqual(supervisor.go_reserved_names(["Max", "abs"]), [])
+
+    def test_message_names_every_offender(self):
+        one = supervisor.reserved_name_message(["fabs"], "la bibliothèque standard")
+        self.assertIn("« fabs » est déjà fourni au harnais par la bibliothèque standard", one)
+        many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
+        self.assertIn("« max », « min » sont déjà fournis au harnais", many)
 
 
 if __name__ == "__main__":

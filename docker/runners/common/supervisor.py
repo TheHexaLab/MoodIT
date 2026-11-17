@@ -1598,6 +1598,20 @@ GO_TYPES = {"int": "int", "int64": "int64", "float64": "float64", "bool": "bool"
             "string": "string"}
 
 
+# Identifiants PREDECLARES de Go (spécification, « Predeclared identifiers », Go 1.23) : une
+# declaration de paquet du meme nom les masque dans tout le paquet, harnais compris.
+GO_PREDECLARED = frozenset("""
+    any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32
+    int64 rune string uint uint8 uint16 uint32 uint64 uintptr true false iota nil append cap
+    clear close complex copy delete imag len make max min new panic print println real recover
+""".split())
+
+
+def go_reserved_names(names):
+    """Noms de fonctions soumises qui masqueraient un identifiant prédéclaré. PURE (testée)."""
+    return [n for n in dict.fromkeys(names) if n in GO_PREDECLARED]
+
+
 def go_signatures(source):
     """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])].
 
@@ -2557,6 +2571,50 @@ static const char *moodit_valeur(const char *id) {
 '''
 
 
+C_GRADER_HEADER = "#include <math.h>\n#include <stdbool.h>\n"
+
+
+def c_probe_source(names):
+    """Sonde des noms RESERVES du noteur C/C++. FONCTION PURE (testée).
+
+    Reprend exactement les en-tetes que voit le harnais (C_GRADER_HEADER, puis ceux de
+    C_RUNTIME) et declare chaque nom comme une VARIABLE : la sonde compile si et seulement si
+    aucun de ces en-tetes ne declare deja ce nom (fonction, surcharge C++ ou mot-cle), et le
+    #ifdef attrape les macros (`isnan`, `true` en C), qu'une variable ne heurterait pas."""
+    includes = "".join(l + "\n" for l in C_RUNTIME.splitlines() if l.startswith("#include"))
+    checks = "".join("#ifdef %s\n#error moodit_reserve\n#endif\nint %s;\n" % (n, n) for n in names)
+    return C_GRADER_HEADER + includes + checks
+
+
+def c_reserved_names(names, compiler, std, case_dir, env):
+    """Noms de `names` deja declares par les en-tetes du noteur (sonde -fsyntax-only, root).
+
+    Une seule compilation dans le cas courant (aucun nom reserve) ; en cas d'echec, une sonde
+    par nom pour nommer les fautifs dans le message."""
+    names = list(dict.fromkeys(names))
+    probe = os.path.join(case_dir, "sonde.c" if compiler == "gcc" else "sonde.cpp")
+
+    def compiles(subset):
+        write_private(probe, c_probe_source(subset))
+        code, expired = run_proc([compiler, std, "-fno-builtin", "-fsyntax-only", probe],
+                                 case_dir, env, COMPILE_TIMEOUT_S,
+                                 os.path.join(case_dir, "sonde.out"),
+                                 os.path.join(case_dir, "sonde.err"), preexec_compile)
+        return code == 0 and not expired
+
+    if not names or compiles(names):
+        return []
+    return [n for n in names if not compiles([n])]
+
+
+def reserved_name_message(names, origin):
+    """Message de refus d'une soumission qui reutilise un nom fourni au harnais. PURE (testée)."""
+    return ("Nom de fonction réservé : %s %s déjà fourni%s au harnais par %s. Le harnais ne "
+            "pourrait pas distinguer votre fonction de celle-ci ; renommez-la."
+            % (", ".join("« %s »" % n for n in names), "est" if len(names) == 1 else "sont",
+               "" if len(names) == 1 else "s", origin))
+
+
 def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     """Programme NOTEUR C/C++ : bouchons typés + harnais booléen + nonce. PURE (testée)."""
     stubs = []
@@ -2565,8 +2623,8 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
         fmt = "".join("|" + C_TYPES[t] for t in types)
         args = "".join(", a%d" % i for i in range(len(types)))
         reader = C_READ[ret]
-        # PAS static : apres <stdlib.h>, un `static int abs(int)` est une redeclaration
-        # refusee par gcc et g++ ; la definition ordinaire, elle, remplace celle de la libc.
+        # Prefixe moodit_f_ : le bouchon ne heurte aucune declaration des en-tetes (les noms
+        # qu'ils declarent sont de toute facon refuses en amont, voir c_reserved_names).
         stubs.append("""%s moodit_f_%s(%s) {
     char id[40], requete[4096];
     moodit_identifiant(id);
@@ -2575,10 +2633,12 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     return %s(moodit_valeur(id));
 }""" % (ret, ident, params or "void", c_dispatch_key(ident, types), fmt, args, reader))
     # Le harnais du prof ne peut pas ajouter d'#include : <math.h> (fabs, sqrt) et <stdbool.h>
-    # (true/false en C) lui sont fournis. Les bouchons sont PREFIXES puis renommes par #define :
-    # une fonction notee au nom d'une fonction de <math.h> avec une autre signature
-    # (`int round(int)`) ne heurte ainsi aucune declaration, et le harnais ecrit `round(3)`.
-    header = "#include <math.h>\n#include <stdbool.h>\n"
+    # (true/false en C) lui sont fournis. Les bouchons sont PREFIXES puis renommes par #define.
+    # Aucun nom deja declare par ces en-tetes n'arrive jusqu'ici : run_c_rpc refuse avant
+    # (c_reserved_names). Sinon le #define detournait vers le code note les `fabs`, `sqrt`,
+    # `isnan`… que le harnais utilise comme OUTILS, et une `fabs` soumise qui renvoie 0
+    # faisait passer `fabs(f(x) - attendu) < 1e-9` quel que soit f.
+    header = C_GRADER_HEADER
     renames = "".join("#define %s moodit_f_%s\n" % (n, n)
                          for n in dict.fromkeys(ident for _, ident, _ in methods))
     return header + C_RUNTIME + r'''
@@ -4227,6 +4287,13 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
     harness = harness_rpc_body(case_dir) or ""
+    # Refus AVANT toute compilation : une fonction soumise au nom d'une fonction ou d'une macro
+    # de la bibliotheque standard fournie au harnais (fabs, sqrt, isnan, abs, true…) prendrait
+    # sa place dans le harnais (voir c_grader_source).
+    reserved = c_reserved_names([ident for _, ident, _ in method_list], compiler, std, case_dir, env)
+    if reserved:
+        return None, reserved_name_message(
+            reserved, "la bibliothèque standard (math.h, stdbool.h, stdio.h, stdlib.h, string.h)")
 
     lock_src_dir(case_dir)
     build_area = student_build_dir(case_dir)
@@ -4289,6 +4356,11 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         return None, ("Aucune fonction exploitable dans le code soumis (types acceptés : int, "
                       "int64, float64, bool, string).")
     harness = harness_rpc_body(case_dir) or ""
+    # Les bouchons du noteur portent le nom exact des fonctions soumises, au niveau du paquet :
+    # une `func max(a, b int) int` soumise y masquait la fonction INTEGREE `max` du harnais.
+    reserved = go_reserved_names([ident for _, ident, _ in method_list])
+    if reserved:
+        return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
 
     # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI
     # présent dans l'arborescence que son processus peut lire.
