@@ -1256,6 +1256,48 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
     return "\n".join(src_lines) + "\n"
 
 
+# Types PUBLICS de premier niveau de java.lang (JDK 25). Le bouchon recopie les classes de
+# premier niveau du code soumis dans le paquet du NOTEUR ; un type du meme paquet l'emporte sur
+# l'import implicite de java.lang. Une `class StringBuffer` soumise detournait donc vers le code
+# note le `new StringBuffer(...)` dont le harnais se sert pour calculer l'attendu.
+JAVA_LANG_TYPES = frozenset("""
+    Appendable AutoCloseable CharSequence Cloneable Comparable Iterable Readable Runnable
+    Boolean Byte Character Class ClassLoader ClassValue Compiler Double Enum Float IO
+    InheritableThreadLocal Integer Long Math Module ModuleLayer Number Object Package Process
+    ProcessBuilder ProcessHandle Record Runtime RuntimePermission ScopedValue SecurityManager
+    Short StackTraceElement StackWalker StrictMath String StringBuffer StringBuilder
+    StringTemplate System Thread ThreadGroup ThreadLocal Throwable Void
+    ArithmeticException ArrayIndexOutOfBoundsException ArrayStoreException ClassCastException
+    ClassNotFoundException CloneNotSupportedException EnumConstantNotPresentException Exception
+    IllegalAccessException IllegalArgumentException IllegalCallerException
+    IllegalMonitorStateException IllegalStateException IllegalThreadStateException
+    IndexOutOfBoundsException InstantiationException InterruptedException
+    LayerInstantiationException MatchException NegativeArraySizeException NoSuchFieldException
+    NoSuchMethodException NullPointerException NumberFormatException
+    ReflectiveOperationException RuntimeException SecurityException
+    StringIndexOutOfBoundsException TypeNotPresentException UnsupportedOperationException
+    WrongThreadException
+    AbstractMethodError AssertionError BootstrapMethodError ClassCircularityError
+    ClassFormatError Error ExceptionInInitializerError IllegalAccessError
+    IncompatibleClassChangeError InstantiationError InternalError LinkageError
+    NoClassDefFoundError NoSuchFieldError NoSuchMethodError OutOfMemoryError
+    StackOverflowError ThreadDeath UnknownError UnsatisfiedLinkError
+    UnsupportedClassVersionError VerifyError VirtualMachineError
+    Deprecated FunctionalInterface Override SafeVarargs SuppressWarnings
+""".split())
+
+
+def java_shadowed_names(class_names, harness_code):
+    """Classes de premier niveau soumises qui masqueraient, dans le noteur, un type de
+    java.lang que le HARNAIS emploie. PURE (testée).
+
+    Seul l'emploi par le harnais rend le nom ambigu : une `class Process` que le harnais ne
+    nomme pas ne detourne rien, et la refuser mettrait 0 a une reponse juste."""
+    bare = blank_code(harness_code or "")
+    return [n for n in dict.fromkeys(class_names)
+            if n in JAVA_LANG_TYPES and re.search(r"\b%s\b" % re.escape(n), bare)]
+
+
 def java_grader_source(harness_code, nonce):
     """Programme NOTEUR : runtime RPC + harnais booléen du prof + nonce.
 
@@ -1365,7 +1407,12 @@ final class MooditRpc {
     static long mlong(int h, String n, Object[] a) { return Long.parseLong(valeur(appelMethode(h, n, a))); }
     static double mdouble(int h, String n, Object[] a) { return Double.parseDouble(valeur(appelMethode(h, n, a))); }
     static boolean mboolean(int h, String n, Object[] a) { return Boolean.parseBoolean(valeur(appelMethode(h, n, a))); }
-    static String mstring(int h, String n, Object[] a) { return dechaine(valeur(appelMethode(h, n, a))); }
+    static String mstring(int h, String n, Object[] a) {
+        // Même règle que string() : un JSON null est un null Java, pas le texte « null ».
+        String v = valeur(appelMethode(h, n, a));
+        if (v.equals("null")) { return null; }
+        return dechaine(v);
+    }
 
     static int integer(String nom, Object[] args) { return Integer.parseInt(valeur(echange(nom, args))); }
     static long long_(String nom, Object[] args) { return Long.parseLong(valeur(echange(nom, args))); }
@@ -2992,11 +3039,11 @@ def rust_object_stub(obj_list, field_list=None):
                 literal = ", ".join(n for n, _ in field_list[typ])
                 body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
-        let brut = moodit_appel(&id, &(id.clone() + "|new|%s"%s));
+        let brut = moodit_appel(&id, &(id.clone() + "|new|%s::%s"%s));
         let mut parts = brut.split('|');
 %s
         %s { %s }
-    }''' % (ident, params, typ, ident, send_args, reads, typ, literal))
+    }''' % (ident, params, typ, typ, ident, send_args, reads, typ, literal))
             for ret, ident, types in method_list:
                 params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
                 send_args = rust_send_args(types)
@@ -3019,9 +3066,9 @@ def rust_object_stub(obj_list, field_list=None):
             send_args = rust_send_args(types)
             body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
-        let requete = id.clone() + "|new|%s"%s;
+        let requete = id.clone() + "|new|%s::%s"%s;
         %s { __h: moodit_appel(&id, &requete).parse::<i64>().unwrap_or_default() }
-    }''' % (ident, params, typ, ident, send_args, typ))
+    }''' % (ident, params, typ, typ, ident, send_args, typ))
         for ret, ident, types in method_list:
             params = ", ".join(["&self"] + ["a%d: %s" % (i, t) for i, t in enumerate(types)])
             send_args = rust_send_args(types)
@@ -3044,7 +3091,9 @@ def rust_object_dispatch(obj_list, field_list=None):
     """Aiguillage OBJET côté étudiant : une pile PAR TYPE, pas d'unsafe. PURE (testée).
 
     Un type à champs capturés se construit par son littéral, comme l'écrirait l'étudiant ; la clé
-    `new` porte alors le NOM DU TYPE et non celui d'un constructeur."""
+    `new` porte alors le NOM DU TYPE et non celui d'un constructeur. Une fonction constructrice a
+    pour clé `new|Type::fonction` : avec le seul nom de la fonction, deux types dotés chacun d'un
+    `fn new` partageaient le bras `"new|new"`, et le second construisait un objet du premier."""
     field_list = field_list or {}
     stacks, branches = [], []
     for typ, ctors, method_list in obj_list:
@@ -3070,12 +3119,12 @@ def rust_object_dispatch(obj_list, field_list=None):
                     if t == "String"
                     else '                                + "|" + &moodit_cree.%s.to_string()' % n
                     for n, t in field_list[typ])
-                branches.append('''            "new|%s" => {
+                branches.append('''            "new|%s::%s" => {
 %s
                 let moodit_cree = %s;
                 format!("{}|ok", id)
 %s
-            }''' % (ident, read_args, call_expr, rets))
+            }''' % (typ, ident, read_args, call_expr, rets))
         else:
             # Sans capture de champs, le constructeur rend une POIGNÉE. Les deux formes étaient
             # émises pour un type à champs capturés : le second bras, inatteignable, valait un
@@ -3087,11 +3136,11 @@ def rust_object_dispatch(obj_list, field_list=None):
                     for i, t in enumerate(types))
                 call_expr = "%s::%s(%s)" % (typ, ident,
                                         ", ".join("a%d" % i for i in range(len(types))))
-                branches.append('''            "new|%s" => {
+                branches.append('''            "new|%s::%s" => {
 %s
                 moodit_%s.push(%s);
                 format!("{}|ok|{}", id, moodit_%s.len() - 1)
-            }''' % (ident, reads, typ.lower(), call_expr, typ.lower()))
+            }''' % (typ, ident, reads, typ.lower(), call_expr, typ.lower()))
         for ret, ident, types in method_list:
             # Les arguments de la méthode doivent être LUS et TRANSMIS : sans cela, le bouchon du
             # noteur les envoyait, l'appel généré ici était à vide, et rustc refusait le programme
@@ -3884,7 +3933,7 @@ def cs_strip_comments(src_text):
     return "".join(res)
 
 
-CS_TOKENS = re.compile(r"[{};]|\bclass\s+(\w+)")
+CS_TOKENS = re.compile(r"[{};]|\bclass\s+(\w+)(\s*<)?")
 CS_NAMESPACE = re.compile(r"\bnamespace\s+([\w.]+)")
 
 
@@ -3893,11 +3942,17 @@ def cs_top_level_classes(source):
 
     Premier niveau = enfermee seulement dans des `namespace`. Une classe IMBRIQUEE n'est pas
     visible sous son nom depuis le serveur (`typeof(Rect)` ne compilait pas), et le code
-    soumis ne compilait plus."""
+    soumis ne compilait plus.
+
+    Une classe GENERIQUE (`Pile<T>`) est ecartee : `typeof(Pile)` ne compile pas (CS0305) et
+    faisait echouer TOUT le serveur, donc tous les cas d'une reponse juste. Ses membres ne
+    sont de toute facon pas appelables par le fil (type ouvert)."""
     src_text = source or ""
     idents, stack, segment = [], [], 0
     for m in CS_TOKENS.finditer(src_text):
         if m.group(1):
+            if m.group(2):
+                continue
             if all(stack) and m.group(1) not in idents:
                 idents.append(m.group(1))
             continue
@@ -3932,6 +3987,17 @@ def cs_student_class(source, harness=""):
     if "Solution" in classes:
         return "Solution"
     return classes[0] if classes else "Solution"
+
+
+def cs_has_object_api(source):
+    """Une classe de PREMIER NIVEAU offre-t-elle un constructeur et une méthode d'instance ?
+    PURE (testée). Indépendant du harnais, pour que canaris et cas réels soient refusés ou
+    acceptés ensemble."""
+    for ident in cs_top_level_classes(source):
+        ctors, instance = cs_object_api(source, ident)
+        if ctors and instance:
+            return True
+    return False
 
 
 def cs_student_classes(source, harness=""):
@@ -4115,6 +4181,15 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                 body_text = f.read()
             if "__MOODIT_HARNAIS__" in body_text:
                 harness = body_text.split("__MOODIT_HARNAIS__", 1)[1].lstrip("\n")
+    shadowed = java_shadowed_names(
+        [klass] + [name for name, _, _ in obj_list if "." not in name], harness)
+    if shadowed:
+        return None, ("Nom de classe réservé : %s %s déjà fourni%s au harnais par java.lang. "
+                      "Le harnais ne pourrait pas distinguer votre classe de celle-ci ; "
+                      "renommez-la."
+                      % (", ".join("« %s »" % n for n in shadowed),
+                         "est" if len(shadowed) == 1 else "sont",
+                         "" if len(shadowed) == 1 else "s"))
     write_private(os.path.join(grader_src, klass + ".java"),
                  java_stub_source(klass, method_list, obj_list, own_ctors, own_instance))
     write_private(os.path.join(grader_src, "MooditGrader.java"),
@@ -4212,7 +4287,11 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     ctors, instance = cs_object_api(extraction, klass)
     # Une question POO n'a AUCUNE méthode statique : son API, c'est le constructeur et les
     # méthodes d'instance. Exiger une statique refusait ces questions (dont celles de la démo).
-    if not (method_list or (ctors and instance)):
+    # Le contrôle porte sur le CODE SOUMIS SEUL, jamais sur la classe que le harnais désigne :
+    # le harnais d'un canari ne nomme aucune classe, donc le canari visait `Solution` (souvent
+    # un simple Main) et était refusé, alors que le vrai cas visant `Rectangle` passait —
+    # « falsification probable » sur une réponse juste. Même critère pour tous les cas.
+    if not (method_list or cs_has_object_api(extraction)):
         return None, ("Aucune méthode exploitable dans le code soumis : ni méthode statique, "
                       "ni constructeur avec méthode d'instance (types acceptés : int, long, "
                       "double, bool, string).")
@@ -4627,7 +4706,9 @@ def exec_commands(runtime, entry):
         # fenêtre de run (défaut 3 s) — un « Exécuter » correct pouvait être « Interrompu ».
         return ["go", "build", "-o", "prog", entry], ["./prog"]
     if runtime == "rust":
-        return ["rustc", "-O", entry, "-o", "prog"], ["./prog"]
+        # Même édition que la notation : sans --edition, rustc compile en 2015, et un code
+        # accepté à la notation pouvait échouer au bouton « Exécuter ».
+        return ["rustc", "-O", "--edition", "2021", entry, "-o", "prog"], ["./prog"]
     return None, None
 
 

@@ -675,7 +675,7 @@ class ObjectApiTest(unittest.TestCase):
         stacks, branches = supervisor.rust_object_dispatch(obj_list, field_list)
         self.assertIn("let mut moodit_rectangle: Vec<Rectangle>", stacks)
         self.assertIn('"new|Rectangle" =>', branches)
-        self.assertIn('"new|new" =>', branches)
+        self.assertIn('"new|Rectangle::new" =>', branches)
         self.assertIn('"method|Rectangle.aire" =>', branches)
         self.assertNotIn("unsafe", stub_src + stacks + branches)
 
@@ -750,7 +750,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         obj_list = [("Rectangle", [("new", ["i32", "i32"])], [("i32", "aire", [])])]
         field_list = {"Rectangle": [("largeur", "i32"), ("hauteur", "i32")]}
         _, branches = supervisor.rust_object_dispatch(obj_list, field_list)
-        self.assertEqual(branches.count('"new|new" =>'), 1)
+        self.assertEqual(branches.count('"new|Rectangle::new" =>'), 1)
         self.assertEqual(branches.count('"new|Rectangle" =>'), 1)
 
     def test_go_pointer_receiver(self):
@@ -1913,6 +1913,80 @@ class Review246Test(unittest.TestCase):
         self.assertEqual(server.count("Signe(c.GetParameters(), parts[2], parts.Length - 3)"), 1)
         self.assertEqual(server.count("Signe(m.GetParameters(), parts[3], parts.Length - 4)"), 1)
         self.assertEqual(server.count("Signe(m.GetParameters(), nom, parts.Length - 2)"), 1)
+
+
+class Review246bTest(unittest.TestCase):
+    """Seconde revue de la PR #246 : faux verdicts sur du code juste, et masquage de java.lang."""
+
+    NL = "\n"
+
+    def test_cs_object_api_check_ignores_the_harness(self):
+        # Solution ne porte qu'un Main ; l'objet note est Rectangle. Le harnais d'un canari ne
+        # nomme aucune classe : le controle doit trouver Rectangle quand meme, sinon le canari
+        # etait refuse alors que le vrai cas passait -> « falsification probable ».
+        src = self.NL.join([
+            "class Solution { static void Main() { } }",
+            "class Rectangle {",
+            "    int l, h;",
+            "    public Rectangle(int l, int h) { this.l = l; this.h = h; }",
+            "    public int aire() { return l * h; }",
+            "}", ""])
+        self.assertEqual(supervisor.cs_student_class(src, "return __MOODIT_A__ == __MOODIT_B__;"),
+                         "Solution")
+        self.assertTrue(supervisor.cs_has_object_api(src))
+        self.assertFalse(supervisor.cs_has_object_api("class Solution { static void Main() { } }"))
+
+    def test_cs_generic_class_left_out_of_typeof(self):
+        src = self.NL.join([
+            "public class Pile<T> { public void Empile(T x) { } }",
+            "public class Solution { public static int F(int n) { return n; } }", ""])
+        self.assertEqual(supervisor.cs_top_level_classes(src), ["Solution"])
+        server = supervisor.cs_server_source(supervisor.cs_student_classes(src))
+        self.assertNotIn("typeof(Pile)", server)
+        self.assertIn("typeof(Solution)", server)
+        # Un heritage d'interface generique n'est pas une classe generique.
+        self.assertEqual(supervisor.cs_top_level_classes(
+            "class Note : System.IComparable<Note> { }"), ["Note"])
+
+    def test_rust_two_new_functions_get_distinct_arms(self):
+        obj_list = [("Compteur", [("new", ["i32"])], [("i32", "plus", ["i32"])]),
+                    ("Pile", [("new", [])], [("i32", "taille", [])])]
+        stub = supervisor.rust_object_stub(obj_list)
+        self.assertIn('"|new|Compteur::new"', stub)
+        self.assertIn('"|new|Pile::new"', stub)
+        _, branches = supervisor.rust_object_dispatch(obj_list)
+        self.assertEqual(branches.count('"new|Compteur::new" =>'), 1)
+        self.assertEqual(branches.count('"new|Pile::new" =>'), 1)
+        self.assertNotIn('"new|new" =>', branches)
+        # Avec capture de champs aussi : meme cle des deux cotes.
+        fields = {"Compteur": [("v", "i32")], "Pile": [("n", "i32")]}
+        stub = supervisor.rust_object_stub(obj_list, fields)
+        _, branches = supervisor.rust_object_dispatch(obj_list, fields)
+        for typ in ("Compteur", "Pile"):
+            self.assertIn('"|new|%s::new"' % typ, stub)
+            self.assertEqual(branches.count('"new|%s::new" =>' % typ), 1)
+
+    def test_java_class_shadowing_java_lang_used_by_harness(self):
+        harness = "return new StringBuffer(\"abc\").reverse().toString().equals(Solution.inv(\"abc\"));"
+        self.assertEqual(supervisor.java_shadowed_names(["Solution", "StringBuffer"], harness),
+                         ["StringBuffer"])
+        # Nom absent du harnais (ou seulement en commentaire / chaine) : rien a refuser.
+        self.assertEqual(supervisor.java_shadowed_names(["Process"], "return Solution.f() == 1;"), [])
+        self.assertEqual(supervisor.java_shadowed_names(
+            ["Process"], "// Process\nreturn \"Process\".length() == 7;"), [])
+        self.assertEqual(supervisor.java_shadowed_names(["Rectangle"], "new Rectangle(1, 2)"), [])
+
+    def test_java_instance_method_null_string_is_null(self):
+        source = supervisor.java_grader_source("return true;", "N")
+        body = source[source.index("static String mstring("):]
+        body = body[:body.index("static int integer(")]
+        self.assertIn('if (v.equals("null")) { return null; }', body)
+
+    def test_rust_exec_uses_the_grading_edition(self):
+        # Sans --edition, rustc compile en 2015 : « Exécuter » refusait du code que la
+        # notation (édition 2021) acceptait.
+        build, _ = supervisor.exec_commands("rust", "main.rs")
+        self.assertEqual(build[build.index("--edition") + 1], "2021")
 
 
 class SqliteExecTest(unittest.TestCase):
