@@ -2639,12 +2639,29 @@ def c_probe_source(names):
     return C_GRADER_HEADER + includes + checks
 
 
+# Identifiants RESERVES A L'IMPLEMENTATION (C17 7.1.3, C++ [lex.name]) : tout nom qui commence
+# par `_` suivi d'une majuscule, et tout nom qui contient `__` (en C, seulement en tete ; on
+# applique la regle C++, plus large, aux deux langages). Les macros des en-tetes s'y developpent
+# (`HUGE_VAL` -> `__builtin_huge_val ()`, `isnan` -> `__builtin_isnan`…) : une fonction soumise de
+# ce nom, renommee par #define dans le noteur, detournait ces outils vers le code note. La sonde
+# ne les voit pas, et la signature peut meme venir d'un bloc `#if 0` (lecture du texte brut).
+C_IMPL_RESERVED = re.compile(r"^_[A-Z]|__")
+
+
+def c_implementation_reserved(names):
+    """Noms reserves a l'implementation C/C++ parmi `names`. FONCTION PURE (testee)."""
+    return [n for n in dict.fromkeys(names) if C_IMPL_RESERVED.search(n)]
+
+
 def c_reserved_names(names, compiler, std, case_dir, env):
-    """Noms de `names` deja declares par les en-tetes du noteur (sonde -fsyntax-only, root).
+    """Noms de `names` reserves a l'implementation, ou deja declares par les en-tetes du noteur
+    (sonde -fsyntax-only, root).
 
     Une seule compilation dans le cas courant (aucun nom reserve) ; en cas d'echec, une sonde
     par nom pour nommer les fautifs dans le message."""
     names = list(dict.fromkeys(names))
+    impl = c_implementation_reserved(names)
+    names = [n for n in names if n not in impl]
     probe = os.path.join(case_dir, "sonde.c" if compiler == "gcc" else "sonde.cpp")
 
     def compiles(subset):
@@ -2656,8 +2673,8 @@ def c_reserved_names(names, compiler, std, case_dir, env):
         return code == 0 and not expired
 
     if not names or compiles(names):
-        return []
-    return [n for n in names if not compiles([n])]
+        return impl
+    return impl + [n for n in names if not compiles([n])]
 
 
 def reserved_name_message(names, origin):
@@ -4442,7 +4459,12 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     harness = harness_rpc_body(case_dir) or ""
     # Les bouchons du noteur portent le nom exact des fonctions soumises, au niveau du paquet :
     # une `func max(a, b int) int` soumise y masquait la fonction INTEGREE `max` du harnais.
-    reserved = go_reserved_names([ident for _, ident, _ in method_list])
+    # Meme chose pour les NOMS DE TYPE et les CONSTRUCTEURS de l'API objet, eux aussi declares
+    # au niveau du paquet du noteur (`type string struct{}`, `func recover() *T`). Les methodes,
+    # rattachees a leur type, ne masquent rien.
+    reserved = go_reserved_names([ident for _, ident, _ in method_list]
+                                 + [name for type_name, ctors, _ in obj_list
+                                    for name in [type_name] + [c[0] for c in ctors]])
     if reserved:
         return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
 
@@ -4654,6 +4676,11 @@ def exec_env(work):
     return env
 
 
+def exec_output_dir():
+    """Dossier des sorties capturées du mode exec : à root, hors de tout dossier étudiant."""
+    return os.path.join(BOX, ".sorties")
+
+
 def exec_main(job):
     src = os.path.join(BOX, "src")
     work = os.path.join(BOX, "work")
@@ -4663,7 +4690,17 @@ def exec_main(job):
     for root, dirs, files in os.walk(BOX):
         for name in dirs + files:
             os.chown(os.path.join(root, name), STUDENT_UID, STUDENT_GID)
-    os.chown(BOX, STUDENT_UID, STUDENT_GID)
+    # /box lui-même reste à ROOT (0755), et les sorties capturées vivent dans un dossier root
+    # 0700 : root les relit PAR LEUR CHEMIN (exec_stage). Posées dans /box/work, qui appartient à
+    # l'étudiant, le code exécuté pouvait effacer run.err pendant son exécution et en créer un à
+    # lui à la place — root écrivait dans l'ancien inode et relisait le nouveau, donc une sortie
+    # choisie par le code noté (un nonce lu ailleurs suffisait alors à passer).
+    os.chown(BOX, 0, 0)
+    os.chmod(BOX, 0o755)
+    outputs = exec_output_dir()
+    os.makedirs(outputs, exist_ok=True)
+    os.chown(outputs, 0, 0)
+    os.chmod(outputs, 0o700)
 
     runtime = job.get("runtime", "")
     entry = job.get("entry", "")
@@ -4683,10 +4720,10 @@ def exec_main(job):
     compile_stage = None
     if compile_cmd is not None:
         code, timed_out = run_proc(compile_cmd, src, env, EXEC_COMPILE_TIMEOUT_S,
-                                   os.path.join(work, "cc.out"), os.path.join(work, "cc.err"),
+                                   os.path.join(outputs, "cc.out"), os.path.join(outputs, "cc.err"),
                                    demote_student)
-        compile_stage = exec_stage(code, timed_out, os.path.join(work, "cc.out"),
-                                   os.path.join(work, "cc.err"))
+        compile_stage = exec_stage(code, timed_out, os.path.join(outputs, "cc.out"),
+                                   os.path.join(outputs, "cc.err"))
         if timed_out or code != 0:
             print(json.dumps({"v": 1, "compile": compile_stage, "run": None}, ensure_ascii=False))
             return
@@ -4699,10 +4736,10 @@ def exec_main(job):
         # « Interrompu » par intermittence. Plancher dédié.
         timeout_s = max(timeout_s, 10)
     code, timed_out = run_proc(run_cmd, src, env, timeout_s,
-                               os.path.join(work, "run.out"), os.path.join(work, "run.err"),
+                               os.path.join(outputs, "run.out"), os.path.join(outputs, "run.err"),
                                demote_student, stdin_path=stdin_path)
-    run_stage = exec_stage(code, timed_out, os.path.join(work, "run.out"),
-                           os.path.join(work, "run.err"))
+    run_stage = exec_stage(code, timed_out, os.path.join(outputs, "run.out"),
+                           os.path.join(outputs, "run.err"))
     print(json.dumps({"v": 1, "compile": compile_stage, "run": run_stage}, ensure_ascii=False))
 
 

@@ -145,7 +145,7 @@ class CodeAssemblerLanguagesTest {
 
         assertThat(grader).contains("doubler() { __moodit_rpc doubler \"$@\"; }\n")
                 .doesNotContain("__moodit_rpc() { __moodit_rpc")
-                .endsWith("if __moodit_harness; then printf '%s' 'MOODIT_OK_sh' >&2; exit 0; else exit 1; fi\n");
+                .endsWith("if __moodit_harness; then printf '%s' 'MOODIT_OK_sh' >&2; exit 0; else exit 1; fi\n}\n");
         // Le répartiteur CADRE sa réponse par l'identifiant reçu du noteur : un `echo` de
         // premier niveau du code étudiant ne vaut plus réponse. C'était la forge naïve du chemin
         // interprété — imprimer l'attendu et ne rien imprimer dans sa fonction. Et il ne peut

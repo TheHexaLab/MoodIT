@@ -1821,6 +1821,24 @@ class ReservedNamesTest(unittest.TestCase):
                 self.assertEqual(supervisor.c_reserved_names(["moitie", "f"], compiler, std, d,
                                                              dict(os.environ)), [])
 
+    def test_c_implementation_reserved_names(self):
+        # `HUGE_VAL` se developpe en `__builtin_huge_val ()` : une fonction soumise de ce nom,
+        # renommee par #define dans le noteur, detournait la constante vers le code note.
+        self.assertEqual(supervisor.c_implementation_reserved(
+            ["__builtin_huge_val", "_Exit", "a__b", "moitie", "_x", "f_", "__builtin_huge_val"]),
+            ["__builtin_huge_val", "_Exit", "a__b"])
+
+    def test_c_reserved_names_refuses_implementation_names_without_compiling(self):
+        calls = []
+        self.addCleanup(unittest.mock.patch.stopall)
+        unittest.mock.patch.object(
+            supervisor, "run_proc", lambda *a, **k: calls.append(a) or (0, False)).start()
+        with tempfile.TemporaryDirectory() as d:
+            found = supervisor.c_reserved_names(["__builtin_isnan", "moitie"], "gcc",
+                                                "-std=gnu17", d, {})
+        self.assertEqual(found, ["__builtin_isnan"])
+        self.assertEqual(len(calls), 1)    # une seule sonde, pour le nom ordinaire
+
     def test_go_predeclared_names(self):
         self.assertEqual(supervisor.go_reserved_names(["doubler", "max", "min", "len", "max"]),
                          ["max", "min", "len"])

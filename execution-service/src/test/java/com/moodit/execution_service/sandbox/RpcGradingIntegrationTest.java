@@ -535,6 +535,39 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void c_submitted_function_named_like_a_compiler_builtin_is_refused() {
+        // Revue #246 : `HUGE_VAL` se développe en `__builtin_huge_val ()`. Une fonction soumise
+        // de ce nom (même cachée sous `#if 0`, les signatures étant lues dans le texte brut)
+        // était renommée par #define dans le noteur et détournait la constante du harnais.
+        String forged = """
+                #define __builtin_huge_val() 42.0
+                #if 0
+                double __builtin_huge_val(void) { return 0; }
+                #endif
+                double divise(double a, double b) { return 42.0; }
+                """;
+        for (String language : List.of("C", "C++")) {
+            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
+            assertThat(r.passed()).as(language).isFalse();
+            assertThat(r.detail()).as(language).contains("réservé").contains("__builtin_huge_val");
+        }
+    }
+
+    @Test
+    void go_submitted_type_or_constructor_cannot_shadow_a_builtin() {
+        // Revue #246 : les noms de type et les constructeurs de l'API objet sont déclarés au
+        // niveau du paquet du noteur, comme les fonctions : même refus explicite (ici un
+        // constructeur `recover`, qui masquait la fonction intégrée du même nom).
+        TestResult r = note("Go", "return NewBoite(2).Valeur() == 2",
+                "package main\n\ntype Boite struct{ v int }\n\n"
+                        + "func NewBoite(v int) *Boite { return &Boite{v} }\n\n"
+                        + "func recover() *Boite { return &Boite{0} }\n\n"
+                        + "func (b *Boite) Valeur() int { return b.v }\n");
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("recover");
+    }
+
+    @Test
     void csharp_namespace_helper_nested_class_and_method_named_Double() {
         String h = "return Solution.Double(4) == 8;";
         String code = """

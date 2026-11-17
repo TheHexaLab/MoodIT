@@ -40,7 +40,13 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
   plus atteindre le nonce). À re-tester si le runtime React/Node change.
 - **Compilation TS** : `tsc --noCheck` (transpilation seule — typage permissif à l'exécution) ;
   le grader spawn `node student_server` → résolu vers le `.js` transpilé.
-- **Bash** : `grader.sh` supprimé mais lisible via son fd déjà ouvert (sémantique unlink Unix).
+- **Bash** : bash garde `grader.sh` ouvert (fd 255) même supprimé, et `/proc/<pid>/fd/255` le
+  rouvre sous le même UID. Le noteur est donc un seul bloc `{ … }`, analysé en entier avant
+  exécution, qui **vide** son fichier avant de l'effacer : le fd ne rouvre plus qu'un fichier vide.
+  Ne pas sortir de commande du bloc. Même précaution pour `grader.php`.
+- **Sorties du mode exec** : relues par chemin par root, donc rangées dans `/box/.sorties`
+  (root 0700) et non dans `/box/work`, qui appartient à l'étudiant (il pouvait y substituer
+  `run.err` pendant son exécution).
 - **Compilés** : notés dans le runner Docker en mode « evaluate » (voir plus bas) ; le bouton
   « Exécuter » passe par le mode « exec » des mêmes images.
 

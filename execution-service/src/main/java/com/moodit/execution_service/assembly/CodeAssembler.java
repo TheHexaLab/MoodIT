@@ -404,6 +404,9 @@ public class CodeAssembler {
                     .append("}\n");
         }
         String grader = "<?php\n"
+                // Vidé PUIS effacé (script déjà compilé) : un descripteur que l'interpréteur
+                // garderait ouvert ne rouvre plus qu'un fichier vide (cf. le noteur Bash).
+                + "@file_put_contents('grader.php', '');\n"
                 + "@unlink('grader.php');\n"                       // hors de portée du serveur
                 + "$__moodit_pipes = [];\n"
                 + "$__moodit_proc = proc_open(escapeshellarg(PHP_BINARY).' student_server.php',"
@@ -509,7 +512,13 @@ public class CodeAssembler {
                 // en « * » et la valeur décodée serait fausse.
                 + "printf '%s|%s\\n' \"$__moodit_id\" "
                 + "\"$(printf '%s' \"$__moodit_val\" | od -An -vtx1 | tr -d ' \n')\"\n";
-        String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
+        // Le noteur entier est UN SEUL bloc `{ … }` : bash le lit et l'analyse en entier avant
+        // d'en exécuter la première commande. Il peut donc VIDER son propre fichier avant tout
+        // appel au code soumis. L'effacer ne suffisait pas : bash garde le script ouvert (fd 255)
+        // et, sous le même UID, /proc/<pid>/fd/255 rouvrait le fichier supprimé — harnais et
+        // nonce compris. Vidé, il ne contient plus rien ; le nonce ne vit plus qu'en mémoire.
+        String grader = "{\n"
+                + ": > grader.sh 2>/dev/null; rm -f grader.sh 2>/dev/null\n"
                 + "__moodit_srv=" + shellSingleQuote(dispatcher) + "\n"
                 + "__moodit_rpc() { local __n=\"$1\"; shift;"
                 + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
@@ -521,7 +530,8 @@ public class CodeAssembler {
                 + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
-                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
+                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n"
+                + "}\n";
         return new Assembled("bash", List.of(
                 new RunnerExec.File("grader.sh", grader),
                 new RunnerExec.File("solution.sh", studentCode)));

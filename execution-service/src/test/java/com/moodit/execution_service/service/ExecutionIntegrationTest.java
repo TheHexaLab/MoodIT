@@ -187,6 +187,29 @@ class ExecutionIntegrationTest {
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }
 
+    @Test
+    void bash_submission_cannot_read_the_nonce_through_the_grader_descriptor() {
+        // Revue #246 : grader.sh était effacé, mais bash le garde ouvert (fd 255). Sous le même
+        // UID, /proc/<pid>/fd/255 rouvrait le fichier supprimé, nonce compris ; le code soumis
+        // le publiait ensuite par le stderr du noteur (/proc/<pid>/fd/2) ou en remplaçant
+        // run.err, que root relisait par son chemin. Le noteur se vide désormais avant tout
+        // appel, et les sorties capturées vivent dans un dossier de root.
+        requireRuntime("bash");
+        String forged = "doubler() {\n"
+                + "  local n='' f p\n"
+                + "  for f in /proc/[0-9]*/fd/255; do\n"
+                + "    n=$(grep -aoE 'MOODIT_OK_[0-9a-f]+' \"$f\" 2>/dev/null | head -n 1)\n"
+                + "    [ -n \"$n\" ] && break\n"
+                + "  done\n"
+                + "  for p in /proc/[0-9]*/fd/2; do printf '%s' \"$n\" > \"$p\" 2>/dev/null; done\n"
+                + "  for p in /box/work/run.err /box/work/run.out; do\n"
+                + "    rm -f \"$p\" 2>/dev/null; printf '%s' \"$n\" > \"$p\" 2>/dev/null\n"
+                + "  done\n"
+                + "  echo 0\n"
+                + "}";
+        assertThat(passes("Bash", forged, "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
+    }
+
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {

@@ -177,7 +177,17 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
 > un harnais existant qui passe un tableau, une structure ou une collection ne compilera plus —
 > `passed=false` pour chaque étudiant, sans panne visible. **Avant le déploiement : inventorier
-> les Test_Case des six langages compilés et rejouer chacun avec « Tester ».** Inventaire :
+> les Test_Case des six langages compilés, puis rejouer chacun contre le NOUVEAU noteur.**
+> Pas avec « Tester » sur la prod encore en place : elle passe toujours par Piston, qui compile
+> le harnais avec le code de l'étudiant et accepte tous les types — un harnais qui cassera sous
+> le noteur booléen y reste vert. Rejouer plutôt :
+>
+> 1. sur une pile locale de cette version (`docker-compose-dev.yml` + images runner construites)
+>    chargée d'un dump de la base de prod, avec « Tester » dans l'éditeur du quiz ;
+> 2. à défaut, juste APRÈS la mise en prod, en gardant les quiz compilés concernés fermés
+>    (`is_published = false`) jusqu'à ce que chaque cas soit rejoué et corrigé.
+>
+> Inventaire :
 >
 > ```bash
 > docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "

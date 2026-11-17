@@ -115,6 +115,12 @@ class CodeAssemblerTest {
                 .doesNotContain("MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
                 .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");
+        // Le noteur est un seul bloc, analysé en entier par bash avant toute exécution, qui VIDE
+        // son fichier en premier : le fd 255 que bash garde ouvert ne rouvre plus ni harnais ni
+        // nonce (/proc/<pid>/fd/255, même UID que le code soumis).
+        String grader = a.files().get(0).content();
+        assertThat(grader).startsWith("{\n: > grader.sh 2>/dev/null; rm -f grader.sh")
+                .endsWith("fi\n}\n");
         // La valeur voyage en HEX sur UNE ligne (od -v : sans lui, les répétitions se
         // compressent en « * ») et le noteur la décode : une valeur multi-ligne perdait tout
         // sauf sa première ligne — réponse juste notée fausse.
