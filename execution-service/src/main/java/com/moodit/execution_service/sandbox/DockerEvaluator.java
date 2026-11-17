@@ -220,7 +220,12 @@ public class DockerEvaluator {
      * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
      */
     static boolean frameworkMarkerFound(String runnerLanguage, String harnessCode) {
-        return harnessCode != null && frameworkMarker(runnerLanguage).matcher(harnessCode).find();
+        // Cherché sur le CODE seulement : un `// pas de @Test ici` ou une chaîne
+        // "prof@Test.ca" dans un harnais booléen valide le faisait refuser, et toute la
+        // question rendait 0 avec un diagnostic trompeur. Ce refus n'est qu'un diagnostic : un
+        // vrai test framework qui y échapperait ne compilerait pas comme corps booléen.
+        return harnessCode != null && frameworkMarker(runnerLanguage)
+                .matcher(HarnessProjects.withoutCommentsOrLiterals(harnessCode)).find();
     }
 
     private static java.util.regex.Pattern frameworkMarker(String runnerLanguage) {

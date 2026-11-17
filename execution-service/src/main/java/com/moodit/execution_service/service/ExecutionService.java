@@ -107,13 +107,33 @@ public class ExecutionService {
         // la boucle d'evaluation pour distinguer une panne de charge d'une solution lente.
         long requestedAt = System.nanoTime();
         return limiter.withSandboxSlot(() -> {
-            WAIT_NS.get()[0] += System.nanoTime() - requestedAt;
-            return runner.execute(runtime, files, stdin, timeoutMs);
+            long startedAt = System.nanoTime();
+            WAIT_NS.get()[0] += startedAt - requestedAt;
+            RunnerExec.Result result = runner.execute(runtime, files, stdin, timeoutMs);
+            // Execution INTERROMPUE (delai ou memoire) : temps consomme par le code soumis lui-meme,
+            // lu sur le SIGNAL de l'execution — jamais sur un texte, que la sortie de l'etudiant
+            // pouvait imiter.
+            if (interrupted(result)) {
+                INTERRUPTED_NS.get()[0] += System.nanoTime() - startedAt;
+            }
+            return result;
         });
     }
 
     /** Attente de place cumulee pendant l'evaluation en cours sur ce fil (ns). */
     private static final ThreadLocal<long[]> WAIT_NS = ThreadLocal.withInitial(() -> new long[1]);
+
+    /** Temps des executions interrompues (delai, memoire) pendant l'evaluation en cours (ns). */
+    private static final ThreadLocal<long[]> INTERRUPTED_NS = ThreadLocal.withInitial(() -> new long[1]);
+
+    private static boolean interrupted(RunnerExec.Result result) {
+        if (result == null) {
+            return false;
+        }
+        RunnerExec.Stage compile = result.compile();
+        RunnerExec.Stage run = result.run();
+        return (compile != null && compile.signal() != null) || (run != null && run.signal() != null);
+    }
 
     /** Jeton aléatoire imprévisible, injecté dans le harnais et vérifié en sortie. */
     private static String newNonce() {
@@ -177,11 +197,9 @@ public class ExecutionService {
         long startNs = System.nanoTime();
         long deadline = startNs + budgetNs;
         WAIT_NS.get()[0] = 0;
+        INTERRUPTED_NS.get()[0] = 0;
         List<TestResult> results = new ArrayList<>();
         boolean exhausted = false;
-        // Un harnais INTERROMPU (delai ou memoire atteint) signe que l'etudiant a lui-meme
-        // consomme du budget : son epuisement ne peut alors pas etre mis sur la charge.
-        boolean interrupted = false;
         for (TestCaseInput testCase : request.testCases()) {
             // Le PREMIER harnais part toujours : un budget mal configuré (0, négatif) doit
             // dégrader la correction, pas la vider de tout verdict réel. L'échéance est ensuite
@@ -202,11 +220,16 @@ public class ExecutionService {
                     // l'etudiant resoumet. Sinon (solution lente, question a beaucoup de
                     // harnais), c'est reproductible : note PARTIELLE, jamais un 502 a chaque
                     // renvoi qui rendrait la question impossible a noter.
-                    // ET aucun harnais interrompu : une solution qui boucle, dans une file
-                    // chargee, atteignait son delai a chaque harnais sans que le travail mesure
-                    // depasse le budget — elle partait en 502, un essai de plus.
-                    long workNs = (System.nanoTime() - startNs) - WAIT_NS.get()[0];
-                    if (limiter.isInternal() && workNs < budgetNs && !interrupted) {
+                    // ET l'attente l'emporte sur le temps des harnais INTERROMPUS : une solution
+                    // qui boucle, dans une file chargee, atteignait son delai a chaque harnais
+                    // sans que le travail mesure depasse le budget — elle partait en 502, un
+                    // essai de plus. Mais un seul harnais interrompu ne suffit pas a mettre
+                    // toute l'attente sur le compte de l'etudiant : quand la file a coute plus
+                    // que ses propres interruptions, c'est bien la charge qui a fait deborder.
+                    long waitNs = WAIT_NS.get()[0];
+                    long workNs = (System.nanoTime() - startNs) - waitNs;
+                    if (limiter.isInternal() && workNs < budgetNs
+                            && waitNs > INTERRUPTED_NS.get()[0]) {
                         throw new SandboxException("Notation incomplète (charge du serveur) : "
                                 + "la tentative est à reprendre");
                     }
@@ -217,12 +240,8 @@ public class ExecutionService {
                 continue;
             }
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
-            TestResult r = runOne(request.language(), request.code(), testCase, newNonce(),
-                    request.timeoutMs());
-            if (r.detail() != null && r.detail().startsWith("Interrompu")) {
-                interrupted = true;
-            }
-            results.add(r);
+            results.add(runOne(request.language(), request.code(), testCase, newNonce(),
+                    request.timeoutMs()));
         }
         return results;
     }
@@ -332,8 +351,6 @@ public class ExecutionService {
         CodeAssembler.Assembled p2 = assembler.assembleSqlPhase2(data, testCase.harnessCode(), nonce);
         RunnerExec.Stage run2 = execute("sqlite3", p2.files(), null, timeoutMs).run();
         if (run2 != null && run2.signal() != null) {
-            // Meme prefixe « Interrompu » que les autres interruptions : la boucle s'en sert pour
-            // savoir si l'etudiant a consomme le budget.
             return new TestResult(testCase.name(), weight, false,
                     "Interrompu en phase 2 (dépassement de temps ou de mémoire probable)");
         }
@@ -437,7 +454,7 @@ public class ExecutionService {
                 && ((compile.code() != null && compile.code() != 0) || compileKilled(compile));
     }
 
-    /** Commence par « Interrompu », comme une exécution tuée : même règle de budget (imputable). */
+    /** Compilation tuée : « Interrompu », comme une exécution tuée (le budget lit le signal, pas ce texte). */
     private static String compileFailureDetail(RunnerExec.Stage compile) {
         if (compileKilled(compile)) {
             return "Interrompu à la compilation (signal " + compile.signal()

@@ -161,39 +161,91 @@ class ExecutionServiceTest {
         assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
     }
 
-    @Test
-    void budget_exhausted_by_interrupted_harness_stays_a_grade() throws Exception {
-        // VRAIE contention (la place unique est occupee 600 ms par une autre correction, budget
-        // 200 ms), donc le travail mesure tient dans le budget — MAIS le harnais atteint son
-        // delai. Sans le garde-fou, une solution qui boucle dans une file chargee partait en 502 :
-        // un essai de plus. Avec, c'est une note. (L'ancienne version tournait avec un budget nul :
-        // la condition etait toujours fausse et le test ne pouvait pas rougir.)
-        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
-        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
-        svc.interpretedBudgetMs = 200;
-        pistonRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
+    /** Occupe la place UNIQUE du sandbox pendant {@code holdMs}, puis rend la main. */
+    private static Thread holdSlot(ExecutionLimiter limiter, long holdMs) throws InterruptedException {
         java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
         Thread other = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
             acquired.countDown();
-            try {
-                Thread.sleep(600);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
+            sleep(holdMs);
             return null;
         })));
         other.start();
         acquired.await();
-        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+        return other;
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static EvaluateRequest twoPythonCases() {
+        return new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
+    }
 
-        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
+    @Test
+    void budget_exhausted_by_interrupted_harness_stays_a_grade() throws Exception {
+        // VRAIE contention (place occupee 500 ms par une autre correction, budget 1000 ms) ET un
+        // harnais qui boucle jusqu'a son delai (800 ms, puis tue). Le travail mesure tient dans le
+        // budget, mais l'etudiant a consomme PLUS que l'attente : c'est sa boucle, pas la charge,
+        // qui a fait deborder. Sans ce garde-fou, une solution qui boucle dans une file chargee
+        // partait en 502 — un essai de plus. Avec, c'est une note.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 1000;
+        pistonRun(files -> {
+            sleep(800);
+            return new RunnerExec.Stage("", "", null, "SIGKILL", null);
+        });
+        Thread other = holdSlot(limiter, 500);
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(twoPythonCases()));
         other.join();
         assertThat(r).hasSize(2);
         assertThat(r.get(0).detail()).startsWith("Interrompu");
         assertThat(r.get(1).passed()).isFalse();
         assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    @Test
+    void wait_dominating_a_short_interruption_is_still_load() throws Exception {
+        // Un seul harnais interrompu tot (150 ms) ne met pas toute l'attente (900 ms) sur le
+        // compte de l'etudiant : c'est la file qui a fait deborder le budget. Avant, la moindre
+        // interruption suffisait a enregistrer des harnais « Non evalue » a 0 — sur une
+        // tentative unique, pendant un examen charge.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 800;
+        pistonRun(files -> {
+            sleep(150);
+            return new RunnerExec.Stage("", "", null, "SIGKILL", null);
+        });
+        Thread other = holdSlot(limiter, 900);
+
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
+                .isInstanceOf(SandboxException.class)
+                .hasMessageContaining("charge du serveur");
+        other.join();
+    }
+
+    @Test
+    void student_output_imitating_an_interruption_does_not_count() throws Exception {
+        // L'interruption se lit sur le SIGNAL de l'execution, plus sur le texte du detail : un
+        // stderr etudiant qui commence par « Interrompu » ne change pas la regle.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        pistonRun(files -> new RunnerExec.Stage("", "Interrompu (signal SIGKILL)", 1, null, null));
+        Thread other = holdSlot(limiter, 600);
+
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
+                .isInstanceOf(SandboxException.class);
+        other.join();
     }
 
     @Test

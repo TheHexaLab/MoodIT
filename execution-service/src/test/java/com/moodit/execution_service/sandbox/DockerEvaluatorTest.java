@@ -96,6 +96,29 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void framework_marker_in_comment_or_string_is_not_a_framework() {
+        // Un harnais booléen VALIDE qui mentionne le marqueur en commentaire ou dans une chaîne
+        // était refusé : tous les cas de la question à 0, avec un diagnostic trompeur.
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "// pas de @Test ici\nreturn Solution.f() == 1;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "return Solution.isEmail(\"prof@Test.ca\");")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "/* @Test */ return true;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("rust",
+                "// pas de #[test]\nsolution::f() == 1")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "return Solution.F(\"[Test]\") == 1;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("go",
+                "// func TestX(t *testing.T)\nreturn f() == 1")).isFalse();
+        // Le même marqueur dans le CODE reste refusé.
+        assertThat(DockerEvaluator.frameworkMarkerFound("java",
+                "// commentaire\n@Test\nvoid t() { }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("go",
+                "func TestX(t *testing.T) { }")).isTrue();
+    }
+
+    @Test
     void forgery_wins_over_incomplete_on_java_side_too() {
         // Le superviseur ne signale jamais « incomplet » avec des canaris incoherents, mais Java
         // ne lui fait pas confiance aveuglement : une regression cote superviseur ne doit pas

@@ -242,6 +242,16 @@ class DockerSandboxTest {
 
         assertThat(new DockerSandbox(docker, 512, 64, 1.0).removeOrphans()).isEqualTo(1);
         org.mockito.Mockito.verify(remove).exec();
+        // Le filtre lui-même : sans « running » (une notation en vol), et sans rien d'autre.
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.Collection<String>> statuses =
+                org.mockito.ArgumentCaptor.forClass(java.util.Collection.class);
+        org.mockito.Mockito.verify(list).withStatusFilter(statuses.capture());
+        assertThat(statuses.getValue()).containsExactlyInAnyOrder("created", "exited", "dead");
+        // Et l'étiquette des runners : sans elle, le balayage viserait tout conteneur arrêté.
+        org.mockito.Mockito.verify(list).withLabelFilter(
+                org.mockito.ArgumentMatchers.<Map<String, String>>argThat(
+                        m -> m != null && m.containsKey("moodit.runner")));
     }
 
     @Test
