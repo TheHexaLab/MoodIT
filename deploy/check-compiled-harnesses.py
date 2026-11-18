@@ -10,14 +10,16 @@ reçoit 0 sur une tentative unique, sans panne visible. Ce script le détecte av
 Pour chaque question compilée qui a des cas, il envoie son CODE DE DÉPART et ses harnais à
 l'endpoint interne d'execution-service (le chemin de la correction), puis classe le verdict :
 
-  BLOQUANT    le harnais ne compile pas contre la signature : la question notera 0 à tout le
-              monde ;
+  BLOQUANT    le harnais ne compile pas contre la signature, et le compilateur le dit : la
+              question notera 0 à tout le monde ;
   À VÉRIFIER  rien ne prouve que le harnais a tourné : le code de départ ne compile pas seul,
               n'existe pas ou ne déclare aucune fonction aux types transportables (aucune
               fonction du tout, ou seulement des types non transportables : le superviseur ne
-              distingue pas les deux), le noteur n'a pas répondu ou a refusé le format, ou le
-              détail n'est pas reconnu : le script ne peut pas conclure, rejouer à la main avec
-              une solution (« Tester ») ;
+              distingue pas les deux), la compilation du harnais a expiré ou a été tuée, le
+              compilateur n'a rien dit, le harnais appelle une fonction absente du code de
+              départ (squelette à compléter), le noteur n'a pas répondu ou a refusé le format,
+              ou le détail n'est pas reconnu : le script ne peut pas conclure, rejouer à la main
+              avec une solution (« Tester ») ;
   OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
@@ -38,6 +40,7 @@ Le jeton n'est jamais affiché.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -48,7 +51,37 @@ COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
 # Préfixes et marqueurs écrits par le superviseur (docker/runners/common/supervisor.py) : le texte
 # du compilateur ne vient qu'APRÈS eux, le code soumis ne peut pas les produire.
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
+HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
 NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
+
+# Nom introuvable, d'après le diagnostic du compilateur de chaque langage compilé :
+#   Java   « symbol:   method carre(int) »        C/C++  « implicit declaration of function ‘f’ »,
+#          « symbol:   class Rect »                      « ‘f’ was not declared in this scope »,
+#   C#     « does not contain a definition for `F' »,    « undefined reference to `f' »
+#          « The name `f' does not exist »         Go     « undefined: F »
+#   Rust   « cannot find function `f` in this scope »
+_Q = "[`'‘’\"]"
+UNDEFINED_NAME = re.compile(
+    r"symbol:\s+(?:method|variable|class)\s+(\w+)"
+    r"|implicit declaration of function " + _Q + r"(\w+)"
+    r"|" + _Q + r"(\w+)" + _Q + r" was not declared in this scope"
+    r"|undefined reference to " + _Q + r"(\w+)"
+    r"|does not contain a definition for " + _Q + r"(\w+)"
+    r"|The name " + _Q + r"(\w+)" + _Q + r" does not exist"
+    r"|undefined: (\w+)"
+    r"|cannot find (?:function|value|struct|type) " + _Q + r"(\w+)")
+
+
+def missing_from_start_code(diagnostic, start_code):
+    """Noms que le compilateur ne trouve pas ET que le code de départ ne mentionne pas.
+    FONCTION PURE (testée).
+
+    Un nom PRÉSENT dans le code de départ mais introuvable pour le harnais a été écarté par le
+    générateur de bouchons (types non transportables) : la question est cassée. Un nom ABSENT
+    est une fonction que l'étudiant doit écrire : rien ne prouve que le harnais est faux."""
+    names = {n for match in UNDEFINED_NAME.findall(diagnostic or "") for n in match if n}
+    return sorted(n for n in names
+                  if not re.search(r"\b%s\b" % re.escape(n), start_code or ""))
 
 # Débuts de détail qui PROUVENT que le harnais a compilé et tourné (liste blanche) : le noteur a
 # rendu faux, a relayé une exception du harnais, a vu le processus étudiant refuser un appel ou
@@ -88,12 +121,21 @@ SELECT COALESCE(json_agg(row_to_json(t)), '[]') FROM (
 """ % ", ".join("'%s'" % name for name in COMPILED_LANGUAGES)
 
 
-def classify(detail, passed):
+def classify(detail, passed, start_code=""):
     """Classe le verdict d'UN cas joué contre le code de départ. FONCTION PURE (testée)."""
     if passed:
         return OK
     text = detail or ""
+    if text.startswith(HARNESS_BUILD_ABORTED):
+        # Compilation du noteur expirée ou tuée (machine chargée) : pas un diagnostic.
+        return TO_CHECK
     if text.startswith(HARNESS_BUILD_ERROR):
+        # BLOQUANT seulement sur un vrai diagnostic du compilateur, et pas quand le harnais
+        # appelle une fonction que le code de départ ne contient pas (squelette à compléter) :
+        # --unpublish ne ferme un quiz que si la preuve est là.
+        diagnostic = text.split("\n", 1)[1].strip() if "\n" in text else ""
+        if not diagnostic or missing_from_start_code(diagnostic, start_code):
+            return TO_CHECK
         return BLOCKING
     if NO_TRANSPORTABLE_SIGNATURE in text:
         # Le superviseur rend le même message quand le code de départ déclare des fonctions aux
@@ -175,7 +217,8 @@ def check_question(base_url, token, question):
         return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
     lines, statuses = [], []
     for case, result in zip(question["cases"], results):
-        status = classify(result.get("detail"), bool(result.get("passed")))
+        status = classify(result.get("detail"), bool(result.get("passed")),
+                          question.get("start_code") or "")
         statuses.append(status)
         if status != OK:
             first_line = (result.get("detail") or "").strip().splitlines()[:1]

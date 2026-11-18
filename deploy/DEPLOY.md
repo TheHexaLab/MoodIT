@@ -184,9 +184,11 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > Le script envoie le code de départ et les harnais de chaque question compilée à l'endpoint
 > interne de correction, puis classe chaque question : **BLOQUANT** (le harnais ne compile pas
-> contre la signature : 0 pour tout le monde), **À VÉRIFIER** (pas de code de départ, code de
-> départ qui ne compile pas seul ou sans fonction aux types transportables, noteur muet ou qui
-> refuse le format, détail non reconnu : rejouer à la main avec une solution) ou **OK**
+> contre la signature, diagnostic du compilateur à l'appui : 0 pour tout le monde), **À VÉRIFIER**
+> (pas de code de départ, code de départ qui ne compile pas seul ou sans fonction aux types
+> transportables, compilation du harnais expirée ou tuée, harnais qui appelle une fonction absente
+> du code de départ, noteur muet ou qui refuse le format, détail non reconnu : rejouer à la main
+> avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
 > fermé). Il sort en 1 tant qu'il reste un BLOQUANT ou un
 > À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Le jeton interne est lu

@@ -33,6 +33,57 @@ class ClassifyTest(unittest.TestCase):
     def test_harnais_qui_ne_compile_pas_bloquant(self):
         self.assertEqual(chk.BLOCKING, chk.classify("Le harnais ne compile pas :\nerreur", False))
 
+    def test_fonction_ecartee_par_les_bouchons_bloquant(self):
+        # La fonction EXISTE dans le code de départ, mais aux types non transportables : le
+        # générateur de bouchons l'a écartée, la question notera 0 à tout le monde.
+        start = "public class Solution { public static int somme(int[] t) { return 0; } }"
+        detail = ("Le harnais ne compile pas contre la signature du code soumis :\n"
+                  "MooditGrader.java:3: error: cannot find symbol\n"
+                  "  symbol:   method somme(int[])\n  location: class Solution")
+        self.assertEqual(chk.BLOCKING, chk.classify(detail, False, start))
+
+    def test_compilation_du_harnais_expiree_a_verifier(self):
+        # Compilation du noteur expirée ou tuée sur une machine chargée : pas un diagnostic,
+        # jamais un quiz fermé par --unpublish.
+        detail = ("Le harnais n'a pas fini de compiler (temps limite de compilation dépassé ou "
+                  "compilateur arrêté) : rejouer la correction.")
+        self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f(int x) { return x; }"))
+
+    def test_diagnostic_vide_a_verifier(self):
+        for detail in ("Le harnais ne compile pas contre le code soumis :\n",
+                       "Le harnais ne compile pas contre le code soumis :\n   \n",
+                       "Le harnais ne compile pas contre le code soumis"):
+            with self.subTest(detail=detail):
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f;"))
+
+    def test_fonction_absente_du_code_de_depart_a_verifier(self):
+        # Squelette à compléter : le harnais appelle la fonction que l'étudiant doit écrire.
+        # Un diagnostic par langage compilé.
+        start = "int aide(int x) { return x; }"
+        for detail in (
+                "Le harnais ne compile pas contre la signature du code soumis :\n"
+                "MooditGrader.java:3: error: cannot find symbol\n  symbol:   method carre(int)",
+                "Le harnais ne compile pas contre le code soumis :\n"
+                "noteur.c:9:12: error: implicit declaration of function ‘carre’",
+                "Le harnais ne compile pas contre le code soumis :\n"
+                "noteur.cpp:9:12: error: 'carre' was not declared in this scope",
+                "Le harnais ne compile pas contre le code soumis :\n"
+                "noteur.cs(9,20): error CS0117: `Solution' does not contain a definition for `Carre'",
+                "Le harnais ne compile pas contre le code soumis :\n"
+                "./noteur.go:9:9: undefined: Carre",
+                "Le harnais ne compile pas contre le code soumis :\n"
+                "error[E0425]: cannot find function `carre` in this scope"):
+            with self.subTest(detail=detail):
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
+
+    def test_missing_from_start_code(self):
+        diagnostic = "undefined: Carre\nundefined: Aide"
+        self.assertEqual(["Carre"], chk.missing_from_start_code(diagnostic, "func Aide() int"))
+        # Mot entier : « carre » ne compte pas comme présent dans « carres ».
+        self.assertEqual(["carre"], chk.missing_from_start_code(
+            "cannot find function `carre` in this scope", "fn carres() {}"))
+        self.assertEqual([], chk.missing_from_start_code("erreur de type", "fn f() {}"))
+
     def test_code_de_depart_sans_fonction_transportable_a_verifier(self):
         # Même message du superviseur pour un squelette sans aucune fonction (harnais peut-être
         # juste) et pour des types non transportables : jamais BLOQUANT, donc jamais de quiz
