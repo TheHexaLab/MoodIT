@@ -247,6 +247,35 @@ class ExecutionLimiterTest {
     }
 
     @Test
+    void a_slot_stays_reserved_for_public_calls() throws Exception {
+        // max = 3 (prod) : les corrections internes n'occupent que DEUX places — une file de
+        // soumissions (fin d'examen) ne doit jamais refuser tous les « Exécuter ».
+        ExecutionLimiter limiter = new ExecutionLimiter(3, 0, 200, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> g1 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            Future<String> g2 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            // Troisième correction : refusée après son attente — la place restante est publique.
+            assertThatThrownBy(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> "non")))
+                    .isInstanceOf(ExecutionBusyException.class)
+                    .hasMessage(ExecutionBusyException.SANDBOX_BUSY);
+            assertThat(limiter.availableSlots()).isEqualTo(1);
+            // Un appel PUBLIC, lui, obtient la place réservée, sans attendre.
+            assertThat(limiter.withSandboxSlot(() -> "public")).isEqualTo("public");
+            release.countDown();
+            assertThat(g1.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            assertThat(g2.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            // Places rendues des deux côtés : une correction repasse.
+            assertThat(limiter.availableSlots()).isEqualTo(3);
+            assertThat(limiter.asInternal(() -> limiter.withSandboxSlot(() -> "interne"))).isEqualTo("interne");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void internal_context_is_visible_and_restored() {
         // Le mur du conteneur dépend de ce drapeau (public : plafond court).
         ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 2);

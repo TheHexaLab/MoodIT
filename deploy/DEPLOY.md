@@ -317,8 +317,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
   notation, configurable par question jusqu'à 60 s), mémoire par conteneur
   (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
-  `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod, dont **une place réservée
-  aux corrections** : il en reste deux pour « Exécuter »/« Tester »), file d'attente publique
+  `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod). Corrections et
+  « Exécuter »/« Tester » ont **chacun au plus deux places** (`EXEC_MAX_CONCURRENT − 1`) : chaque
+  côté en garde toujours une, même pendant une rafale de l'autre. File d'attente publique
   `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
   au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
@@ -329,8 +330,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   aucune capacité au-delà du minimum du superviseur root). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
-  Capacité : une correction compilée tient une place (`EXEC_MAX_CONCURRENT`, 3 en prod) pendant
-  TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
+  Capacité : une correction compilée tient une place (au plus `EXEC_MAX_CONCURRENT − 1`, 2 en
+  prod, pour les corrections) pendant TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
   absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet.
   Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
   boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
@@ -347,9 +348,10 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
   la changer pour un seul des deux ferait abandonner des corrections encore en cours.
   **Côté core, les quiz à harnais ont leur propre pool** (`AsyncConfig.quizCodeExecutor`) : autant
-  de corrections en parallèle que `QUIZ_CODE_GRADING_THREADS` (3 par défaut), à garder **égal**
-  à `EXEC_MAX_CONCURRENT` — moins laisse des places vides, plus fait attendre des corrections
-  dans la file d'execution-service jusqu'à leur abandon. Les deux se règlent dans
+  de corrections en parallèle que `QUIZ_CODE_GRADING_THREADS` (3 par défaut, 2 en prod), à garder
+  **égal** à `EXEC_MAX_CONCURRENT − 1`, les places accordées aux corrections — moins laisse des
+  places vides, plus fait attendre des corrections dans la file d'execution-service jusqu'à leur
+  abandon. Les deux se règlent dans
   `docker-compose-hetzner.yml`, l'un dans le bloc de core-service, l'autre dans celui
   d'execution-service. Les quiz SANS harnais passent par un autre pool (`quizExecutor`) et
   n'attendent jamais derrière une correction compilée. Au-delà de la file du pool de code

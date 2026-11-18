@@ -106,8 +106,9 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   le dump SQL de la phase 1 peut approcher `app.sql.max-dump-chars`).
 - **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` conteneurs runner simultanés (file
   d'attente de `EXEC_QUEUE_WAIT_MS`), et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur sur
-  `/exec/**`. Au-delà : 429 avec un message en français. L'appel interne (correction des soumissions)
-  ne compte que dans la limite globale.
+  `/exec/**`. Au-delà : 429 avec un message en français. Appels publics et appels internes
+  (correction des soumissions, sans limite par utilisateur) ont chacun au plus
+  `EXEC_MAX_CONCURRENT − 1` places : chaque côté en garde toujours une que l'autre ne peut pas prendre.
 - **Budget global d'une correction INTERPRÉTÉE/SQL/vues** (`EXEC_INTERPRETED_BUDGET_MS`, 15 min ;
   4 min pour un « Tester » public) : ce chemin prend une place et un conteneur **par harnais**, son
   pire cas croissait donc linéairement et sans borne. Passé l'échéance, les harnais restants ne sont

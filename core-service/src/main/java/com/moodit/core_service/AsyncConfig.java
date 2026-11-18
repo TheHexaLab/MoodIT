@@ -21,9 +21,10 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  *   <li>{@code quizCodeExecutor} : quiz AVEC harnais. Une correction tient une place
  *       d'execution-service pendant tout son conteneur runner (jusqu'à plusieurs minutes pour un
  *       langage compilé). Le nombre de threads ({@code QUIZ_CODE_GRADING_THREADS}) est à aligner
- *       sur {@code EXEC_MAX_CONCURRENT} : moins laisse des places inutilisées, plus fait attendre
- *       des corrections dans la file d'execution-service jusqu'à leur abandon (tentative
- *       supprimée). Cœur = maximum, car un {@link ThreadPoolTaskExecutor} ne dépasse son cœur
+ *       sur {@code EXEC_MAX_CONCURRENT - 1}, les places qu'execution-service accorde aux
+ *       corrections (la dernière reste à « Exécuter »/« Tester ») : moins laisse des places
+ *       inutilisées, plus fait attendre des corrections dans la file d'execution-service jusqu'à
+ *       leur abandon (tentative supprimée). Cœur = maximum, car un {@link ThreadPoolTaskExecutor} ne dépasse son cœur
  *       qu'une fois la file pleine.
  * </ul>
  *
