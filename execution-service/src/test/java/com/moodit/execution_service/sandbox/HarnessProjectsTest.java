@@ -268,6 +268,23 @@ class HarnessProjectsTest {
     }
 
     @Test
+    void overlong_type_name_falls_back_to_default_file_name() {
+        // Au-delà de 200 octets UTF-8, le nom ne sert plus de nom de fichier (limite Linux à 255,
+        // plus .class et $Interne) : repli, javac rend une erreur lisible au lieu d'un 502.
+        String atLimit = "A".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES);
+        assertThat(HarnessProjects.javaFileName("public class " + atLimit + " { }", "Main"))
+                .isEqualTo(atLimit + ".java");
+        assertThat(HarnessProjects.javaFileName("public class " + atLimit + "B { }", "Main"))
+                .isEqualTo("Main.java");
+        // Compté en OCTETS : 67 caractères de 3 octets dépassent la limite.
+        String wide = "€".repeat(67);
+        assertThat(HarnessProjects.javaTypeNameTooLong(wide)).isTrue();
+        assertThat(HarnessProjects.javaTypeName("public class " + atLimit + "B { }"))
+                .isEqualTo(atLimit + "B");
+        assertThat(HarnessProjects.javaTypeName("int x;")).isNull();
+    }
+
+    @Test
     void file_name_is_read_in_linear_time() {
         // Une tete en \s* multiligne faisait repartir le moteur de chaque ligne jusqu'au bout
         // de la source : temps quadratique, sur une source choisie par l'etudiant.

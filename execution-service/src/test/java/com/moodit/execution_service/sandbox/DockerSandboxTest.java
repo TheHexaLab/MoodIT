@@ -205,6 +205,69 @@ class DockerSandboxTest {
     }
 
     @Test
+    void wait_callback_closed_and_json_file_log_driver_imposed() throws IOException {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var waitCb = docker.waitContainerCmd("cid").start();
+
+        new DockerSandbox(docker, 512, 64, 1.0).run("img", Map.of("job.json", "{}"), 5000);
+
+        // Rappel d'attente fermé : sinon sa connexion au démon restait ouverte.
+        org.mockito.Mockito.verify(waitCb).close();
+        // Pilote de journaux imposé : le verdict est lu par `docker logs`.
+        var hostConfig = org.mockito.ArgumentCaptor.forClass(
+                com.github.dockerjava.api.model.HostConfig.class);
+        org.mockito.Mockito.verify(create).withHostConfig(hostConfig.capture());
+        assertThat(hostConfig.getValue().getLogConfig().getType())
+                .isEqualTo(com.github.dockerjava.api.model.LogConfig.LoggingType.JSON_FILE);
+    }
+
+    @Test
+    void interrupted_wait_restores_interrupt_flag() {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var waitCb = docker.waitContainerCmd("cid").start();
+        // Ce que fait docker-java 3.4.1 : l'InterruptedException enveloppée, drapeau non rétabli.
+        org.mockito.Mockito.doThrow(new com.github.dockerjava.api.exception.DockerClientException(
+                        "Awaiting status code interrupted: ", new InterruptedException()))
+                .when(waitCb).awaitStatusCode(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> new DockerSandbox(docker, 512, 64, 1.0)
+                                    .run("img", Map.of("job.json", "{}"), 5000))
+                    .isInstanceOf(SandboxException.class)
+                    .hasMessageContaining("interrompue");
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();   // ne pas laisser le drapeau aux tests suivants
+        }
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
+    void incomplete_log_read_fails_instead_of_returning_truncated_output() {
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        // Journaux jamais terminés : ni onComplete ni onError.
+        var logs = docker.logContainerCmd("cid");
+        org.mockito.Mockito.doAnswer(inv -> inv.getArgument(0))
+                .when(logs).exec(org.mockito.ArgumentMatchers.any());
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+        sandbox.logReadTimeout = java.time.Duration.ofMillis(200);
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), () ->
+                org.assertj.core.api.Assertions.assertThatThrownBy(
+                                () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                        .isInstanceOf(SandboxException.class)
+                        .hasMessageContaining("Journaux"));
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
     void cleanup_failure_does_not_swallow_result() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
@@ -232,8 +295,8 @@ class DockerSandboxTest {
         org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
         org.mockito.Mockito.when(list.withLabelFilter(
                 org.mockito.ArgumentMatchers.<Map<String, String>>any())).thenReturn(list);
-        // Seuls les conteneurs TERMINÉS sont balayés : une notation en vol (autre instance
-        // sur le même démon) ne doit pas être tuée.
+        // Tous les statuts, « running » compris : c'est l'âge (removable) qui protège une
+        // notation en vol d'une autre instance sur le même démon.
         org.mockito.Mockito.when(list.withStatusFilter(
                 org.mockito.ArgumentMatchers.<java.util.Collection<String>>any())).thenReturn(list);
         org.mockito.Mockito.when(list.exec()).thenReturn(java.util.List.of(orphan));
@@ -242,12 +305,12 @@ class DockerSandboxTest {
 
         assertThat(new DockerSandbox(docker, 512, 64, 1.0).removeOrphans()).isEqualTo(1);
         org.mockito.Mockito.verify(remove).exec();
-        // Le filtre lui-même : sans « running » (une notation en vol), et sans rien d'autre.
+        // Le filtre lui-même : « running » compris (JVM morte pendant l'exécution), rien d'autre.
         @SuppressWarnings("unchecked")
         org.mockito.ArgumentCaptor<java.util.Collection<String>> statuses =
                 org.mockito.ArgumentCaptor.forClass(java.util.Collection.class);
         org.mockito.Mockito.verify(list).withStatusFilter(statuses.capture());
-        assertThat(statuses.getValue()).containsExactlyInAnyOrder("created", "exited", "dead");
+        assertThat(statuses.getValue()).containsExactlyInAnyOrder("created", "running", "exited", "dead");
         // Et l'étiquette des runners : sans elle, le balayage viserait tout conteneur arrêté.
         org.mockito.Mockito.verify(list).withLabelFilter(
                 org.mockito.ArgumentMatchers.<Map<String, String>>argThat(
@@ -261,7 +324,7 @@ class DockerSandboxTest {
         // journaux). Le balayer faisait échouer cette notation : 502, tentative supprimée.
         long now = System.currentTimeMillis() / 1000;
         long old = (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 1000) / 1000;
-        for (String status : new String[] {"created", "Created", "exited", "dead", null}) {
+        for (String status : new String[] {"created", "Created", "running", "exited", "dead", null}) {
             assertThat(DockerSandbox.removable(container(status, now))).as(status).isFalse();
             assertThat(DockerSandbox.removable(container(status, old))).as(status).isTrue();
         }

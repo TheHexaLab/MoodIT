@@ -3,10 +3,12 @@ package com.moodit.execution_service.sandbox;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.WaitContainerResultCallback;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.LogConfig;
 import com.github.dockerjava.api.model.StreamType;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -70,6 +72,11 @@ public class DockerSandbox {
     private final long pidsLimit;
     private final long nanoCpus;
     private final Duration responseTimeout;
+    /**
+     * Délai de lecture des journaux d'un conteneur terminé (le verdict). Compté dans
+     * {@code ORPHAN_GRACE_MS}. Modifiable par les tests seulement.
+     */
+    Duration logReadTimeout = Duration.ofSeconds(30);
     private volatile DockerClient client;
     private volatile DockerClient waitClient;
 
@@ -180,10 +187,13 @@ public class DockerSandbox {
     public int removeOrphans() {
         int removed = 0;
         try {
-            // Statuts TERMINÉS seulement : plusieurs instances peuvent partager le démon
-            // (pile e2e + dev, ou un update.sh pendant une correction). Balayer tout ce qui
-            // porte l'étiquette tuait une notation EN VOL — 502, tentative supprimée, soit
-            // précisément le mode d'échec que le reste de la PR s'applique à éliminer.
+            // Plusieurs instances peuvent partager le démon (pile e2e + dev, ou un update.sh
+            // pendant une correction) : balayer tout ce qui porte l'étiquette tuait une notation
+            // EN VOL — 502, tentative supprimée. Le filtre par ÂGE (removable) l'empêche, quel
+            // que soit le statut, « running » compris : au-delà de ORPHAN_GRACE_MS, aucune
+            // notation ne peut plus posséder le conteneur. Sans « running », un conteneur dont la
+            // JVM est morte pendant l'exécution (et dont le code tourne encore) n'était jamais
+            // ramassé.
             List<com.github.dockerjava.api.model.Container> orphans = client().listContainersCmd()
                     .withShowAll(true)
                     .withLabelFilter(Map.of(RUNNER_LABEL, "1"))
@@ -193,7 +203,7 @@ public class DockerSandbox {
                     // n'est en revanche ramassé par personne : il n'appartient pas au projet
                     // compose, donc ni `compose up --remove-orphans` ni `docker image prune`
                     // (deploy/update.sh) ne le voient — il s'accumulerait indéfiniment.
-                    .withStatusFilter(List.of("created", "exited", "dead"))
+                    .withStatusFilter(List.of("created", "running", "exited", "dead"))
                     .exec();
             for (com.github.dockerjava.api.model.Container container : orphans) {
                 if (!removable(container)) {
@@ -307,6 +317,11 @@ public class DockerSandbox {
                     .withCapAdd(Capability.CHOWN, Capability.FOWNER, Capability.DAC_OVERRIDE,
                             Capability.SETUID, Capability.SETGID, Capability.KILL)
                     .withSecurityOpts(List.of("no-new-privileges"))
+                    // Le verdict est lu par `docker logs` : pilote json-file IMPOSÉ, sans
+                    // rotation (le conteneur est supprimé juste après). Hérité du démon, un
+                    // pilote « none », « syslog »… ou un max-size bas rendait la sortie illisible
+                    // ou tronquée — 502 sur toutes les notations.
+                    .withLogConfig(new LogConfig(LogConfig.LoggingType.JSON_FILE, Map.of()))
                     .withAutoRemove(false);
             CreateContainerResponse created = docker.createContainerCmd(image)
                     .withHostConfig(hostConfig)
@@ -330,29 +345,41 @@ public class DockerSandbox {
 
             docker.startContainerCmd(containerId).exec();
 
-            Integer status = waitClient().waitContainerCmd(containerId)
-                    .start()
-                    .awaitStatusCode(wallTimeoutMs, TimeUnit.MILLISECONDS);
+            // Callbacks FERMÉS dans tous les cas : un rappel non fermé gardait sa connexion au
+            // démon et son fil de lecture ouverts indéfiniment (attente expirée, journaux lents).
+            Integer status;
+            try (WaitContainerResultCallback waitCallback =
+                         waitClient().waitContainerCmd(containerId).start()) {
+                status = waitCallback.awaitStatusCode(wallTimeoutMs, TimeUnit.MILLISECONDS);
+            }
 
             // Accumuler les OCTETS puis décoder UNE fois : un caractère UTF-8 scindé entre deux
             // frames deviendrait sinon « � » dans le détail d'un verdict.
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-            docker.logContainerCmd(containerId)
-                    .withStdOut(true)
-                    .withStdErr(true)
-                    .exec(new ResultCallback.Adapter<Frame>() {
-                        @Override
-                        public void onNext(Frame frame) {
-                            byte[] payload = frame.getPayload();
-                            if (frame.getStreamType() == StreamType.STDOUT) {
-                                stdout.write(payload, 0, payload.length);
-                            } else {
-                                stderr.write(payload, 0, payload.length);
-                            }
-                        }
-                    })
-                    .awaitCompletion(30, TimeUnit.SECONDS);
+            ResultCallback.Adapter<Frame> logCallback = new ResultCallback.Adapter<>() {
+                @Override
+                public void onNext(Frame frame) {
+                    byte[] payload = frame.getPayload();
+                    if (frame.getStreamType() == StreamType.STDOUT) {
+                        stdout.write(payload, 0, payload.length);
+                    } else {
+                        stderr.write(payload, 0, payload.length);
+                    }
+                }
+            };
+            try (logCallback) {
+                docker.logContainerCmd(containerId)
+                        .withStdOut(true)
+                        .withStdErr(true)
+                        .exec(logCallback);
+                // Lecture INCOMPLÈTE : une sortie tronquée n'est pas un verdict. On échoue
+                // franchement plutôt que de lire un JSON coupé.
+                if (!logCallback.awaitCompletion(logReadTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    throw new SandboxException("Journaux du conteneur de notation non lus en "
+                            + logReadTimeout.toSeconds() + " s");
+                }
+            }
             return new ContainerRun(stdout.toString(StandardCharsets.UTF_8),
                     stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status);
         } catch (NotFoundException e) {
@@ -364,6 +391,13 @@ public class DockerSandbox {
             Thread.currentThread().interrupt();
             throw new SandboxException("Notation interrompue", e);
         } catch (RuntimeException | IOException e) {
+            // docker-java enveloppe l'InterruptedException de son attente dans une
+            // DockerClientException SANS rétablir le drapeau : le catch ci-dessus ne la voyait
+            // jamais, et l'interruption (arrêt du service) était perdue.
+            if (e.getCause() instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw new SandboxException("Notation interrompue", e);
+            }
             throw new SandboxException("Échec du conteneur de notation : " + e.getMessage(), e);
         } finally {
             if (containerId != null) {

@@ -3,6 +3,7 @@ package com.moodit.execution_service.sandbox;
 import com.moodit.execution_service.assembly.UnsupportedLanguageException;
 import com.moodit.execution_service.dto.TestCaseInput;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -266,6 +267,30 @@ public final class HarnessProjects {
      * fichier Java : la notation et le bouton « Exécuter » ({@code CodeAssembler}) l'appellent.
      */
     public static String javaFileName(String source, String fallback) {
+        String name = javaTypeName(source);
+        // Nom trop long pour un nom de fichier : le dépôt dans le conteneur échouait (502, tentative
+        // supprimée). Fichier de repli : javac rend une erreur de compilation lisible, la
+        // notation la refuse en amont avec un message clair (DockerEvaluator.reservedNameRejection).
+        return (name != null && !javaTypeNameTooLong(name) ? name : fallback) + ".java";
+    }
+
+    /**
+     * Plafond, en octets UTF-8, d'un nom de type Java qui devient un nom de fichier. Linux borne un
+     * nom de fichier à 255 octets ; javac y ajoute {@code .class} et, pour une classe imbriquée,
+     * {@code $Interne} : 200 laisse cette marge.
+     */
+    public static final int MAX_JAVA_TYPE_NAME_BYTES = 200;
+
+    /** Le nom de type dépasse-t-il {@link #MAX_JAVA_TYPE_NAME_BYTES} ? */
+    public static boolean javaTypeNameTooLong(String name) {
+        return name.getBytes(StandardCharsets.UTF_8).length > MAX_JAVA_TYPE_NAME_BYTES;
+    }
+
+    /**
+     * Nom du type qui impose le nom de fichier (cf. {@link #javaFileName}), ou {@code null} si le
+     * source ne déclare aucun type de premier niveau. Non borné en longueur.
+     */
+    public static String javaTypeName(String source) {
         source = withoutCommentsOrLiterals(source == null ? "" : source);
         Matcher m = JAVA_TYPE_DECL.matcher(source);
         String firstTopLevel = null;
@@ -284,13 +309,13 @@ public final class HarnessProjects {
                 continue;
             }
             if (PUBLIC_MOD.matcher(m.group(1)).find()) {
-                return m.group(2) + ".java";
+                return m.group(2);
             }
             if (firstTopLevel == null) {
                 firstTopLevel = m.group(2);
             }
         }
-        return (firstTopLevel != null ? firstTopLevel : fallback) + ".java";
+        return firstTopLevel;
     }
 
     private static String jsonString(String value) {

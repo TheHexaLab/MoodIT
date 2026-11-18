@@ -176,14 +176,25 @@ public class DockerEvaluator {
         if (!"java".equals(runnerLanguage)) {
             return null;
         }
-        String fileName = HarnessProjects.javaFileName(code == null ? "" : code, "Solution");
-        String className = fileName.substring(0, fileName.length() - ".java".length());
-        if (!className.startsWith("Moodit") && !"harnais_rpc".equals(className)) {
+        String className = HarnessProjects.javaTypeName(code == null ? "" : code);
+        if (className == null) {
             return null;
         }
-        String detail = "Le nom de classe « " + className + " » est réservé par la notation "
-                + "(« harnais_rpc » et le préfixe « Moodit » appartiennent aux fichiers du "
-                + "superviseur). Renommer la classe — par exemple « Solution » — et resoumettre.";
+        String detail;
+        if (HarnessProjects.javaTypeNameTooLong(className)) {
+            // Le nom devient un nom de fichier : au-delà de la limite du système de fichiers, le
+            // dépôt dans le conteneur échouait (502, tentative supprimée) au lieu d'une note.
+            detail = "Le nom de classe « " + className.substring(0, className.offsetByCodePoints(0, 40)) + "… » est trop long "
+                    + "(plus de " + HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES + " octets) : il "
+                    + "sert de nom de fichier. Raccourcir le nom — par exemple « Solution » — et "
+                    + "resoumettre.";
+        } else if (className.startsWith("Moodit") || "harnais_rpc".equals(className)) {
+            detail = "Le nom de classe « " + className + " » est réservé par la notation "
+                    + "(« harnais_rpc » et le préfixe « Moodit » appartiennent aux fichiers du "
+                    + "superviseur). Renommer la classe — par exemple « Solution » — et resoumettre.";
+        } else {
+            return null;
+        }
         return cases.stream()
                 .map(c -> new TestResult(c.name(), c.effectiveWeight(), false, detail))
                 .toList();

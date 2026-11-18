@@ -7,6 +7,7 @@ import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import com.moodit.execution_service.sandbox.RunnerExec;
 import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.HarnessProjects;
 import com.moodit.execution_service.sandbox.SandboxException;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
@@ -477,6 +478,28 @@ class ExecutionServiceTest {
         // Et un nom NORMAL ne déclenche rien : le refus est chirurgical.
         assertThat(DockerEvaluator.reservedNameRejection("Java",
                 "public class Solution { }", List.of())).isNull();
+    }
+
+    @Test
+    void overlong_java_class_name_rejected_with_diagnostic() {
+        // Le nom de la classe devient un nom de fichier : au-delà de la limite de Linux, le dépôt
+        // dans le conteneur échouait — 502, tentative supprimée — au lieu d'une note.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        String longName = "A".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES + 1);
+
+        List<TestResult> results = routed.evaluate(oneTest("Java",
+                "public class " + longName + " { static int f() { return 1; } }",
+                "return " + longName + ".f() == 1;"));
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("trop long").doesNotContain(longName);
+        verifyNoInteractions(docker);
+        // À la limite exacte, le nom passe.
+        assertThat(DockerEvaluator.reservedNameRejection("Java",
+                "public class " + "A".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES) + " { }",
+                List.of())).isNull();
     }
 
     @Test
