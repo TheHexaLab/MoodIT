@@ -479,7 +479,12 @@ public class QuizService {
             // (3) persiste les verdicts + passe en "done" (transactionnel : un échec ici annule tout
             // et laisse la tentative en "pending" → traité comme une défaillance ci-dessous).
             TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
-            writeTx.executeWithoutResult(status -> finalizeAttempt(attemptId, verdicts));
+            Boolean finalized = writeTx.execute(status -> finalizeAttempt(attemptId, verdicts));
+            if (!Boolean.TRUE.equals(finalized)) {
+                // Déjà corrigée par une autre passe (reprise au démarrage + soumission) : rien à
+                // pousser, l'autre passe l'a fait.
+                return;
+            }
         } catch (RuntimeException e) {
             failGrading(attemptId, e);
             return;
@@ -521,9 +526,25 @@ public class QuizService {
         } catch (RuntimeException ignore) {
             // Destinataire introuvable : on pousse pas d'event, le front récupère par polling.
         }
+        // Suppression CONDITIONNELLE, sous verrou de ligne : seulement si la tentative est encore
+        // "pending". Une tentative peut être corrigée deux fois (soumise pendant la reprise au
+        // démarrage) : la passe perdante échoue sur la clé de Submission_Test_Case, et ne doit pas
+        // supprimer la tentative que l'autre passe vient de finaliser en "done". Suppression par
+        // l'entité : soumissions et verdicts partent par la cascade JPA.
         TransactionTemplate delTx = new TransactionTemplate(transactionManager);
         delTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        delTx.executeWithoutResult(status -> attemptRepository.deleteById(attemptId));
+        Boolean deleted = delTx.execute(status -> attemptRepository.findByIdForUpdate(attemptId)
+                .filter(a -> "pending".equals(a.getStatus()))
+                .map(a -> {
+                    attemptRepository.delete(a);
+                    return true;
+                })
+                .orElse(false));
+        if (!Boolean.TRUE.equals(deleted)) {
+            log.info("Tentative {} plus en pending : déjà corrigée ou supprimée, rien à abandonner",
+                    attemptId);
+            return;
+        }
         if (who != null) {
             realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, null);
         }
@@ -535,7 +556,8 @@ public class QuizService {
      */
     private GradingContext loadGradingContext(Integer attemptId) {
         Attempt attempt = attemptRepository.findById(attemptId).orElse(null);
-        if (attempt == null) return null;
+        // Plus en "pending" : une autre passe l'a déjà corrigée (cf. finalizeAttempt).
+        if (attempt == null || !"pending".equals(attempt.getStatus())) return null;
         Quiz quiz = attempt.getQuiz();
         Map<Integer, SubmittedAnswerDTO> byQuestion = new HashMap<>();
         for (Submission s : attempt.getSubmissions()) {
@@ -601,10 +623,16 @@ public class QuizService {
      * ({@code Submission_Test_Case}) à partir des soumissions déjà enregistrées, puis passe la
      * tentative en {@code "done"}. Aucun score n'est stocké : il est recalculé à la lecture
      * ({@link #computeAttemptResult}).
+     *
+     * <p>{@code false} si la tentative n'est plus {@code "pending"} : une autre passe (reprise au
+     * démarrage) l'a déjà finalisée ; rien n'est écrit.
      */
-    private void finalizeAttempt(Integer attemptId, Map<Integer, Map<Integer, Boolean>> codeVerdicts) {
+    private boolean finalizeAttempt(Integer attemptId, Map<Integer, Map<Integer, Boolean>> codeVerdicts) {
         Attempt attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(AttemptNotFoundException::new);
+        if (!"pending".equals(attempt.getStatus())) {
+            return false;
+        }
         for (Submission s : attempt.getSubmissions()) {
             Map<Integer, Boolean> verdicts = codeVerdicts.get(s.getQuestion().getId());
             if (verdicts == null) continue;
@@ -620,6 +648,7 @@ public class QuizService {
         }
         attempt.setStatus("done");
         attemptRepository.save(attempt);
+        return true;
     }
 
     private static int weightOf(TestCase testCase) {

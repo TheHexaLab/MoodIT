@@ -317,7 +317,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             service.gradeAttempt(ATTEMPT_ID);
 
             verifyNoInteractions(executionClient, realtimePublisher, submissionTestCaseRepository);
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
         }
 
         @Test
@@ -351,7 +351,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             assertThat(attempt.getStatus()).isEqualTo("done");
             verify(attemptRepository).save(attempt);
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
         }
 
         @Test
@@ -372,10 +372,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void sandboxIndisponible_supprimeEtNotifie() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
             verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
             verifyNoInteractions(submissionTestCaseRepository);
@@ -395,7 +396,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     new AttemptSubmittedEvent(ATTEMPT_ID, true),
                     new AttemptSubmittedEvent(71, false));
             verifyNoInteractions(executionClient, realtimePublisher);
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
         }
 
         @Test
@@ -410,10 +411,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Correction refusée par l'executor → pending supprimé dans une NOUVELLE transaction, push failed")
         void abandon_supprimeDansUneNouvelleTransaction() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.abandonGrading(ATTEMPT_ID, new TaskRejectedException("file pleine"));
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
             verifyNoInteractions(executionClient);
             // Appelé depuis le rappel after-commit de la soumission : en REQUIRED, la lecture et la
@@ -429,10 +431,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void verdictsIncoherents_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
         }
 
@@ -441,10 +444,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void erreurInattendue_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
         }
 
@@ -455,10 +459,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .thenReturn(Optional.of(attempt))
                     .thenThrow(new IllegalStateException("BD indisponible"));
             when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verifyNoInteractions(realtimePublisher);
         }
 
@@ -472,8 +477,56 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).findByIdForUpdate(ATTEMPT_ID);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verify(attemptRepository, never()).save(any());
+            verifyNoInteractions(realtimePublisher);
+        }
+
+        @Test
+        @DisplayName("Tentative déjà corrigée (reprise au démarrage) → rien n'est exécuté, ni supprimé, ni poussé")
+        void dejaCorrigee_rienAFaire() {
+            attempt.setStatus("done");
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verifyNoInteractions(executionClient, realtimePublisher, submissionTestCaseRepository);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+            verify(attemptRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Finalisée par une autre passe pendant l'exécution → aucune écriture, aucun push, pas de suppression")
+        void finaliseeParUneAutrePasse_ignoree() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenAnswer(inv -> {
+                attempt.setStatus("done"); // l'autre passe a committé pendant le sandbox
+                return List.of(true, true);
+            });
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verifyNoInteractions(submissionTestCaseRepository, realtimePublisher);
+            verify(attemptRepository, never()).save(any());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+        }
+
+        @Test
+        @DisplayName("Échec d'une passe alors que l'autre a finalisé → la tentative done n'est PAS supprimée, aucun push failed")
+        void echecApresFinalisationParLAutre_rienNestSupprime() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            // Clé (submission, test_case) déjà écrite par l'autre passe.
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(submissionTestCaseRepository.save(any()))
+                    .thenThrow(new DataIntegrityViolationException("pk"));
+            // Relue sous verrou : l'autre passe l'a finalisée.
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID))
+                    .thenReturn(Optional.of(attempt(ATTEMPT_ID, quiz, eva, 1, "done")));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verifyNoInteractions(realtimePublisher);
         }
 
@@ -488,7 +541,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             service.gradeAttempt(ATTEMPT_ID);
 
             assertThat(attempt.getStatus()).isEqualTo("done");
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verify(realtimePublisher, never())
                     .quizAttemptFailed(anyLong(), anyLong(), anyLong(), any());
         }
