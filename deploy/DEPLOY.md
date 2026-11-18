@@ -164,7 +164,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 
 > **Déploiement du runner (#116) — une seule forme de harnais.** Le harnais d'un langage compilé
 > est un CORPS qui renvoie un **booléen**, noté par le modèle à deux processus et deux UID
-> (verdict non falsifiable). C'est la forme des gabarits installés par `V9`, et la seule notée.
+> (verdict non falsifiable). C'est la forme des gabarits installés par `V5`, et la seule notée.
 >
 > Le format **vrai test du framework** (JUnit, NUnit, go test, cargo test, `moodit_check.h`) a
 > existé dans une version intermédiaire de #116 et il est **retiré** : il compilait le harnais
@@ -176,32 +176,31 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > de l'étudiant, elles pouvaient échanger n'importe quel type. Le chemin booléen ne transporte
 > que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
 > un harnais existant qui passe un tableau, une structure ou une collection ne compilera plus —
-> `passed=false` pour chaque étudiant, sans panne visible. **Avant le déploiement : inventorier
-> les Test_Case des six langages compilés, puis rejouer chacun contre le NOUVEAU noteur.**
-> Pas avec « Tester » sur la prod encore en place : elle passe toujours par Piston, qui compile
-> le harnais avec le code de l'étudiant et accepte tous les types — un harnais qui cassera sous
-> le noteur booléen y reste vert. Rejouer plutôt :
+> `passed=false` pour chaque étudiant, sans panne visible. **Étape bloquante du déploiement :
+> rejouer chaque harnais compilé contre le NOUVEAU noteur**, avec
+> `deploy/check-compiled-harnesses.py`. Pas avec « Tester » sur la prod encore en place : elle
+> passe toujours par Piston, qui compile le harnais avec le code de l'étudiant et accepte tous
+> les types — un harnais qui cassera sous le noteur booléen y reste vert.
 >
-> 1. sur une pile locale de cette version (`docker-compose-dev.yml` + images runner construites)
->    chargée d'un dump de la base de prod, avec « Tester » dans l'éditeur du quiz ;
-> 2. à défaut, juste APRÈS la mise en prod, en gardant les quiz compilés concernés fermés
->    (`is_published = false`) jusqu'à ce que chaque cas soit rejoué et corrigé.
->
-> Inventaire :
+> Le script envoie le code de départ et les harnais de chaque question compilée à l'endpoint
+> interne de correction, puis classe chaque question : **BLOQUANT** (le harnais ne compile pas
+> contre la signature, ou la signature n'a aucun type transportable : 0 pour tout le monde),
+> **À VÉRIFIER** (pas de code de départ, code de départ qui ne compile pas seul, noteur muet :
+> rejouer à la main avec une solution) ou **OK**. Il sort en 1 tant qu'il reste un BLOQUANT ou un
+> À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Le jeton interne est lu
+> dans le conteneur et jamais affiché.
 >
 > ```bash
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
->   SELECT qz.id AS quiz, qz.title AS titre, qz.is_published AS publie, q.id AS question,
->          l.name AS langage, tc.id AS cas, tc.name AS nom_cas
->   FROM Test_Case tc
->   JOIN Question q ON q.id = tc.question_id
->   JOIN Language l ON l.id = q.language_id
->   JOIN Quiz qz ON qz.id = q.quiz_id
->   WHERE l.name IN ('Java', 'C', 'C++', 'C#', 'Go', 'Rust')
->   ORDER BY qz.is_published DESC, qz.id, q.id, tc.id;"
+> # Juste après ./deploy/update.sh : rejoue tout, et ferme (is_published = false) les quiz
+> # publiés qui portent un BLOQUANT, le temps de corriger leurs harnais dans l'éditeur.
+> python3 deploy/check-compiled-harnesses.py --depublier
 > ```
 >
-> Chaque ligne est un cas à rejouer ; les quiz publiés d'abord. Le harnais C/C++ dispose de
+> Pour vérifier AVANT la mise en prod : une pile locale de cette version
+> (`docker-compose-dev.yml` + images runner construites + execution-service lancé), chargée d'un
+> dump de la base de prod, puis `EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… python3
+> deploy/check-compiled-harnesses.py` (sous Docker Desktop, l'IP d'un conteneur n'est pas
+> joignable depuis l'hôte : `EXEC_URL` est obligatoire). Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
