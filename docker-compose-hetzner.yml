@@ -138,6 +138,10 @@ services:
         condition: service_completed_successfully
       auth-service:
         condition: service_started
+      # Reprise des corrections pending au démarrage : execution-service doit répondre, sinon
+      # chaque tentative reprise est supprimée (cf. le healthcheck d'execution-service).
+      execution-service:
+        condition: service_healthy
 
   auth-service:
     build: ./auth-service
@@ -250,6 +254,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - internal
+    # Port ouvert = contexte Spring démarré. Sert au depends_on de core-service : la reprise des
+    # corrections "pending" au démarrage de core (QuizGradingListener) appelle ce service, et
+    # une correction qui le trouve injoignable SUPPRIME la tentative. Bash /dev/tcp : l'image
+    # JRE n'a ni curl ni wget.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/$${EXEC_SERVICE_PORT:-8085}'"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
 
 volumes:
   postgres_data:
