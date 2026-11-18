@@ -1,4 +1,4 @@
-# Runner de notation Go (#116) : toolchain Go (go test) + superviseur.
+# Runner de notation Go (#116) : toolchain Go (go build) + superviseur.
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
 # /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
 # cgo inutile aux harnais et surface en moins pour la compilation ROOT de sources non fiables.

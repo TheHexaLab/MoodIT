@@ -76,6 +76,48 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
 
+    def test_membre_ou_type_absent_du_code_de_depart_a_verifier(self):
+        # Squelette où l'étudiant doit ajouter une MÉTHODE, un champ ou un type : le compilateur
+        # ne dit pas « fonction introuvable » mais « pas de membre ». Sans ces formes, --unpublish
+        # fermait un quiz dont le harnais était juste.
+        start = "struct Rect { int largeur; };"
+        prefix = "Le harnais ne compile pas contre le code soumis :\n"
+        for diagnostic in (
+                "MooditGrader.java:3: error: cannot find symbol\n  symbol:   constructor Cercle(int)",
+                "noteur.cpp:9:12: error: ‘class Rect’ has no member named ‘aire’",
+                "noteur.c:9:12: error: ‘struct Rect’ has no member named ‘hauteur’",
+                "noteur.cs(9,20): error CS0246: The type or namespace name `Cercle' could not be found",
+                "./noteur.go:9:9: r.Aire undefined (type Rect has no field or method Aire)",
+                "error[E0599]: no method named `aire` found for struct `Rect` in the current scope",
+                "error[E0599]: no function or associated item named `new` found for struct `Rect`",
+                "error[E0609]: no field `hauteur` on type `Rect`",
+                "error[E0433]: failed to resolve: use of undeclared type `Cercle`"):
+            with self.subTest(diagnostic=diagnostic):
+                self.assertEqual(chk.TO_CHECK, chk.classify(prefix + diagnostic, False, start))
+        # Le membre EXISTE dans le code de départ et le harnais ne le voit pas : question cassée.
+        self.assertEqual(chk.BLOCKING, chk.classify(
+            prefix + "./noteur.go:9:9: r.largeur undefined (type Rect has no field or method largeur)",
+            False, start))
+
+    def test_connexion_coupee_pendant_la_reponse_a_verifier(self):
+        # Une coupure en cours de lecture n'est ni une URLError ni un TimeoutError : le script
+        # s'arrêtait, sans rejouer la suite ni fermer les quiz bloquants.
+        import http.client
+        question = {"start_code": "int f(void);", "language": "C", "cases": []}
+        original = chk.evaluate
+        try:
+            for error in (ConnectionResetError("coupée"), http.client.RemoteDisconnected("fermée"),
+                          http.client.IncompleteRead(b"")):
+                def fails(base_url, token, q, error=error):
+                    raise error
+                chk.evaluate = fails
+                with self.subTest(error=type(error).__name__):
+                    status, lines = chk.check_question("http://x", "t", question)
+                    self.assertEqual(chk.TO_CHECK, status)
+                    self.assertIn("le noteur n'a pas répondu", lines[0])
+        finally:
+            chk.evaluate = original
+
     def test_missing_from_start_code(self):
         diagnostic = "undefined: Carre\nundefined: Aide"
         self.assertEqual(["Carre"], chk.missing_from_start_code(diagnostic, "func Aide() int"))

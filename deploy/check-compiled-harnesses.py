@@ -38,12 +38,12 @@ Le jeton n'est jamais affiché.
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.request
 
 COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
@@ -60,16 +60,27 @@ NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
 #   C#     « does not contain a definition for `F' »,    « undefined reference to `f' »
 #          « The name `f' does not exist »         Go     « undefined: F »
 #   Rust   « cannot find function `f` in this scope »
+# et, pour un MEMBRE ou un type que l'étudiant doit ajouter (squelette à compléter) :
+#   Java   « symbol:   constructor Rect(int) »     C/C++  « has no member named ‘aire’ »
+#   C#     « The type or namespace name 'Rect' »   Go     « has no field or method Aire »
+#   Rust   « no method named `aire` found », « no function or associated item named `new` »,
+#          « no field `x` on type », « use of undeclared type `Rect` »
 _Q = "[`'‘’\"]"
 UNDEFINED_NAME = re.compile(
-    r"symbol:\s+(?:method|variable|class)\s+(\w+)"
+    r"symbol:\s+(?:method|variable|class|constructor)\s+(\w+)"
     r"|implicit declaration of function " + _Q + r"(\w+)"
     r"|" + _Q + r"(\w+)" + _Q + r" was not declared in this scope"
     r"|undefined reference to " + _Q + r"(\w+)"
     r"|does not contain a definition for " + _Q + r"(\w+)"
     r"|The name " + _Q + r"(\w+)" + _Q + r" does not exist"
     r"|undefined: (\w+)"
-    r"|cannot find (?:function|value|struct|type) " + _Q + r"(\w+)")
+    r"|cannot find (?:function|value|struct|type) " + _Q + r"(\w+)"
+    r"|has no member named " + _Q + r"(\w+)"
+    r"|has no field or method (\w+)"
+    r"|The type or namespace name " + _Q + r"(\w+)"
+    r"|no (?:method|function or associated item|associated item) named " + _Q + r"(\w+)"
+    r"|no field " + _Q + r"(\w+)" + _Q + r" on type"
+    r"|use of undeclared type " + _Q + r"(\w+)")
 
 
 def missing_from_start_code(diagnostic, start_code):
@@ -229,7 +240,10 @@ def check_question(base_url, token, question):
         return TO_CHECK, ["pas de code de départ : rejouer à la main avec une solution"]
     try:
         results = evaluate(base_url, token, question)
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+    except (OSError, http.client.HTTPException, ValueError) as e:
+        # OSError couvre URLError, le délai dépassé et la connexion coupée PENDANT la lecture de
+        # la réponse (ConnectionResetError), HTTPException une réponse tronquée : sans eux le
+        # script s'arrêtait là, sans rejouer les questions suivantes ni fermer les quiz bloquants.
         return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
     lines, statuses = [], []
     for case, result in zip(question["cases"], results):

@@ -3,7 +3,8 @@
 # Peuple une base de DÉVELOPPEMENT déjà migrée (y compris une pile PROD lancée en local) avec les
 # données de test, SANS e2e, SANS Flyway, SANS recréer de volume. Rapide et rejouable.
 #
-# Réutilise les fichiers db/demo/* en les envoyant à psql via STDIN, EN UNE TRANSACTION (-1 :
+# Réutilise les fichiers db/demo/* en les envoyant à psql via STDIN, EN UNE TRANSACTION (-1,
+# que psql n'accepte qu'avec -f ou -c, d'où le `-f -` qui désigne stdin :
 # un échec à mi-parcours ne laisse pas une base à moitié peuplée que la garde d'idempotence
 # refuserait ensuite de réparer). Pas de docker cp ni de chemins dans le conteneur → aucun
 # souci de conversion de chemin sous Git Bash/Windows. Idempotent : ne
@@ -58,7 +59,7 @@ if [ "$NB" -eq 0 ]; then
   echo "✗ Aucun fichier de démo trouvé dans $DEMO" >&2
   exit 1
 fi
-find "$DEMO" -maxdepth 1 -name 'V*.sql' -print0 | sort -zV | xargs -0 cat | pg -v ON_ERROR_STOP=1 -1 -q
+find "$DEMO" -maxdepth 1 -name 'V*.sql' -print0 | sort -zV | xargs -0 cat | pg -v ON_ERROR_STOP=1 -1 -q -f -
 
 echo
 echo "✓ Terminé. Établissements autorisés :"

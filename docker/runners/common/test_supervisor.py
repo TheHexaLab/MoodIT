@@ -725,7 +725,7 @@ class ObjectApiTest(unittest.TestCase):
         self.assertIn('"%s|new|Rectangle(int,int)|%d|%d"', stub_src)
         stacks, branches = supervisor.cpp_object_dispatch(obj_list)
         self.assertIn("static std::vector<Rectangle> moodit_objets_Rectangle;", stacks)
-        self.assertIn('strcmp(nom, "Rectangle.aire()")', branches)
+        self.assertIn('strcmp(moodit_nom, "Rectangle.aire()")', branches)
 
     def test_java_stub_when_public_class_is_the_object(self):
         # Classe publique `Rectangle`, AUCUNE méthode statique : le bouchon de premier niveau
@@ -824,7 +824,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         self.assertIn("moodit_dehexe(&brut)", grader_dir)
         server = supervisor.rust_server_source([("String", "copie", ["String"])], "fn copie() {}")
         self.assertIn("moodit_dehexe(args.next()", server)
-        self.assertIn("moodit_hexe(&copie(a0))", server)
+        self.assertIn("moodit_hexe(&crate::copie(a0))", server)
 
     def test_csharp_string_and_culture(self):
         self.assertIn("MooditRpc.Hexe(a0)", supervisor.cs_send_args(["string"]))
@@ -855,13 +855,13 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         self.assertEqual(supervisor.GO_CONV["int"], "int(mooditEntier(%s))")
         for source in (supervisor.go_grader_source([("int64", "somme", ["int64"])], "true", "N"),
                        supervisor.go_server_source([("int64", "somme", ["int64"])])):
-            self.assertIn("dec.UseNumber()", source)
+            self.assertIn(".UseNumber()", source)
             self.assertIn("func mooditEntier(", source)
             # Une seule table de conversion : l'aiguillage du serveur avait la sienne, restée sur
             # la lecture en flottant. Aucun chemin ne doit lire un entier autrement.
             self.assertNotIn("int64(mooditNombre(", source)
             self.assertNotIn("int(mooditNombre(", source)
-        self.assertIn("valeur = somme(mooditEntier(req.Args[0]))",
+        self.assertIn("mooditValeur = somme(mooditEntier(mooditDemande.Args[0]))",
                       supervisor.go_server_source([("int64", "somme", ["int64"])]))
 
     def test_go_pointer_constructor_with_field_capture(self):
@@ -937,7 +937,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         for t in supervisor.GO_CONV:
             self.assertIn(supervisor.GO_CONV[t] % "v",
                           supervisor.go_grader_source([(t, "f", [])], "true", "N"))
-            self.assertIn(supervisor.GO_CONV[t] % "req.Args[0]",
+            self.assertIn(supervisor.GO_CONV[t] % "mooditDemande.Args[0]",
                           supervisor.go_server_source([("int", "f", [t])]))
         for t in supervisor.RUST_CONV:
             expected = supervisor.RUST_CONV[t] % 'args.next().unwrap_or("")'
@@ -1665,11 +1665,11 @@ class Review28Test(unittest.TestCase):
         # Chaque surcharge porte SA cle, des deux cotes du fil.
         for dedup_key in ("Rect()", "Rect(int,int)"):
             self.assertIn("|new|" + dedup_key, stub)
-            self.assertIn('strcmp(nom, "%s")' % dedup_key, branches)
+            self.assertIn('strcmp(moodit_nom, "%s")' % dedup_key, branches)
         server = supervisor.c_server_source([("int", "f", ["int"]), ("int", "f", ["double"])],
                                              "", cpp=True)
-        self.assertIn('strcmp(nom, "f(int)")', server)
-        self.assertIn('strcmp(nom, "f(double)")', server)
+        self.assertIn('strcmp(moodit_nom, "f(int)")', server)
+        self.assertIn('strcmp(moodit_nom, "f(double)")', server)
 
     def test_c_stub_not_static(self):
         grader_dir = supervisor.c_grader_source([("int", "abs", ["int"])], "return abs(-1) == 1;", "1")
@@ -2310,7 +2310,7 @@ class Review246eTest(unittest.TestCase):
         self.assertIn("func (o Rectangle) perimetre() int {", stub)
         _, method_branch = supervisor.go_object_dispatch(obj_list, fields)
         self.assertIn('case "Rectangle.#champs":', method_branch)
-        self.assertIn("valeur = []interface{}{moodit_lu.largeur, moodit_lu.hauteur}", method_branch)
+        self.assertIn("mooditValeur = []interface{}{moodit_lu.largeur, moodit_lu.hauteur}", method_branch)
         # Sans l'information de récepteur, aucune relecture (comportement d'avant).
         self.assertNotIn("#champs", supervisor.go_object_stub(obj_list, fields))
 
@@ -2517,6 +2517,80 @@ class Review246eTest(unittest.TestCase):
         extraction = supervisor.cs_canonical_types(supervisor.cs_strip_comments(src))
         ctors, _ = supervisor.cs_object_api(extraction, "Compteur")
         self.assertEqual(ctors, [[], ["int"]])
+
+
+class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
+    """Le serveur généré partage la portée du code soumis : aucune de ses locales ne doit porter
+    un nom qu'une fonction soumise peut porter (réponse juste notée 0, faute de compiler)."""
+
+    def test_rust_calls_submitted_functions_by_absolute_path(self):
+        server = supervisor.rust_server_source(
+            [("bool", "premier", ["i32"]), ("i32", "id", ["i32"]), ("String", "cle", ["String"])],
+            "")
+        self.assertIn("crate::premier(a0)", server)
+        self.assertIn("crate::id(a0)", server)
+        self.assertIn("moodit_hexe(&crate::cle(a0))", server)
+        # Aucun appel par nom nu : il viserait la locale du serveur.
+        self.assertIsNone(re.search(r"(?<![:\w])(premier|id|cle)\(a0\)", server))
+
+    def test_rust_field_locals_are_prefixed(self):
+        obj_list = [("Point", [], [("i32", "somme", [])])]
+        _, branches = supervisor.rust_object_dispatch(obj_list, {"Point": [("id", "i32"),
+                                                                            ("args", "i32")]})
+        self.assertIn("let moodit_c_id = ", branches)
+        self.assertIn("Point { id: moodit_c_id, args: moodit_c_args }", branches)
+        self.assertNotIn("let id = ", branches)
+        self.assertNotIn("let args = ", branches)
+
+    def test_go_server_declares_only_prefixed_locals_where_it_calls(self):
+        server = supervisor.go_server_source([("int", "valeur", ["int"])])
+        self.assertIn("mooditValeur = valeur(int(mooditEntier(mooditDemande.Args[0])))", server)
+        body = server.split("func mooditServe() {", 1)[1].split("\nfunc main() {", 1)[0]
+        # Tout ce qui est en portée à l'appel porte le préfixe ; restent `r` (dans le defer) et
+        # `brut` / `errRep`, déclarées après la fermeture qui appelle le code soumis.
+        declared = set(re.findall(r"\bvar (\w+)", body))
+        for group in re.findall(r"([\w, ]+?) :=", body):
+            declared.update(n.strip() for n in group.split(",") if n.strip() != "if")
+        declared = {n.split()[-1] for n in declared}
+        self.assertEqual({n for n in declared if not n.startswith("moodit")},
+                         {"r", "brut", "errRep"})
+
+    def test_go_object_dispatch_uses_the_prefixed_locals(self):
+        new_branch, method_branch = supervisor.go_object_dispatch(
+            [("Compteur", [("NewCompteur", ["int"], True)], [("int", "valeur", [])])])
+        both = new_branch + method_branch
+        self.assertIn("mooditValeur = mooditObjets[mooditDemande.Handle].(*Compteur).valeur()",
+                      both)
+        self.assertIsNone(re.search(r"(?<!\w)(req|valeur) ?[.=]", both.replace(".valeur()", "")))
+
+    def test_c_server_locals_and_parameters_are_prefixed(self):
+        for cpp in (False, True):
+            server = supervisor.c_server_source([("int", "id", ["int"]), ("int", "nom", ["int"])],
+                                                 "", cpp=cpp)
+            self.assertIn("moodit_traite(const char *moodit_id, const char *moodit_op,", server)
+            self.assertIn("int moodit_a0 = atoi(moodit_jeton());", server)
+            self.assertIn('moodit_id, id(moodit_a0));', server)
+            self.assertIn('moodit_id, nom(moodit_a0));', server)
+            traite = server.split("static void moodit_traite(", 1)[1].split("\nint main(void)")[0]
+            self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|a0)(?![\w(\"])", traite))
+
+    def test_c_multiword_parameter_type_is_not_read_as_its_first_word(self):
+        # `long double x` passait pour un `long` : le bouchon tronquait l'argument, et une
+        # réponse juste était notée fausse. Hors des types transportables : pas de bouchon.
+        for cpp in (False, True):
+            self.assertEqual(supervisor.c_signatures(
+                "double racine(long double x) { return 0; }\n", cpp=cpp), [])
+            self.assertEqual(supervisor.c_signatures(
+                "long somme(long long a, long b) { return 0; }\n", cpp=cpp), [])
+            self.assertEqual(supervisor.c_signatures(
+                "int f(const int n, long m) { return 0; }\n", cpp=cpp), [("int", "f", ["int", "long"])])
+
+    def test_cpp_object_dispatch_locals_are_prefixed(self):
+        _, branches = supervisor.cpp_object_dispatch([("Rect", [["int"]], [("int", "aire", [])])])
+        self.assertIn("int moodit_h = atoi(moodit_jeton());", branches)
+        self.assertIn("moodit_objets_Rect[moodit_h].aire()", branches)
+        self.assertIn("Rect(moodit_a0)", branches)
+        self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|h|a0)(?![\w(\"])", branches))
 
 
 class SqliteExecTest(unittest.TestCase):

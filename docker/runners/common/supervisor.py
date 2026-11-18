@@ -46,7 +46,7 @@ import random
 import re
 # `resource` est POSIX : absent sous Windows, l environnement de dev du projet. Les
 # fonctions qui posent des rlimits ne tournent que DANS le conteneur (Linux) ; proteger
-# l import permet de rejouer les 93 tests unitaires du superviseur en local, sans Docker.
+# l import permet de rejouer les tests unitaires du superviseur en local, sans Docker.
 try:
     import resource
 except ImportError:  # Windows : les preexec_fn ne sont jamais appeles hors conteneur
@@ -674,8 +674,8 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
                 if len(part) < len(chunk):
                     # Le plafond tombe DANS ce bloc : la tête se ferme DÉFINITIVEMENT, coupée
                     # à la dernière fin de ligne. Coupée à l'octet près, le marqueur de
-                    # troncature scinderait la ligne en cours — et si c'est celle du jeton,
-                    # token_exit_code ne la reconnaît plus : fausse accusation de forgeage.
+                    # troncature scinderait la ligne en cours — et si c'est celle du nonce,
+                    # le verdict ne la reconnaît plus : une réponse juste serait notée fausse.
                     # DÉFINITIVEMENT, parce que la coupe laisse written < cap : sans ce
                     # verrou, un bloc suivant assez court repartait dans la tête, qui
                     # devenait discontinue — et le DERNIER bloc, celui qui porte la ligne du
@@ -699,8 +699,8 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
         if writable and dropped:
             kept = bytes(tail)
             dropped -= len(kept)
-            # MÊME libellé que read_capped, au mot près : libtest_selection s'en sert pour
-            # détecter une sortie tronquée et renoncer alors au filtre.
+            # MÊME libellé que read_capped, au mot près : un seul texte signale une sortie
+            # tronquée, où qu'elle ait été coupée.
             marker = ("\n… (sortie tronquée au milieu : %d octets)\n"
                         % (written + dropped + len(kept))).encode("utf-8")
             try:
@@ -1009,9 +1009,9 @@ def inconclusive(outcome):
     """L'échec de ce cas a-t-il une cause NON CONCLUANTE ? FONCTION PURE (testée).
 
     Temps limite dépassé ou mort par signal : on ne peut rien en déduire sur l'intention.
-    Le verdict des canaris s'en sert pour ne pas accuser — wrapper_verdict prend déjà soin
-    de ne pas accuser un processus tué après les tests, et canary_verdict défaisait cette
-    précaution par l'autre porte."""
+    Le verdict des canaris s'en sert pour ne pas accuser : un processus tué ou expiré ne dit
+    rien de la chaîne de notation, et canary_verdict en concluait à tort qu'elle ne tranchait
+    plus."""
     return outcome.timed_out or outcome.killed or outcome.harness_build
 
 
@@ -2180,29 +2180,29 @@ def go_object_dispatch(obj_list, field_list=None):
     for typ, ctors, method_list in obj_list:
         if typ in field_list:
             assignments = ", ".join(
-                "%s: %s" % (n, GO_CONV[t] % ("req.Args[%d]" % i))
+                "%s: %s" % (n, GO_CONV[t] % ("mooditDemande.Args[%d]" % i))
                 for i, (n, t) in enumerate(field_list[typ]))
             new_branch.append('        case "%s":\n'
                            '            mooditObjets = append(mooditObjets, &%s{%s})\n'
-                           '            valeur = len(mooditObjets) - 1'
+                           '            mooditValeur = len(mooditObjets) - 1'
                            % (typ, typ, assignments))
             # Une fonction-constructeur renvoie les CHAMPS du résultat, pas une poignée : le
             # bouchon reconstruit alors une valeur simple, utilisable comme un littéral.
             for ident, types, _ in ctors:
-                args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+                args = ", ".join(GO_CONV[t] % ("mooditDemande.Args[%d]" % i) for i, t in enumerate(types))
                 return_fields = ", ".join("moodit_cree.%s" % n for n, _ in field_list[typ])
                 new_branch.append('        case "%s":\n'
                                '            moodit_cree := %s(%s)\n'
                                '            _ = moodit_cree\n'
-                               '            valeur = []interface{}{%s}'
+                               '            mooditValeur = []interface{}{%s}'
                                % (ident, ident, args, return_fields))
             # Relecture des champs après une méthode à récepteur pointeur (cf. go_object_stub).
             # `#` ne peut pas figurer dans un nom de méthode : aucune collision possible.
             if field_list[typ]:
                 method_branch.append(
                     '        case "%s.#champs":\n'
-                    '            moodit_lu := mooditObjets[req.Handle].(*%s)\n'
-                    '            valeur = []interface{}{%s}'
+                    '            moodit_lu := mooditObjets[mooditDemande.Handle].(*%s)\n'
+                    '            mooditValeur = []interface{}{%s}'
                     % (typ, typ, ", ".join("moodit_lu.%s" % n for n, _ in field_list[typ])))
         else:
             # On garde un POINTEUR vers l'objet : une méthode à récepteur pointeur — l'idiome le
@@ -2210,18 +2210,18 @@ def go_object_dispatch(obj_list, field_list=None):
             # qui n'est pas adressable. Le programme de l'étudiant ne compilait pas, et il lisait
             # « Échec de compilation » pour du code qu'il n'avait pas écrit.
             for ident, types, pointer in ctors:
-                args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+                args = ", ".join(GO_CONV[t] % ("mooditDemande.Args[%d]" % i) for i, t in enumerate(types))
                 new_branch.append('        case "%s":\n'
                                '            moodit_cree := %s(%s)\n'
                                '            mooditObjets = append(mooditObjets, %smoodit_cree)\n'
-                               '            valeur = len(mooditObjets) - 1'
+                               '            mooditValeur = len(mooditObjets) - 1'
                                % (ident, ident, args, "" if pointer else "&"))
         for ret, ident, types in method_list:
-            args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
+            args = ", ".join(GO_CONV[t] % ("mooditDemande.Args[%d]" % i) for i, t in enumerate(types))
             # `(*T)` : un récepteur valeur s'appelle aussi sur un pointeur (déréférencement
             # automatique), donc une seule forme suffit pour les deux.
             method_branch.append('        case "%s.%s":\n'
-                               '            valeur = mooditObjets[req.Handle].(*%s).%s(%s)'
+                               '            mooditValeur = mooditObjets[mooditDemande.Handle].(*%s).%s(%s)'
                                % (typ, ident, typ, ident, args))
     return "\n".join(new_branch), "\n".join(method_branch)
 
@@ -2406,8 +2406,14 @@ def go_server_source(methods, obj_list=(), field_list=None):
         # noteur : cette boucle-ci avait la sienne, et elle est restée sur `mooditNombre` quand
         # les entiers sont passés à la lecture exacte — une somme au-delà de 2^53 revenait fausse
         # sur le chemin le plus courant, celui de l'appel de fonction.
-        args = ", ".join(GO_CONV[t] % ("req.Args[%d]" % i) for i, t in enumerate(types))
-        branches.append('        case "%s":\n            valeur = %s(%s)' % (ident, ident, args))
+        # Locales du serveur PRÉFIXÉES `moodit` : Go n'a pas de chemin qualifié vers son propre
+        # paquet, et une locale masque une fonction du même nom. Avec `valeur`, `req`, `ligne`…,
+        # une `func valeur(n int) int` soumise donnait `valeur = valeur(…)` sur un interface{}
+        # — « Échec de compilation » sur une réponse juste.
+        args = ", ".join(GO_CONV[t] % ("mooditDemande.Args[%d]" % i)
+                         for i, t in enumerate(types))
+        branches.append('        case "%s":\n            mooditValeur = %s(%s)'
+                        % (ident, ident, args))
     return go_alias_imports('''package main
 
 import (
@@ -2448,52 +2454,52 @@ func mooditEntier(v interface{}) int64 {
 var mooditObjets []interface{}
 
 func mooditServe() {
-    lecteur := bufio.NewReader(os.Stdin)
+    mooditLecteur := bufio.NewReader(os.Stdin)
     for {
-        ligne, err := lecteur.ReadString('\\n')
-        if err != nil {
+        mooditLigne, mooditErr := mooditLecteur.ReadString('\\n')
+        if mooditErr != nil {
             return
         }
-        var req mooditReq
-        dec := json.NewDecoder(strings.NewReader(ligne))
-        dec.UseNumber()
-        if dec.Decode(&req) != nil {
+        var mooditDemande mooditReq
+        mooditDec := json.NewDecoder(strings.NewReader(mooditLigne))
+        mooditDec.UseNumber()
+        if mooditDec.Decode(&mooditDemande) != nil {
             continue
         }
-        rep := mooditRep{Ok: true, Id: req.Id}
+        mooditReponse := mooditRep{Ok: true, Id: mooditDemande.Id}
         func() {
             defer func() {
                 if r := recover(); r != nil {
-                    rep = mooditRep{Ok: false, Id: req.Id, Error: fmt.Sprint(r)}
+                    mooditReponse = mooditRep{Ok: false, Id: mooditDemande.Id, Error: fmt.Sprint(r)}
                 }
             }()
-            var valeur interface{}
-            if req.Op == "new" {
-                switch req.Name {
+            var mooditValeur interface{}
+            if mooditDemande.Op == "new" {
+                switch mooditDemande.Name {
 %s
                 default:
-                    panic("constructeur inconnu : " + req.Name)
+                    panic("constructeur inconnu : " + mooditDemande.Name)
                 }
-            } else if req.Op == "method" {
-                switch req.Name {
+            } else if mooditDemande.Op == "method" {
+                switch mooditDemande.Name {
 %s
                 default:
-                    panic("methode inconnue : " + req.Name)
+                    panic("methode inconnue : " + mooditDemande.Name)
                 }
             } else {
-                switch req.Name {
+                switch mooditDemande.Name {
 %s
                 default:
-                    panic("fonction inconnue : " + req.Name)
+                    panic("fonction inconnue : " + mooditDemande.Name)
                 }
             }
-            rep.Value = valeur
+            mooditReponse.Value = mooditValeur
         }()
-        brut, errRep := json.Marshal(rep)
+        brut, errRep := json.Marshal(mooditReponse)
         if errRep != nil {
             // Meme motif que cote noteur : une valeur non representable (NaN, Inf) rendue par le
             // code soumis ne doit pas bloquer le couple, mais etre refusee explicitement.
-            brut, _ = json.Marshal(mooditRep{Ok: false, Id: req.Id,
+            brut, _ = json.Marshal(mooditRep{Ok: false, Id: mooditDemande.Id,
                 Error: "valeur non representable en JSON"})
         }
         fmt.Print("\\n" + string(brut) + "\\n")
@@ -2838,7 +2844,9 @@ def _c_param_types(params):
         if any(c in param_group for c in "*[&"):
             return None
         pieces = [m for m in param_group.split() if m != "const"]
-        if len(pieces) < 2 or pieces[0] not in C_TYPES:
+        # EXACTEMENT un type et un nom : `long double x` passait pour un `long` (premier mot
+        # seul lu), le bouchon tronquait 2.5 a 2 et une reponse juste etait notee fausse.
+        if len(pieces) != 2 or pieces[0] not in C_TYPES:
             return None
         types.append(pieces[0])
     return types
@@ -2895,27 +2903,27 @@ def cpp_object_dispatch(obj_list):
         stacks.append("static std::vector<%s> moodit_objets_%s;" % (klass, klass))
         for types in ctors:
             reads = "\n".join(
-                "        %s a%d = %s(moodit_jeton());"
+                "        %s moodit_a%d = %s(moodit_jeton());"
                 % (t, i, C_READ[t])
                 for i, t in enumerate(types))
-            args = ", ".join("a%d" % i for i in range(len(types)))
-            branches.append('''    if (strcmp(op, "new") == 0 && strcmp(nom, "%s") == 0) {
+            args = ", ".join("moodit_a%d" % i for i in range(len(types)))
+            branches.append('''    if (strcmp(moodit_op, "new") == 0 && strcmp(moodit_nom, "%s") == 0) {
 %s
         moodit_objets_%s.push_back(%s(%s));
-        printf("\\n%%s|ok|%%d\\n", id, (int) moodit_objets_%s.size() - 1);
+        printf("\\n%%s|ok|%%d\\n", moodit_id, (int) moodit_objets_%s.size() - 1);
         fflush(stdout);
         return;
     }''' % (c_dispatch_key(klass, types), reads, klass, klass, args, klass))
         for ret, ident, types in method_list:
             reads = "\n".join(
-                "        %s a%d = %s(moodit_jeton());"
+                "        %s moodit_a%d = %s(moodit_jeton());"
                 % (t, i, C_READ[t])
                 for i, t in enumerate(types))
-            args = ", ".join("a%d" % i for i in range(len(types)))
-            branches.append('''    if (strcmp(op, "method") == 0 && strcmp(nom, "%s.%s") == 0) {
-        int h = atoi(moodit_jeton());
+            args = ", ".join("moodit_a%d" % i for i in range(len(types)))
+            branches.append('''    if (strcmp(moodit_op, "method") == 0 && strcmp(moodit_nom, "%s.%s") == 0) {
+        int moodit_h = atoi(moodit_jeton());
 %s
-        printf("\\n%%s|ok|%s\\n", id, moodit_objets_%s[h].%s(%s));
+        printf("\\n%%s|ok|%s\\n", moodit_id, moodit_objets_%s[moodit_h].%s(%s));
         fflush(stdout);
         return;
     }''' % (klass, c_dispatch_key(ident, types), reads, C_TYPES[ret], klass, ident, args))
@@ -3109,11 +3117,14 @@ def c_server_source(methods, student_source, cpp=False, obj_list=()):
         reads = []
         for i, t in enumerate(types):
             conv = C_READ[t]
-            reads.append("        %s a%d = %s(moodit_jeton());" % (t, i, conv))
-        args = ", ".join("a%d" % i for i in range(len(types)))
-        branches.append("""    if (strcmp(op, "call") == 0 && strcmp(nom, "%s") == 0) {
+            reads.append("        %s moodit_a%d = %s(moodit_jeton());" % (t, i, conv))
+        # Locales et paramètres PRÉFIXÉS `moodit_` : en C comme en C++, un paramètre masque une
+        # fonction du même nom. Avec `id`, `op`, `nom` et `a0`, une `int id(int x)` soumise
+        # devenait un appel sur un `const char *` — le programme de l'étudiant ne compilait plus.
+        args = ", ".join("moodit_a%d" % i for i in range(len(types)))
+        branches.append("""    if (strcmp(moodit_op, "call") == 0 && strcmp(moodit_nom, "%s") == 0) {
 %s
-        printf("\\n%%s|ok|%s\\n", id, %s(%s));
+        printf("\\n%%s|ok|%s\\n", moodit_id, %s(%s));
         fflush(stdout);
         return;
     }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], ident, args))
@@ -3135,9 +3146,10 @@ static const char *moodit_jeton(void) {
 }
 
 /* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
-static void moodit_traite(const char *id, const char *op, const char *nom) {
+static void moodit_traite(const char *moodit_id, const char *moodit_op,
+                          const char *moodit_nom) {
 ''' + "\n".join(branches) + "\n\n" + object_branches + r'''
-    printf("\n%s|err|fonction inconnue\n", id);
+    printf("\n%s|err|fonction inconnue\n", moodit_id);
     fflush(stdout);
 }
 
@@ -3423,10 +3435,15 @@ def rust_object_dispatch(obj_list, field_list=None):
     for typ, ctors, method_list in obj_list:
         stacks.append("    let mut moodit_%s: Vec<%s> = Vec::new();" % (typ.lower(), typ))
         if typ in field_list:
+            # Locales PRÉFIXÉES : nommées comme les champs, un champ `id` ou `args` (banal)
+            # masquait la locale du serveur du même nom — la réponse partait avec la valeur du
+            # champ à la place de l'identifiant de la requête, ou le programme ne compilait pas.
             reads = "\n".join(
-                '                let %s = %s;' % (n, RUST_CONV[t] % 'args.next().unwrap_or("")')
+                '                let moodit_c_%s = %s;'
+                % (n, RUST_CONV[t] % 'args.next().unwrap_or("")')
                 for n, t in field_list[typ])
-            literal = "%s { %s }" % (typ, ", ".join(n for n, _ in field_list[typ]))
+            literal = "%s { %s }" % (typ, ", ".join("%s: moodit_c_%s" % (n, n)
+                                                    for n, _ in field_list[typ]))
             branches.append('''            "new|%s" => {
 %s
                 moodit_%s.push(%s);
@@ -3594,7 +3611,11 @@ def rust_server_source(methods, student_source, obj_list=(), field_list=None):
         # des chaînes a été oublié une première fois.
         reads = ['            let a%d = %s;' % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types)]
-        call_expr = "%s(%s)" % (ident, ", ".join("a%d" % i for i in range(len(types))))
+        # `crate::` : le serveur déclare ses propres locales (`id`, `args`, `premier`, `cle`,
+        # `a0`…), et en Rust une locale masque une fonction du même nom. Une `fn premier` ou une
+        # `fn id` soumise ne compilait plus — « Échec de compilation » sur une réponse juste.
+        # Le chemin absolu désigne la fonction du code soumis quelles que soient les locales.
+        call_expr = "crate::%s(%s)" % (ident, ", ".join("a%d" % i for i in range(len(types))))
         if ret == "String":
             call_expr = "moodit_hexe(&%s)" % call_expr
         branches.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
@@ -4446,6 +4467,18 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
                 os.close(fd)
             except OSError:
                 pass
+        # Le noteur peut être DÉJÀ lancé quand le lancement de l'étudiant échoue : sans ceci, un
+        # harnais qui boucle sans appeler de bouchon restait vivant, non récolté, jusqu'à la fin
+        # du conteneur.
+        for proc in procs:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=PUMP_SWEEP_JOIN_S)
+            except subprocess.TimeoutExpired:
+                pass
         EXIT_STATE.lost = True
         event("espace_sature", case=EXIT_STATE.case, detail="lancement du couple impossible : %r" % e)
         return None, False, "", ""
@@ -5208,9 +5241,13 @@ def exec_main(job):
 
     compile_stage = None
     if compile_cmd is not None:
+        # Même preexec que la compilation du code soumis en notation : UID étudiant, SANS les
+        # rlimits du run. RLIMIT_NPROC (128, threads compris) s'appliquait à `go build`, qui
+        # lance un fil par cœur et par paquet : sur un hôte à beaucoup de cœurs, un code correct
+        # pouvait échouer en EAGAIN à la compilation.
         code, timed_out = run_proc(compile_cmd, src, env, EXEC_COMPILE_TIMEOUT_S,
                                    os.path.join(outputs, "cc.out"), os.path.join(outputs, "cc.err"),
-                                   demote_student)
+                                   preexec_student_compile)
         compile_stage = exec_stage(code, timed_out, os.path.join(outputs, "cc.out"),
                                    os.path.join(outputs, "cc.err"))
         if timed_out or code != 0:
@@ -5261,7 +5298,8 @@ def main():
         return
     with open(os.path.join(BOX, "job.json"), "r", encoding="utf-8") as f:
         job = json.load(f)
-    # job.json porte le code de TOUS les harnais (cas caches compris) : il est DEPLACE ici par
+    # job.json decrit TOUS les cas (caches et canaris compris ; le code des harnais, lui, est dans
+    # l'arbre des cas) : il est DEPLACE ici par
     # wait_for_files avec les perms du tar, donc potentiellement lisible. On le ferme MAINTENANT,
     # root l'ayant deja lu. Meme chose pour l'arbre des cas, par securite.
     try:

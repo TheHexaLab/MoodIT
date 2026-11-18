@@ -1053,6 +1053,79 @@ class RpcGradingIntegrationTest {
                 .passed()).isFalse();
     }
 
+    // Le serveur généré partage la portée du code soumis : ses locales (`id`, `args`, `valeur`,
+    // `req`, `nom`…) masquaient une fonction soumise du même nom, et le programme de l'étudiant
+    // ne compilait plus — une réponse juste notée 0. Seule une vraie compilation le voit : les
+    // tests des générateurs comparent du texte.
+
+    @Test
+    void rust_function_named_like_a_server_local_is_graded() {
+        String h = "premier(7) && id(3) == 3 && args(2) == 4 && cle(1) == 2 && a0(5) == 5";
+        String code = """
+                fn premier(n: i32) -> bool { n == 7 }
+                fn id(n: i32) -> i32 { n }
+                fn args(n: i32) -> i32 { n * 2 }
+                fn cle(n: i32) -> i32 { n + 1 }
+                fn a0(n: i32) -> i32 { n }
+                """;
+        TestResult r = note("Rust", h, code);
+        assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
+        assertThat(note("Rust", h, code.replace("n * 2", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void rust_field_named_like_a_server_local_is_graded() {
+        String h = "let p = Point { id: 3, args: 4 };\np.somme() == 7";
+        String code = """
+                struct Point {
+                    id: i32,
+                    args: i32,
+                }
+
+                impl Point {
+                    fn somme(&self) -> i32 {
+                        self.id + self.args
+                    }
+                }
+                """;
+        TestResult r = note("Rust", h, code);
+        assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
+        assertThat(note("Rust", h, code.replace("self.id + self.args", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void go_function_named_like_a_server_local_is_graded() {
+        String h = "return valeur(5) == 10 && req(1) == 2 && ligne(3) == 3 && rep(4) == 4";
+        String code = """
+                package main
+
+                func valeur(n int) int { return n * 2 }
+                func req(n int) int { return n + 1 }
+                func ligne(n int) int { return n }
+                func rep(n int) int { return n }
+                """;
+        TestResult r = note("Go", h, code);
+        assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
+        assertThat(note("Go", h, code.replace("n * 2", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void c_and_cpp_function_named_like_a_server_local_is_graded() {
+        String h = "return id(5) == 5 && op(2) == 4 && nom(1) == 2 && a0(3) == 3;";
+        String code = """
+                int id(int x) { return x; }
+                int op(int x) { return x * 2; }
+                int nom(int x) { return x + 1; }
+                int a0(int x) { return x; }
+                """;
+        for (String language : List.of("C", "C++")) {
+            TestResult r = note(language, h, code);
+            assertThat(r.passed()).as(language + " : " + (r.detail() == null ? "" : r.detail()))
+                    .isTrue();
+            assertThat(note(language, h, code.replace("x * 2", "0")).passed()).isFalse();
+        }
+    }
+
     @Test
     void java_public_class_is_the_object() {
         // La classe publique s'appelle Rectangle : c'est elle qu'on instancie, et il n'y a
