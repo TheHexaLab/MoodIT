@@ -568,6 +568,115 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void go_pointer_receiver_is_graded_with_a_literal_harness() {
+        // Revue #246 : c'est l'étudiant qui choisit son récepteur. Avec `*Rectangle`, le type
+        // sortait de la capture de champs et la question POO de la démo notait 0 (« Aucune
+        // fonction exploitable ») sur une réponse juste.
+        String code = """
+                package main
+
+                type Rectangle struct {
+                	largeur int
+                	hauteur int
+                }
+
+                func (r *Rectangle) aire() int { return r.largeur * r.hauteur }
+                func (r *Rectangle) agrandir(k int) int { r.largeur *= k; return r.largeur }
+                func (r Rectangle) perimetre() int { return 2 * (r.largeur + r.hauteur) }
+                """;
+        String demo = "r := Rectangle{largeur: 3, hauteur: 4}\nreturn r.aire() == 12";
+        assertThat(note("Go", demo, code).passed()).isTrue();
+        assertThat(note("Go", demo, code.replace("r.largeur * r.hauteur", "r.largeur + r.hauteur"))
+                .passed()).isFalse();
+        // La modification faite par une méthode à récepteur pointeur est REPORTÉE dans l'objet
+        // du harnais ; la perdre en silence donnerait un verdict faux.
+        String mutation = "r := Rectangle{largeur: 3, hauteur: 4}\nr.agrandir(2)\n"
+                + "return r.aire() == 24 && r.perimetre() == 20";
+        assertThat(note("Go", mutation, code).passed()).isTrue();
+        assertThat(note("Go", mutation, code.replace("r.largeur *= k", "_ = k")).passed()).isFalse();
+    }
+
+    @Test
+    void types_without_field_or_declared_constructor_are_graded() {
+        // Revue #246 : Java et C# fournissaient le constructeur par défaut, pas ces trois-là.
+        String go = "package main\n\ntype Calculatrice struct{}\n\n"
+                + "func (c *Calculatrice) additionner(a, b int) int { return a + b }\n";
+        String goHarness = "c := Calculatrice{}\nreturn c.additionner(2, 3) == 5";
+        assertThat(note("Go", goHarness, go).passed()).isTrue();
+        assertThat(note("Go", goHarness, go.replace("a + b", "a - b")).passed()).isFalse();
+
+        String rust = "struct Calculatrice;\n\nimpl Calculatrice {\n"
+                + "    fn additionner(&self, a: i32, b: i32) -> i32 { a + b }\n}\n";
+        String rustHarness = "let c = Calculatrice;\nc.additionner(2, 3) == 5";
+        assertThat(note("Rust", rustHarness, rust).passed()).isTrue();
+        assertThat(note("Rust", rustHarness, rust.replace("a + b", "a - b")).passed()).isFalse();
+
+        String cpp = "class Calculatrice {\npublic:\n"
+                + "    int additionner(int a, int b) { return a + b; }\n};\n";
+        String cppHarness = "Calculatrice c;\nreturn c.additionner(2, 3) == 5;";
+        assertThat(note("C++", cppHarness, cpp).passed()).isTrue();
+        assertThat(note("C++", cppHarness, cpp.replace("a + b", "a - b")).passed()).isFalse();
+    }
+
+    @Test
+    void cpp_abstract_base_class_does_not_break_the_submitted_program() {
+        // Revue #246 : la classe abstraite recevait un `push_back(Forme(...))` dans l'aiguillage
+        // généré — « Échec de compilation » sur un exercice d'héritage juste.
+        String code = """
+                class Forme {
+                public:
+                    Forme(double l, double h) : l(l), h(h) {}
+                    virtual double aire() const = 0;
+                    virtual ~Forme() {}
+                protected:
+                    double l, h;
+                };
+
+                class Rectangle : public Forme {
+                public:
+                    Rectangle(double l, double h) : Forme(l, h) {}
+                    double aire() const override { return l * h; }
+                };
+                """;
+        String h = "Rectangle r(3, 4);\nreturn fabs(r.aire() - 12) < 1e-9;";
+        assertThat(note("C++", h, code).passed()).isTrue();
+        assertThat(note("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
+    }
+
+    @Test
+    void helper_named_like_a_builtin_is_graded_when_the_harness_does_not_use_it() {
+        // Revue #246 : le refus « Nom réservé » ne vise plus que le nom que le harnais emploie.
+        String go = "package main\n\nfunc max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n"
+                + "\treturn b\n}\n\nfunc plusGrand(a, b, c int) int { return max(a, max(b, c)) }\n";
+        assertThat(note("Go", "return plusGrand(2, 9, 3) == 9", go).passed()).isTrue();
+        assertThat(note("Go", "return plusGrand(2, 9, 3) == 9", go.replace("a > b", "a < b"))
+                .passed()).isFalse();
+        String c = "int abs(int x) { return x < 0 ? -x : x; }\n"
+                + "int distance(int a, int b) { return abs(a - b); }\n";
+        assertThat(note("C", "return distance(2, 5) == 3;", c).passed()).isTrue();
+        // En C++, la redéfinition heurte <stdlib.h> dans le programme de l'étudiant : le refus
+        // nommé est conservé.
+        assertThat(note("C++", "return distance(2, 5) == 3;", c).detail())
+                .contains("réservé").contains("abs");
+    }
+
+    @Test
+    void java_secondary_class_statics_and_cause_of_a_submitted_exception() {
+        // Revue #246 : les statiques d'une classe secondaire n'étaient déclarées que dans la
+        // classe principale (« cannot find symbol »), et le motif d'une exception du code
+        // soumis se perdait derrière InvocationTargetException.
+        String code = "class Aide {\n    static int carre(int n) { return n * n; }\n}\n"
+                + "class Solution {\n    static int sommeCarres(int a, int b) {"
+                + " return Aide.carre(a) + Aide.carre(b); }\n"
+                + "    static int div(int a, int b) { return a / b; }\n}\n";
+        String h = "return Solution.sommeCarres(3, 4) == 25 && Aide.carre(3) == 9;";
+        assertThat(note("Java", h, code).passed()).isTrue();
+        TestResult r = note("Java", "return Solution.div(1, 0) == 0;", code);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("ArithmeticException");
+    }
+
+    @Test
     void csharp_namespace_helper_nested_class_and_method_named_Double() {
         String h = "return Solution.Double(4) == 8;";
         String code = """

@@ -785,10 +785,11 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         obj_list = supervisor.go_object_api(source)
         self.assertEqual(obj_list, [("Compteur", [("NewCompteur", ["int"], True)],
                                    [("int", "Plus", ["int"])])])
-        # Un récepteur pointeur écarte la capture de champs : l'objet reconstruit à chaque appel
-        # perdrait la modification EN SILENCE.
-        self.assertEqual(supervisor.go_capture_fields(source), {})
+        # Un récepteur pointeur n'écarte plus la capture de champs : la modification de l'objet
+        # est reportée par relecture des champs (test_go_pointer_receiver_keeps_field_capture).
+        self.assertEqual(supervisor.go_capture_fields(source), {"Compteur": [("valeur", "int")]})
         self.assertEqual(supervisor.go_pointer_receivers(source), {"Compteur"})
+        self.assertEqual(supervisor.go_pointer_methods(source), {("Compteur", "Plus")})
         # Et l'objet est stocké par POINTEUR : une méthode à récepteur pointeur ne peut pas être
         # appelée sur le résultat d'une assertion de type, qui n'est pas adressable.
         new_branch, method_branch = supervisor.go_object_dispatch(obj_list, {})
@@ -2214,29 +2215,33 @@ class Review246dTest(unittest.TestCase):
         self.assertIn("Convert.ChangeType(brut, pt,", server)
         self.assertNotIn("Convert.ChangeType(brut, attendus[i].ParameterType", server)
 
-    @unittest.skipUnless(hasattr(os, "chown") and os.geteuid() == 0,
-                         "chown vers l'UID étudiant : root requis (image runner)")
+    @unittest.skipUnless(os.name == "posix", "liens symboliques : POSIX requis")
     def test_go_student_dirs_reset_between_cases(self):
+        # chown SIMULÉ : le vrai exige root, et ce test ne tournait alors nulle part (la CI
+        # lance la suite sous un compte ordinaire). Le propriétaire demandé reste vérifié.
         directory = tempfile.mkdtemp()
         box = supervisor.BOX
         supervisor.BOX = directory
         try:
-            supervisor.reset_go_student_dirs()
-            for name in supervisor.GO_STUDENT_DIRS:
-                with open(os.path.join(directory, name, "plein"), "w") as f:
-                    f.write("x")
-            supervisor.reset_go_student_dirs(keep_cache=True)
-            self.assertEqual(os.listdir(os.path.join(directory, "gopath_etu")), [])
-            self.assertEqual(os.listdir(os.path.join(directory, "gocache_etu")), ["plein"])
-            # Un lien posé par l'étudiant est retiré, jamais suivi.
-            shutil.rmtree(os.path.join(directory, "gopath_etu"))
-            cible = tempfile.mkdtemp()
-            open(os.path.join(cible, "garde"), "w").close()
-            os.symlink(cible, os.path.join(directory, "gopath_etu"))
-            supervisor.reset_go_student_dirs(keep_cache=True)
-            self.assertFalse(os.path.islink(os.path.join(directory, "gopath_etu")))
-            self.assertTrue(os.path.exists(os.path.join(cible, "garde")))
-            shutil.rmtree(cible, ignore_errors=True)
+            with unittest.mock.patch.object(supervisor.os, "chown", create=True) as chown:
+                supervisor.reset_go_student_dirs()
+                for name in supervisor.GO_STUDENT_DIRS:
+                    chown.assert_any_call(os.path.join(directory, name),
+                                          supervisor.STUDENT_UID, supervisor.STUDENT_GID)
+                    with open(os.path.join(directory, name, "plein"), "w") as f:
+                        f.write("x")
+                supervisor.reset_go_student_dirs(keep_cache=True)
+                self.assertEqual(os.listdir(os.path.join(directory, "gopath_etu")), [])
+                self.assertEqual(os.listdir(os.path.join(directory, "gocache_etu")), ["plein"])
+                # Un lien posé par l'étudiant est retiré, jamais suivi.
+                shutil.rmtree(os.path.join(directory, "gopath_etu"))
+                cible = tempfile.mkdtemp()
+                open(os.path.join(cible, "garde"), "w").close()
+                os.symlink(cible, os.path.join(directory, "gopath_etu"))
+                supervisor.reset_go_student_dirs(keep_cache=True)
+                self.assertFalse(os.path.islink(os.path.join(directory, "gopath_etu")))
+                self.assertTrue(os.path.exists(os.path.join(cible, "garde")))
+                shutil.rmtree(cible, ignore_errors=True)
         finally:
             supervisor.BOX = box
             shutil.rmtree(directory, ignore_errors=True)
@@ -2248,6 +2253,270 @@ class Review246dTest(unittest.TestCase):
         main_body = source.split("\ndef main():", 1)[1]
         self.assertNotIn('for _d in ("gocache_etu", "gopath_etu")', main_body)
         self.assertIn('if language == "go":\n', main_body)
+
+
+class Review246eTest(unittest.TestCase):
+    """Revue exhaustive de la PR #246 : réponses justes notées 0 ou accusées à tort."""
+
+    NL = "\n"
+
+    def setUp(self):
+        supervisor.EVENTS.clear()
+
+    # ── Canaris ──────────────────────────────────────────────────────────────────────────
+    def test_frozen_pass_canary_does_not_accuse_when_the_other_is_confirmed(self):
+        # Hôte chargé : le canari « pass » expire ou son noteur est tué, le canari « fail »
+        # échoue normalement, un cas réel passe. Aucune falsification possible ici.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}, {"index": 2}]
+        for frozen in (supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+                       supervisor.CaseOutcome(False, "tue", ran=True, killed=True)):
+            outcomes = {0: frozen,
+                        1: supervisor.CaseOutcome(False, "echoue comme prevu", ran=True),
+                        2: supervisor.CaseOutcome(True, None, ran=True)}
+            self.assertEqual(supervisor.canary_verdict(cases, outcomes), "indetermines")
+            self.assertEqual(supervisor.EVENTS, [])
+
+    def test_frozen_fail_canary_confirms_nothing(self):
+        # Les DEUX canaris gelés, un cas réel vert : le canari « fail » gelé a « échoué », mais
+        # ce n'est pas une confirmation — le gel sélectif reste accusé, tué comme expiré.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}, {"index": 2}]
+        outcomes = {0: supervisor.CaseOutcome(False, "tue", ran=True, killed=True),
+                    1: supervisor.CaseOutcome(False, "expire", ran=True, timed_out=True),
+                    2: supervisor.CaseOutcome(True, None, ran=True)}
+        self.assertEqual(supervisor.canary_verdict(cases, outcomes), "incoherents")
+
+    # ── Go ───────────────────────────────────────────────────────────────────────────────
+    GO_POINTER = ("package main\n\n"
+                  "type Rectangle struct {\n\tlargeur int\n\thauteur int\n}\n\n"
+                  "func (r *Rectangle) aire() int { return r.largeur * r.hauteur }\n"
+                  "func (r *Rectangle) agrandir(k int) int { r.largeur *= k; return r.largeur }\n"
+                  "func (r Rectangle) perimetre() int { return 2 * (r.largeur + r.hauteur) }\n")
+
+    def test_go_pointer_receiver_keeps_field_capture(self):
+        # Question 15 de la démo : le harnais construit par littéral, et l'étudiant a choisi
+        # un récepteur pointeur. « Aucune fonction exploitable » sur une réponse juste.
+        fields = supervisor.go_capture_fields(self.GO_POINTER)
+        obj_list = supervisor.go_object_api(self.GO_POINTER)
+        self.assertEqual([t for t, _, _ in obj_list], ["Rectangle"])
+        pointers = supervisor.go_pointer_methods(self.GO_POINTER)
+        self.assertEqual(pointers, {("Rectangle", "aire"), ("Rectangle", "agrandir")})
+        stub = supervisor.go_object_stub(obj_list, fields, pointers)
+        # Récepteur pointeur conservé, et champs RECOPIÉS après l'appel.
+        self.assertIn("func (o *Rectangle) agrandir(a0 int) int {", stub)
+        self.assertIn('mooditMethode(moodit_h, "Rectangle.#champs"', stub)
+        self.assertIn("o.largeur = int(mooditEntier(mooditIndex(moodit_c, 0)))", stub)
+        self.assertIn("o.hauteur = int(mooditEntier(mooditIndex(moodit_c, 1)))", stub)
+        # Le récepteur valeur garde sa forme : `Rectangle{…}.perimetre()` doit compiler.
+        self.assertIn("func (o Rectangle) perimetre() int {", stub)
+        _, method_branch = supervisor.go_object_dispatch(obj_list, fields)
+        self.assertIn('case "Rectangle.#champs":', method_branch)
+        self.assertIn("valeur = []interface{}{moodit_lu.largeur, moodit_lu.hauteur}", method_branch)
+        # Sans l'information de récepteur, aucune relecture (comportement d'avant).
+        self.assertNotIn("#champs", supervisor.go_object_stub(obj_list, fields))
+
+    def test_go_struct_without_field_is_proxied(self):
+        source = ("package main\n\ntype Calculatrice struct{}\n\n"
+                  "func NewCalculatrice() Calculatrice { return Calculatrice{} }\n"
+                  "func (c *Calculatrice) additionner(a, b int) int { return a + b }\n")
+        fields = supervisor.go_capture_fields(source)
+        self.assertEqual(fields, {"Calculatrice": []})
+        obj_list = supervisor.go_object_api(source)
+        self.assertEqual([t for t, _, _ in obj_list], ["Calculatrice"])
+        stub = supervisor.go_object_stub(obj_list, fields, supervisor.go_pointer_methods(source))
+        # Rien à relire : ni variable inutilisée (refus du compilateur), ni relecture de champs.
+        self.assertIn('_ = mooditChamps("NewCalculatrice"', stub)
+        self.assertNotIn("champs :=", stub)
+        self.assertNotIn("#champs", stub)
+        self.assertIn("func (o *Calculatrice) additionner(a0 int, a1 int) int {", stub)
+        new_branch, method_branch = supervisor.go_object_dispatch(obj_list, fields)
+        self.assertIn("_ = moodit_cree", new_branch)
+        self.assertNotIn("#champs", method_branch)
+        # Un champ non transportable écarte toujours la structure.
+        self.assertEqual(supervisor.go_capture_fields(
+            "type T struct {\n\tm map[string]int\n}\n"), {})
+
+    def test_go_reserved_name_refused_only_when_the_harness_uses_it(self):
+        # `func max` d'aide, que le harnais n'appelle pas : omise du noteur, pas refusée.
+        self.assertEqual(supervisor.go_hidden_names(["max", "plusGrand"],
+                                                    "return plusGrand(2, 3) == 3"),
+                         ([], [], ["max"]))
+        # Le harnais emploie `max` : il ne pourrait plus désigner l'intégrée.
+        self.assertEqual(supervisor.go_hidden_names(["max"], "return max(2, 3) == 3"),
+                         (["max"], [], []))
+        # Le serveur généré a besoin de `len` : refusé même si le harnais ne le nomme pas.
+        self.assertEqual(supervisor.go_hidden_names(["len"], "return f() == 1"),
+                         (["len"], [], []))
+        self.assertEqual(supervisor.go_hidden_names(["math", "strings"],
+                                                    "return math.Abs(f() - 1) < 1e-9"),
+                         ([], ["math"], ["strings"]))
+        methods = [("int", "max", ["int", "int"]), ("int", "f", [])]
+        objects = [("T", [("new", [], False), ("NewT", [], False)], [("int", "m", [])]),
+                   ("clear", [], [("int", "m", [])])]
+        self.assertEqual(supervisor.go_without_hidden(methods, objects, ["max", "new", "clear"]),
+                         ([("int", "f", [])],
+                          [("T", [("NewT", [], False)], [("int", "m", [])])]))
+
+    def test_go_server_predeclared_list_matches_the_generated_server(self):
+        # Tout identifiant prédéclaré dont le serveur généré se sert doit rester refusé.
+        obj_list = [("T", [("NewT", ["int"], True)], [("bool", "m", ["string", "float64"])])]
+        server = supervisor.go_server_source([("int64", "f", ["int"])], obj_list,
+                                             {"T": [("x", "int")]})
+        # Hors chaînes et étiquettes (`json:"error"`, "new") : ce ne sont pas des identifiants.
+        code = supervisor.blank_code(server, backticks=True)
+        used = set(re.findall(r"\w+", code)) & supervisor.GO_PREDECLARED
+        self.assertEqual(used - supervisor.GO_SERVER_PREDECLARED, set())
+
+    def test_harness_mentions_whole_words_only(self):
+        self.assertTrue(supervisor.harness_mentions("return max(1, 2) == 2", "max"))
+        self.assertFalse(supervisor.harness_mentions("return maximum(1, 2) == 2", "max"))
+        self.assertFalse(supervisor.harness_mentions("return le_max(1, 2) == 2", "max"))
+        self.assertFalse(supervisor.harness_mentions(None, "max"))
+        # Dans le doute (chaîne, commentaire), le nom compte comme employé.
+        self.assertTrue(supervisor.harness_mentions('return f() == "max"', "max"))
+
+    # ── C / C++ ──────────────────────────────────────────────────────────────────────────
+    def test_c_probe_plan_is_bounded(self):
+        names = ["f%d" % i for i in range(5000)]
+        plan = supervisor.c_probe_plan(names)
+        self.assertEqual(len(plan), supervisor.C_PROBE_MAX + 1)
+        self.assertEqual([n for group in plan for n in group], names)
+        self.assertEqual(supervisor.c_probe_plan(["a", "b"]), [["a"], ["b"]])
+
+    def test_c_reserved_probes_do_not_grow_with_the_names(self):
+        calls = []
+
+        def fake_run_proc(cmd, *args):
+            calls.append(cmd)
+            return 1, False                    # toute sonde échoue : pire cas
+
+        directory = tempfile.mkdtemp()
+        try:
+            with unittest.mock.patch.object(supervisor, "run_proc", fake_run_proc), \
+                    unittest.mock.patch.object(supervisor, "write_private"):
+                found = supervisor.c_reserved_names(["f%d" % i for i in range(3000)],
+                                                    "g++", "-std=c++17", directory, {})
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        self.assertEqual(len(found), 3000)
+        self.assertEqual(len(calls), supervisor.C_PROBE_MAX + 2)
+
+    def test_cpp_abstract_and_template_classes_are_not_proxied(self):
+        src = self.NL.join([
+            "class Forme {",
+            "public:",
+            "    Forme(double l, double h) : l(l), h(h) {}",
+            "    virtual double aire() const = 0;",
+            "protected:",
+            "    double l, h;",
+            "};",
+            "class Rectangle : public Forme {",
+            "public:",
+            "    Rectangle(double l, double h) : Forme(l, h) {}",
+            "    double aire() const override { return l * h; }",
+            "};",
+            "template <typename T>",
+            "class Boite {",
+            "public:",
+            "    Boite(int n) {}",
+            "    int taille() { return 1; }",
+            "};", ""])
+        obj_list = supervisor.cpp_object_api(supervisor.blank_code(src))
+        self.assertEqual(obj_list, [("Rectangle", [["double", "double"]],
+                                     [("double", "aire", [])])])
+        stacks, _ = supervisor.cpp_object_dispatch(obj_list)
+        self.assertNotIn("Forme", stacks)
+        self.assertNotIn("Boite", stacks)
+
+    def test_cpp_class_without_declared_constructor_gets_the_default_one(self):
+        src = self.NL.join([
+            "class Calculatrice {",
+            "public:",
+            "    int additionner(int a, int b) { return a + b; }",
+            "};",
+            "class Fermee {",
+            "    Fermee() {}",                       # constructeur PRIVÉ : pas de défaut implicite
+            "public:",
+            "    int f() { return 1; }",
+            "};",
+            "class Base {",
+            "public:",
+            "    Base(int n) {}",
+            "    int g() { return 1; }",
+            "};",
+            "class Derivee : public Base {",         # dérivée : `Derivee()` peut ne pas compiler
+            "public:",
+            "    int h() { return 2; }",
+            "};", ""])
+        obj_list = supervisor.cpp_object_api(supervisor.blank_code(src))
+        self.assertEqual(obj_list, [
+            ("Calculatrice", [[]], [("int", "additionner", ["int", "int"])]),
+            ("Base", [["int"]], [("int", "g", [])])])
+        self.assertIn("    Calculatrice() {", supervisor.cpp_object_stub(obj_list))
+        self.assertIn("moodit_objets_Calculatrice.push_back(Calculatrice());",
+                      supervisor.cpp_object_dispatch(obj_list)[1])
+
+    # ── Rust ─────────────────────────────────────────────────────────────────────────────
+    def test_rust_unit_struct_is_proxied(self):
+        for declaration in ("struct Calculatrice;", "struct Calculatrice {}"):
+            src = self.NL.join([
+                declaration,
+                "impl Calculatrice {",
+                "    fn additionner(&self, a: i32, b: i32) -> i32 { a + b }",
+                "}", ""])
+            extraction = supervisor.blank_code(src, rust=True)
+            fields = supervisor.rust_capture_fields(extraction)
+            self.assertEqual(fields, {"Calculatrice": []}, declaration)
+            obj_list = supervisor.rust_object_api(extraction)
+            self.assertEqual([t for t, _, _ in obj_list], ["Calculatrice"], declaration)
+            # Structure unité côté noteur : le harnais écrit `Calculatrice` ou `Calculatrice {}`.
+            self.assertIn("struct Calculatrice;", supervisor.rust_object_stub(obj_list, fields))
+            self.assertIn("moodit_calculatrice.push(Calculatrice {  });",
+                          supervisor.rust_object_dispatch(obj_list, fields)[1])
+        self.assertEqual(supervisor.rust_struct_fields("struct P(i32);\n"), {})
+
+    # ── Java / C# ────────────────────────────────────────────────────────────────────────
+    def test_java_secondary_class_keeps_its_own_statics(self):
+        statics = [("int", "carre", ["int"]), ("int", "sommeCarres", ["int", "int"])]
+        source = supervisor.java_stub_source(
+            "Aide", statics, [("Solution", [[]], [])],
+            class_statics={"Solution": [("int", "sommeCarres", ["int", "int"])]})
+        solution = source.split("final class Solution {", 1)[1]
+        self.assertIn("public static int sommeCarres(int a0, int a1) {", solution)
+        self.assertIn('MooditRpc.integer("%s"' % supervisor.rpc_name("sommeCarres", ["int", "int"]),
+                      solution)
+        # Classe imbriquée : même règle, dans sa coquille.
+        nested = supervisor.java_stub_source(
+            "Solution", [], [("Solution.Outil", [[]], [])],
+            class_statics={"Solution.Outil": [("int", "f", [])]})
+        self.assertIn("        public static int f() {", nested)
+
+    def test_java_flattened_static_does_not_duplicate_an_instance_method(self):
+        source = supervisor.java_stub_source(
+            "Solution", [("int", "calcul", ["int"]), ("int", "autre", [])],
+            self_ctors=[[]], self_instance=[("int", "calcul", ["int"])])
+        self.assertEqual(len(re.findall(r"int calcul\(int a0\)", source)), 1)
+        self.assertIn("public int calcul(int a0) {", source)
+        self.assertIn("public static int autre() {", source)
+
+    def test_java_server_calls_statics_only_and_relays_the_cause(self):
+        server = supervisor.java_server_source(["Solution"])
+        self.assertIn("java.lang.reflect.Modifier.isStatic(m.getModifiers())", server)
+        self.assertIn("t instanceof java.lang.reflect.InvocationTargetException", server)
+        self.assertIn("String.valueOf(cause)", server)
+        self.assertNotIn("String.valueOf(t)", server)
+
+    def test_csharp_static_constructor_does_not_duplicate_the_default_one(self):
+        src = self.NL.join([
+            "class Compteur {",
+            "    static int total;",
+            "    static Compteur() { total = 0; }",
+            "    public Compteur() { }",
+            "    public Compteur(int depart) { }",
+            "    public int Valeur() { return 1; }",
+            "}", ""])
+        extraction = supervisor.cs_canonical_types(supervisor.cs_strip_comments(src))
+        ctors, _ = supervisor.cs_object_api(extraction, "Compteur")
+        self.assertEqual(ctors, [[], ["int"]])
 
 
 class SqliteExecTest(unittest.TestCase):

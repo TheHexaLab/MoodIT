@@ -303,7 +303,16 @@ def canary_verdict(cases, outcomes):
          canari, donc son init()/constructeur global y tourne aussi) ;
       2. un canari dont la COMPILATION a échoué pour une cause NON CONCLUANTE n'accuse jamais,
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
-      3. sinon tout est confirmé → « ok », ou « indetermines » si un canari n'a rien vérifié
+      3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
+         signal) n'accuse que si AUCUN autre canari n'est confirmé de façon CONCLUANTE (il a
+         tourné jusqu'au bout et rendu son attendu). Le canari n'appelle aucune fonction
+         soumise et son noteur tourne sous un autre UID : sur un hôte chargé, il expire
+         (limite d'une seconde possible) ou meurt de l'OOM du cgroup pendant qu'un cas réel
+         passe, et la soumission honnête était accusée. Le code soumis ne distinguant pas le
+         canari « pass » du canari « fail », un gel VOLONTAIRE les gèle tous les deux — et un
+         canari « fail » gelé ne confirme rien : la détection du gel sélectif (les deux
+         canaris gelés, un cas réel vert) est conservée ;
+      4. sinon tout est confirmé → « ok », ou « indetermines » si un canari n'a rien vérifié
          (non imputable, ou non compilé pour une cause non concluante) : on n'accuse pas, mais
          on ne prétend pas non plus avoir tout vérifié.
 
@@ -321,14 +330,22 @@ def canary_verdict(cases, outcomes):
         return "indetermines"
     real_cases = [c for c in cases if not c.get("canary") and not outcomes[c["index"]].skipped]
 
-    confirmed, accusable = [], []
+    confirmed, accusable, doubtful = [], [], []
     for c in judgeable:
         issue = outcomes[c["index"]]
         if issue.ran and issue.passed == (c["canary"] == "pass"):
             confirmed.append(c)                       # CONFIRMÉ
-        elif issue.ran or not inconclusive(issue):
+        elif not inconclusive(issue):
             accusable.append(c)                      # non confirmé, et imputable a priori
+        elif issue.ran:
+            doubtful.append(c)                       # a tourné, mais expiré ou tué — règle 3
         # sinon : compilation échouée pour une cause non concluante — règle 2, jamais d'accusation
+    # Confirmé DE FAÇON CONCLUANTE : un canari « fail » lui-même expiré ou tué a bien « échoué »,
+    # mais il ne prouve rien — c'est exactement ce que produit un gel des deux canaris.
+    solid = [c for c in confirmed if not inconclusive(outcomes[c["index"]])]
+    if not solid:
+        # Aucune confirmation concluante : le gel peut être voulu, la règle 1 s'applique.
+        accusable += doubtful
 
     if accusable:
         # LE critère : l'étudiant y gagne-t-il ? Sans cas réel vert, faire échouer des canaris
@@ -1220,11 +1237,14 @@ def java_class_api(javap_output):
     return binary_name.replace("$", "."), ctors, method_list
 
 
-def java_object_stub(source_name, ctors, method_list):
+def java_object_stub(source_name, ctors, method_list, statics=()):
     """Bouchon d'une classe OBJET : constructeur → poignée, méthodes → appel sur la poignée.
 
     FONCTION PURE (testée). Une classe imbriquée (`Outer.Inner`) est rendue dans sa coquille, pour
-    que le harnais puisse l'écrire exactement comme l'étudiant l'a déclarée."""
+    que le harnais puisse l'écrire exactement comme l'étudiant l'a déclarée. `statics` : les
+    méthodes statiques de CETTE classe, que le harnais appelle par son nom (`Aide.carre(3)`) —
+    aplaties dans la seule classe principale, elles y étaient introuvables (« cannot find
+    symbol » sur une réponse juste)."""
     simple = source_name.split(".")[-1]
     body = ["    public static final class " + simple + " {",
              "        private final int __h;"]
@@ -1241,6 +1261,13 @@ def java_object_stub(source_name, ctors, method_list):
         body += ["        public %s %s(%s) {" % (ret, ident, params),
                   "            return MooditRpc.%s(__h, \"%s\", new Object[]{%s});"
                   % ("m" + JSON_TYPES[ret].lower(), rpc_name(ident, types), args),
+                  "        }"]
+    for ret, ident, types in statics:
+        params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
+        args = ", ".join("a%d" % i for i in range(len(types)))
+        body += ["        public static %s %s(%s) {" % (ret, ident, params),
+                  "            return MooditRpc.%s(\"%s\", new Object[]{%s});"
+                  % (JAVA_RPC_FN[JSON_TYPES[ret]], rpc_name(ident, types), args),
                   "        }"]
     body.append("    }")
     return "\n".join(body)
@@ -1278,13 +1305,16 @@ def dedupe_signatures(signatures):
     return result
 
 
-def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instance=()):
+def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instance=(),
+                     class_statics=None):
     """Classe-BOUCHON compilée avec le harnais : mêmes signatures, corps = appel RPC.
 
     FONCTION PURE (testée). Le harnais du prof compile contre elle sans rien savoir ; aucune
     ligne de code étudiant n'entre dans ce programme. `objects` apporte les classes IMBRIQUÉES
     proxifiées par poignée, pour que `new Solution.Rectangle(3, 4).aire()` s'écrive naturellement
-    alors que l'objet vit, lui, dans le processus de l'étudiant."""
+    alors que l'objet vit, lui, dans le processus de l'étudiant. `class_statics` ({classe:
+    [statiques]}) donne à chaque classe secondaire ses propres méthodes statiques."""
+    class_statics = class_statics or {}
     src_lines = ["public final class " + class_name + " {"]
     if self_ctors and self_instance:
         # La classe de premier niveau EST l'objet : c'est le cas d'une question POO dont la
@@ -1308,12 +1338,19 @@ def java_stub_source(class_name, methods, objects=(), self_ctors=(), self_instan
         src_lines.append("    private " + class_name + "() {}")
     top_level = []
     for source_name, ctors, instance in objects:
+        statics = class_statics.get(source_name, ())
         if "." in source_name:
             # Classe IMBRIQUEE (Solution.Rectangle) : dans sa coquille, comme l'etudiant l'a ecrite.
-            src_lines.append(java_object_stub(source_name, ctors, instance))
+            src_lines.append(java_object_stub(source_name, ctors, instance, statics))
         else:
-            top_level.append(java_object_stub(source_name, ctors, instance))
+            top_level.append(java_object_stub(source_name, ctors, instance, statics))
+    # Une statique d'une AUTRE classe, aplatie ici, peut porter la signature d'une methode
+    # d'instance de la classe principale : deux membres identiques (« already defined ») sur
+    # une reponse juste. Elle reste appelable par sa propre classe (class_statics).
+    own = {(ident, tuple(types)) for _, ident, types in (self_instance if self_ctors else ())}
     for ret, ident, types in methods:
+        if (ident, tuple(types)) in own:
+            continue
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
         src_lines += ["    public static %s %s(%s) {" % (ret, ident, params),
@@ -1588,8 +1625,15 @@ public final class MooditServer {
                 // consommée, les deux processus s'attendaient, et le cas consommait tout son temps
                 // limite pour rendre « Interrompu » au lieu du vrai motif. Les cinq autres
                 // langages tenaient déjà cet invariant.
+                // La CAUSE, pas l'enveloppe de la reflexion : `InvocationTargetException` seule
+                // ne disait rien au prof, alors que `ArithmeticException: / by zero` designe
+                // la faute du code soumis.
+                Throwable cause = t;
+                if (t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null) {
+                    cause = t.getCause();
+                }
                 reponse = "{\\"ok\\":false,\\"id\\":\\"" + entre(ligne, "\\"id\\":\\"", "\\"")
-                        + "\\",\\"error\\":\\"" + String.valueOf(t).replace('"', '\\'') + "\\"}";
+                        + "\\",\\"error\\":\\"" + String.valueOf(cause).replace('"', '\\'') + "\\"}";
             }
             // « Contrat du canal de réponse » (docker/runners/README.md) : referme une
             // éventuelle ligne partielle écrite par le code soumis, qui sinon se collait à
@@ -1618,7 +1662,10 @@ public final class MooditServer {
         // bouchon puis introuvable ici, et une reponse juste etait notee 0.
         for (String __c : new String[] {__CLASSES__}) {
             for (Method m : Class.forName(__c).getDeclaredMethods()) {
-                if (m.getName().equals(nom) && signe(m.getParameterTypes(), appel, args.length)) {
+                // STATIQUE exigee : une methode d'instance de meme signature dans une autre
+                // classe etait retenue la premiere, et son invocation sans objet levait.
+                if (m.getName().equals(nom) && java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        && signe(m.getParameterTypes(), appel, args.length)) {
                     cible = m;
                     break;
                 }
@@ -1820,6 +1867,46 @@ def go_harness_package_names(names):
     return [n for n in dict.fromkeys(names) if n in GO_HARNESS_PACKAGES]
 
 
+def harness_mentions(harness_code, name):
+    """Le harnais emploie-t-il ce nom ? FONCTION PURE (testée).
+
+    Recherche du MOT dans le texte BRUT du harnais, chaînes et commentaires compris : dans le
+    doute, le nom compte comme employé, et la règle la plus stricte s'applique."""
+    return re.search(r"(?<!\w)%s(?!\w)" % re.escape(name), harness_code or "") is not None
+
+
+# Identifiants prédéclarés dont le SERVEUR généré (compilé dans le paquet de l'étudiant) se
+# sert : une déclaration soumise du même nom l'empêcherait de compiler, harnais ou pas.
+GO_SERVER_PREDECLARED = frozenset("""
+    append bool false float64 int int64 len nil panic recover string true
+""".split())
+
+
+def go_hidden_names(names, harness_code):
+    """Noms soumis qui masquent un identifiant prédéclaré ou un paquet du harnais.
+    FONCTION PURE (testée). Rend (réservés à refuser, paquets à refuser, noms à omettre).
+
+    Refusé : le nom que le HARNAIS emploie (il ne pourrait plus désigner l'intégré) ou dont le
+    serveur généré a besoin. Omis du noteur, sans refus : le nom que le harnais n'emploie pas —
+    son bouchon ne servirait à rien et masquerait l'intégré dans le code généré du noteur."""
+    reserved = go_reserved_names(names)
+    packages = go_harness_package_names(names)
+    refused = [n for n in reserved
+               if n in GO_SERVER_PREDECLARED or harness_mentions(harness_code, n)]
+    refused_packages = [n for n in packages if harness_mentions(harness_code, n)]
+    hidden = [n for n in reserved + packages if n not in refused + refused_packages]
+    return refused, refused_packages, hidden
+
+
+def go_without_hidden(methods, obj_list, hidden):
+    """API du NOTEUR sans les noms à omettre (cf. go_hidden_names). FONCTION PURE (testée)."""
+    hidden = set(hidden)
+    kept_methods = [m for m in methods if m[1] not in hidden]
+    kept_objects = [(typ, [c for c in ctors if c[0] not in hidden], method_list)
+                    for typ, ctors, method_list in obj_list if typ not in hidden]
+    return kept_methods, kept_objects
+
+
 def go_signatures(source):
     """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])].
 
@@ -1963,31 +2050,49 @@ def go_struct_fields(source):
                 entries.append((ident, pieces[-1]))
             if entries is None:
                 break
-        if entries:
+        # Une structure SANS CHAMP (`type Calculatrice struct{}`) est capturable aussi : son
+        # littéral `Calculatrice{}` est la seule façon de la construire, et l'écarter rendait
+        # la question impossible à noter (« Aucune fonction exploitable »).
+        if entries is not None:
             field_list[typ] = entries
     return field_list
 
 
 def go_pointer_receivers(source):
-    """Types dont au moins une méthode a un RÉCEPTEUR POINTEUR. FONCTION PURE (testée).
-
-    Une telle méthode peut modifier l'objet. La capture de champs reconstruisant l'objet à chaque
-    appel, la modification serait perdue EN SILENCE (verdict faux sans diagnostic) : ces types
-    passent donc par la poignée d'un constructeur, ou ne sont pas proxifiés du tout."""
+    """Types dont au moins une méthode a un RÉCEPTEUR POINTEUR. FONCTION PURE (testée)."""
     return {receiver for star, receiver, _, _, _ in GO_METHOD.findall(source or "") if star}
 
 
+def go_pointer_methods(source):
+    """Méthodes à RÉCEPTEUR POINTEUR → {(type, méthode)}. FONCTION PURE (testée).
+
+    Une telle méthode peut modifier l'objet. La capture de champs reconstruit l'objet chez
+    l'étudiant à chaque appel : le bouchon d'une méthode à récepteur pointeur RELIT donc les
+    champs après l'appel et les recopie dans l'objet du harnais (cf. go_object_stub), sans quoi
+    la modification serait perdue EN SILENCE."""
+    return {(receiver, ident)
+            for star, receiver, ident, _, _ in GO_METHOD.findall(source or "") if star}
+
+
 def go_capture_fields(source):
-    """Champs CAPTURABLES : ceux des structures sans méthode à récepteur pointeur. PURE (testée).
+    """Champs CAPTURABLES : ceux des structures aux champs tous marshalables. PURE (testée).
 
     Décision prise ICI et nulle part ailleurs : bouchon, aiguillage et lecture d'API doivent
-    s'accorder, sinon un type est miroité d'un côté et traité par poignée de l'autre."""
-    mutants = go_pointer_receivers(source)
-    return {t: f for t, f in go_struct_fields(source).items() if t not in mutants}
+    s'accorder, sinon un type est miroité d'un côté et traité par poignée de l'autre.
+
+    Un récepteur pointeur n'écarte PLUS la capture : c'est l'étudiant qui choisit son récepteur,
+    et `func (r *Rectangle) aire() int` — réponse juste à un harnais qui construit par littéral —
+    était notée 0 (« Aucune fonction exploitable »). La modification éventuelle de l'objet est
+    reportée par relecture des champs (go_pointer_methods)."""
+    return go_struct_fields(source)
 
 
-def go_object_stub(obj_list, field_list=None):
+def go_object_stub(obj_list, field_list=None, pointer_methods=None):
     """Bouchons OBJET Go : littéral à champs capturés ou poignée, et méthodes relayées.
+
+    `pointer_methods` ({(type, méthode)}, cf. go_pointer_methods) : en capture de champs, ces
+    méthodes gardent leur récepteur POINTEUR et recopient dans l'objet du harnais les champs
+    relus chez l'étudiant après l'appel.
 
     FONCTION PURE (testée). Quand tous les champs sont marshalables, le bouchon les MIROITE :
     le harnais écrit son littéral habituel, et la méthode construit l'objet CHEZ l'étudiant au
@@ -1995,6 +2100,7 @@ def go_object_stub(obj_list, field_list=None):
     chez l'étudiant et le bouchon RELIT les champs du résultat, ce qui garde la valeur simple et
     autorise aussi bien `NewRectangle(3, 4)` que le littéral. Sinon : poignée du constructeur."""
     field_list = field_list or {}
+    pointer_methods = pointer_methods or frozenset()
     pieces = []
     for typ, ctors, method_list in obj_list:
         if typ in field_list:
@@ -2009,21 +2115,40 @@ def go_object_stub(obj_list, field_list=None):
                 # Le constructeur garde SA signature ici aussi : la branche à poignée le faisait
                 # déjà, pas celle-ci, et un harnais qui rangeait le résultat dans un *T (ou le
                 # comparait à nil) ne compilait que d'un côté.
+                # Sans champ, rien à relire : une variable `champs` inutilisée ferait refuser
+                # le noteur par le compilateur Go.
                 pieces.append('''func %s(%s) %s%s {
-    champs := mooditChamps("%s", []interface{}{%s})
+    %s mooditChamps("%s", []interface{}{%s})
     return %s%s{%s}
-}''' % (ident, params, "*" if pointer else "", typ, ident, args,
+}''' % (ident, params, "*" if pointer else "", typ,
+        "champs :=" if field_list[typ] else "_ =", ident, args,
         "&" if pointer else "", typ, reads))
             vals = ", ".join("o.%s" % n for n, _ in field_list[typ])
             for ret, ident, types in method_list:
                 params = ", ".join("a%d %s" % (i, t) for i, t in enumerate(types))
                 args = ", ".join("a%d" % i for i in range(len(types)))
+                pointer = (typ, ident) in pointer_methods
+                if pointer and field_list[typ]:
+                    # Récepteur POINTEUR : la méthode peut modifier l'objet. On relit ses champs
+                    # chez l'étudiant APRÈS l'appel, et on les recopie dans l'objet du harnais.
+                    writes = "\n".join(
+                        "    o.%s = %s" % (n, GO_CONV[t] % ("mooditIndex(moodit_c, %d)" % i))
+                        for i, (n, t) in enumerate(field_list[typ]))
+                    pieces.append('''func (o *%s) %s(%s) %s {
+    moodit_h := int(mooditEntier(mooditNouvelle("%s", []interface{}{%s})))
+    moodit_v := mooditMethode(moodit_h, "%s.%s", []interface{}{%s})
+    moodit_c, _ := mooditMethode(moodit_h, "%s.#champs", []interface{}{}).([]interface{})
+%s
+    return %s
+}''' % (typ, ident, params, ret, typ, vals, typ, ident, args, typ, writes,
+        GO_CONV[ret] % "moodit_v"))
+                    continue
                 conv = GO_CONV[ret] % (
                     'mooditMethode(int(mooditEntier(mooditNouvelle("%s", []interface{}{%s}))), '
                     '"%s.%s", []interface{}{%s})' % (typ, vals, typ, ident, args))
-                pieces.append('''func (o %s) %s(%s) %s {
+                pieces.append('''func (o %s%s) %s(%s) %s {
     return %s
-}''' % (typ, ident, params, ret, conv))
+}''' % ("*" if pointer else "", typ, ident, params, ret, conv))
             continue
         pieces.append("type %s struct {\n    __h int\n}" % typ)
         for ident, types, pointer in ctors:
@@ -2068,8 +2193,17 @@ def go_object_dispatch(obj_list, field_list=None):
                 return_fields = ", ".join("moodit_cree.%s" % n for n, _ in field_list[typ])
                 new_branch.append('        case "%s":\n'
                                '            moodit_cree := %s(%s)\n'
+                               '            _ = moodit_cree\n'
                                '            valeur = []interface{}{%s}'
                                % (ident, ident, args, return_fields))
+            # Relecture des champs après une méthode à récepteur pointeur (cf. go_object_stub).
+            # `#` ne peut pas figurer dans un nom de méthode : aucune collision possible.
+            if field_list[typ]:
+                method_branch.append(
+                    '        case "%s.#champs":\n'
+                    '            moodit_lu := mooditObjets[req.Handle].(*%s)\n'
+                    '            valeur = []interface{}{%s}'
+                    % (typ, typ, ", ".join("moodit_lu.%s" % n for n, _ in field_list[typ])))
         else:
             # On garde un POINTEUR vers l'objet : une méthode à récepteur pointeur — l'idiome le
             # plus répandu — ne peut pas être appelée sur le résultat d'une assertion de type,
@@ -2092,7 +2226,8 @@ def go_object_dispatch(obj_list, field_list=None):
     return "\n".join(new_branch), "\n".join(method_branch)
 
 
-def go_grader_source(methods, harness_code, nonce, obj_list=(), field_list=None):
+def go_grader_source(methods, harness_code, nonce, obj_list=(), field_list=None,
+                     pointer_methods=None):
     """Programme NOTEUR Go : bouchons typés + harnais booléen du prof + nonce. PURE (testée)."""
     stubs = []
     for ret, ident, types in methods:
@@ -2254,7 +2389,8 @@ func main() {
     }
     os.Exit(1)
 }
-''', GO_GRADER_ALIASED) % (GO_RPC_RUNTIME, "\n\n".join(stubs), go_object_stub(obj_list, field_list),
+''', GO_GRADER_ALIASED) % (GO_RPC_RUNTIME, "\n\n".join(stubs),
+                           go_object_stub(obj_list, field_list, pointer_methods),
        "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
        nonce)
 
@@ -2583,6 +2719,10 @@ def c_signatures(source, cpp=False):
 
 CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
 CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
+# `template <...>` qui PRECEDE immediatement une declaration de classe (fin du texte avant elle).
+CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<[^{};]*>\s*\Z")
+# Methode virtuelle PURE : `= 0;` apres la parenthese fermante (et ses qualificatifs).
+CPP_PURE_VIRTUAL = re.compile(r"\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?=\s*0\s*;")
 
 
 def cpp_object_api(source):
@@ -2599,14 +2739,25 @@ def cpp_object_api(source):
         # compilait plus. Elle n'est pas proxifiee (ni ses membres pris pour ceux de A).
         if any(d < klass.start() < f for d, f in spans):
             continue
+        # Classe TEMPLATE (`template <typename T>` sur la ligne precedente) : `std::vector<K>`
+        # sans argument de template ne compile pas. Non proxifiee, comme les generiques en C#.
+        if CPP_TEMPLATE_HEAD.search(src_text[:klass.start()]):
+            continue
         try:
             begin = src_text.index("{", klass.start())
         except ValueError:
             continue
         finish = block_end(src_text, begin)
         body = src_text[begin + 1:finish]
+        # Classe ABSTRAITE (une methode virtuelle pure) : elle ne s'instancie pas, et le
+        # `push_back(K(...))` de l'aiguillage faisait refuser tout le programme de l'etudiant
+        # (« Echec de compilation » sur un exercice d'heritage juste). Ses classes derivees,
+        # elles, restent proxifiees.
+        if CPP_PURE_VIRTUAL.search(body):
+            continue
         public = src_text[klass.start():begin].lstrip().startswith("struct")
         ctors, method_list = [], []
+        declares_ctor = False
         depths = _closings(src_text)[0]
         level = depths[begin] + 1
         position = begin + 1
@@ -2623,7 +2774,11 @@ def cpp_object_api(source):
                 bare_line = bare_line[len("public:"):].strip()
             elif bare_line.startswith("private:") or bare_line.startswith("protected:"):
                 public = False
-                continue
+                bare_line = bare_line.split(":", 1)[1].strip()
+            # Un constructeur DECLARE, meme prive ou non transportable, retire le constructeur
+            # par defaut implicite (voir plus bas).
+            if re.match(re.escape(class_ident) + r"\s*\(", CPP_QUALIF.sub("", bare_line)):
+                declares_ctor = True
             if not public or not bare_line:
                 continue
             # Qualificatifs sans effet sur la signature vue de l'appelant.
@@ -2639,6 +2794,12 @@ def cpp_object_api(source):
                 types = _c_param_types(meth.group(3))
                 if types is not None:
                     method_list.append((meth.group(1), meth.group(2), types))
+        # AUCUN constructeur declare : C++ fournit le constructeur par defaut, comme Java et
+        # C#. Sans lui, `Calculatrice c; c.additionner(2, 3)` n'etait pas notable. Pas pour une
+        # classe DERIVEE : sa construction par defaut depend de celle de sa base, et un `K()`
+        # genere qui ne compile pas casserait le programme de l'etudiant.
+        if not declares_ctor and ":" not in src_text[klass.end():begin]:
+            ctors = [[]]
         if ctors and method_list:
             result.append((class_ident, ctors, method_list))
     return result
@@ -2834,7 +2995,9 @@ def c_reserved_names(names, compiler, std, case_dir, env):
     (sonde -fsyntax-only, root).
 
     Une seule compilation dans le cas courant (aucun nom reserve) ; en cas d'echec, une sonde
-    par nom pour nommer les fautifs dans le message."""
+    par nom pour nommer les fautifs dans le message — C_PROBE_MAX au plus, le reste en UNE
+    sonde groupee (cf. c_probe_plan) : le nombre de compilations est borne quel que soit le
+    nombre de noms."""
     names = list(dict.fromkeys(names))
     impl = c_implementation_reserved(names)
     names = [n for n in names if n not in impl]
@@ -2850,7 +3013,24 @@ def c_reserved_names(names, compiler, std, case_dir, env):
 
     if not names or compiles(names):
         return impl
-    return impl + [n for n in names if not compiles([n])]
+    return impl + [n for group in c_probe_plan(names) if not compiles(group) for n in group]
+
+
+# Sondes INDIVIDUELLES au plus, apres l'echec de la sonde groupee.
+C_PROBE_MAX = 8
+
+
+def c_probe_plan(names):
+    """Groupes a sonder apres l'echec de la sonde groupee. FONCTION PURE (testee).
+
+    Les C_PROBE_MAX premiers noms un par un, puis tous les autres en UN groupe : au plus
+    C_PROBE_MAX + 1 compilations. Un groupe refuse est rapporte en entier — au-dela de la
+    borne, le message nomme donc les candidats, plus forcement le seul fautif."""
+    names = list(names)
+    groups = [[n] for n in names[:C_PROBE_MAX]]
+    if len(names) > C_PROBE_MAX:
+        groups.append(names[C_PROBE_MAX:])
+    return groups
 
 
 def reserved_name_message(names, origin):
@@ -3082,6 +3262,7 @@ def rust_object_api(source):
 
 
 RUST_STRUCT_BODY = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*\{([^{}]*)\}", re.M | re.S)
+RUST_UNIT_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*;", re.M)
 
 
 def rust_struct_fields(source):
@@ -3108,8 +3289,13 @@ def rust_struct_fields(source):
                 entries = None
                 break
             entries.append((ident, type_))
-        if entries:
+        # Structure SANS CHAMP (`struct Calculatrice {}`) : capturable aussi, cf. plus bas.
+        if entries is not None:
             field_list[typ] = entries
+    # Structure UNITE (`struct Calculatrice;`) : sans elle, un type sans champ ni fonction
+    # constructrice n'etait pas proxifie, et la question n'etait pas notable.
+    for typ in RUST_UNIT_STRUCT.findall(source or ""):
+        field_list.setdefault(typ, [])
     return field_list
 
 
@@ -3153,8 +3339,11 @@ def rust_object_stub(obj_list, field_list=None):
     pieces = []
     for typ, ctors, method_list in obj_list:
         if typ in field_list:
-            declaration = "struct %s {\n%s\n}" % (
+            # Sans champ : structure UNITE, que le harnais peut écrire `T` comme `T {}` — les
+            # deux formes sont valides pour elle, quelle que soit celle de l'étudiant.
+            declaration = ("struct %s {\n%s\n}" % (
                 typ, "\n".join("    %s: %s," % (n, t) for n, t in field_list[typ]))
+                if field_list[typ] else "struct %s;" % typ)
             # Les champs suivent la MÊME sérialisation que les arguments : le lecteur d'en face
             # déhexe, donc un champ String envoyé en clair revenait mutilé (une valeur commençant
             # par « H » surtout), et une réponse juste était notée fausse.
@@ -3910,7 +4099,10 @@ def cs_object_api(source, klass):
     # vaudrait que pour le debut du fichier — aucun constructeur ne serait trouve.
     for params in re.findall(CS_CTOR_TPL % re.escape(klass), source or "", re.M):
         types = param_types_of(params)
-        if types is not None:
+        # Une SEULE fois par liste de types : le gabarit lit aussi le constructeur STATIQUE
+        # (`static Compteur()`), qui doublait `public Compteur()` — deux constructeurs sans
+        # parametre dans le bouchon, que mcs refusait (CS0111) sur une reponse juste.
+        if types is not None and types not in ctors:
             ctors.append(types)
     # AUCUN constructeur declare : C# fournit le constructeur par defaut, comme Java.
     # Seulement pour une classe DECLAREE dans le code soumis.
@@ -4340,6 +4532,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     method_list = java_signatures(javap)
     # Une déclaration de classe par bloc : on les sépare pour lire l'API objet de chacune.
     obj_list = []
+    class_statics = {}
     own_ctors, own_instance = (), ()
     for block in re.split(r"(?=^Compiled from )", javap, flags=re.M):
         source_name, ctors, instance = java_class_api(block)
@@ -4351,6 +4544,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
             own_ctors, own_instance = ctors, instance
         else:
             obj_list.append((source_name, ctors, instance))
+            class_statics[source_name] = java_signatures(block)
     if expired or code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
         return None, ("Aucune méthode statique ni objet exploitable dans la classe "
                       + klass + " (types acceptés : int, long, double, boolean, String).")
@@ -4373,7 +4567,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                          "est" if len(shadowed) == 1 else "sont",
                          "" if len(shadowed) == 1 else "s"))
     write_private(os.path.join(grader_src, klass + ".java"),
-                 java_stub_source(klass, method_list, obj_list, own_ctors, own_instance))
+                 java_stub_source(klass, method_list, obj_list, own_ctors, own_instance,
+                                  class_statics))
     write_private(os.path.join(grader_src, "MooditGrader.java"),
                  java_grader_source(harness, TOKENS.get(case_index) or ""))
     code, expired = run_proc(["javac", "-encoding", "UTF-8", "-d", grader_classes,
@@ -4439,7 +4634,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     passed, detail = rpc_verdict(TOKENS.get(case_index) or "", g_err, s_err)
     # Noteur MORT PAR SIGNAL (OOM...) : cause NON CONCLUANTE. Sans ce marquage, un canari
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
-    # accuser de falsification une soumission dont un vrai cas avait reussi.
+    # accuser de falsification une soumission dont un vrai cas avait reussi (regle 3 de
+    # canary_verdict : il n'accuse plus tant que l'autre canari est confirme).
     grader_dead = grader_killed(code, passed)
     return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
@@ -4642,10 +4838,25 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
     harness = harness_rpc_body(case_dir) or ""
+    # Le noteur ne recoit que les bouchons que le HARNAIS EMPLOIE : un bouchon que le harnais
+    # ne nomme pas ne sert a rien, et son #define y detournerait un outil de la bibliotheque.
+    # En C, une fonction d'aide `abs` que le harnais n'appelle pas n'est donc plus refusee
+    # (0 sur une reponse juste). Le nombre de sondes, lui, est borne par c_probe_plan : des
+    # milliers de fonctions soumises tenaient le conteneur jusqu'au mur.
+    grader_methods = [m for m in method_list if harness_mentions(harness, m[1])]
     # Refus AVANT toute compilation : une fonction soumise au nom d'une fonction ou d'une macro
     # de la bibliotheque standard fournie au harnais (fabs, sqrt, isnan, abs, true…) prendrait
     # sa place dans le harnais (voir c_grader_source).
-    reserved = c_reserved_names([ident for _, ident, _ in method_list], compiler, std, case_dir, env)
+    # En C++, TOUS les noms restent sondes : le serveur genere inclut <stdlib.h> apres le code
+    # soumis, et une `int abs(int)` de liaison C++ y heurte la declaration de liaison C (essai
+    # dans l'image : « conflicting declaration with 'C' linkage »). Mieux vaut ce refus nomme
+    # qu'un echec de compilation sur un en-tete. En C, la redefinition est admise.
+    probed = method_list if ext == "cpp" else grader_methods
+    # Les noms reserves a l'IMPLEMENTATION (`__x`, `_X`) restent refuses pour TOUTE fonction
+    # soumise, harnais ou pas : controle textuel, sans compilation.
+    reserved = c_implementation_reserved([ident for _, ident, _ in method_list])
+    reserved += [n for n in c_reserved_names([ident for _, ident, _ in probed], compiler, std,
+                                             case_dir, env) if n not in reserved]
     if reserved:
         return None, reserved_name_message(
             reserved, "la bibliothèque standard (math.h, stdbool.h, stdio.h, stdlib.h, string.h)")
@@ -4657,7 +4868,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     with open(student_src, "w", encoding="utf-8") as f:
         f.write(c_server_source(method_list, student_source, cpp=(ext == "cpp"), obj_list=obj_list))
     set_owner_mode(student_src, STUDENT_UID, STUDENT_GID, 0o600)
-    write_private(grader_src, c_grader_source(method_list, harness, TOKENS.get(case_index) or "",
+    write_private(grader_src, c_grader_source(grader_methods, harness, TOKENS.get(case_index) or "",
                                           cpp=(ext == "cpp"), obj_list=obj_list))
     student_bin = os.path.join(build_area, "etu_bin")
     grader_bin = os.path.join(case_dir, "noteur_bin")
@@ -4716,16 +4927,18 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     # Meme chose pour les NOMS DE TYPE et les CONSTRUCTEURS de l'API objet, eux aussi declares
     # au niveau du paquet du noteur (`type string struct{}`, `func recover() *T`). Les methodes,
     # rattachees a leur type, ne masquent rien.
-    reserved = go_reserved_names([ident for _, ident, _ in method_list]
-                                 + [name for type_name, ctors, _ in obj_list
-                                    for name in [type_name] + [c[0] for c in ctors]])
+    # Refus SEULEMENT si le harnais emploie le nom (ou si le serveur genere en a besoin) : une
+    # fonction d'aide `max` que le harnais ne nomme pas ne detourne rien, et la refuser mettait
+    # 0 a une reponse juste. Son bouchon est simplement omis du noteur (go_hidden_names).
+    submitted = ([ident for _, ident, _ in method_list]
+                 + [name for type_name, ctors, _ in obj_list
+                    for name in [type_name] + [c[0] for c in ctors]])
+    reserved, packages, hidden = go_hidden_names(submitted, harness)
     if reserved:
         return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
-    packages = go_harness_package_names([ident for _, ident, _ in method_list]
-                                        + [name for type_name, ctors, _ in obj_list
-                                           for name in [type_name] + [c[0] for c in ctors]])
     if packages:
         return None, reserved_name_message(packages, "un paquet Go importé pour le harnais")
+    grader_methods, grader_objects = go_without_hidden(method_list, obj_list, hidden)
 
     # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI
     # présent dans l'arborescence que son processus peut lire.
@@ -4737,7 +4950,8 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         f.write(go_server_source(method_list, obj_list, field_list))
     write_private(os.path.join(grader_src_dir, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
     write_private(os.path.join(grader_src_dir, "noteur.go"),
-                 go_grader_source(method_list, harness, TOKENS.get(case_index) or "", obj_list, field_list))
+                 go_grader_source(grader_methods, harness, TOKENS.get(case_index) or "",
+                                  grader_objects, field_list, go_pointer_methods(extraction)))
     os.chmod(grader_src_dir, 0o700)
 
     # Le module ETUDIANT lui appartient, et son build tourne sous SON UID avec CGO coupe : en
