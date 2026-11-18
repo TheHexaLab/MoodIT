@@ -1,26 +1,31 @@
--- #116 — Harnais des langages COMPILÉS : retour au CORPS QUI RENVOIE UN BOOLÉEN, parce que
--- c'est la seule forme que l'on sait noter SANS QUE L'ÉTUDIANT PUISSE FALSIFIER SON RÉSULTAT.
+-- #116 — Gabarits de l'éditeur alignés sur les conteneurs runner (retrait de Piston).
 --
--- Pourquoi ce retour en arrière apparent. V7 avait fait du harnais un VRAI test du framework
--- (JUnit, NUnit, go test, cargo test, moodit_check.h), compilé AVEC le code de l'étudiant. C'est
--- ergonomique, mais structurellement falsifiable : le code noté partage le processus qui détient
--- le secret et calcule le verdict. Cinq canaux de forge ont été démontrés contre cette forme —
--- lecture de l'artefact compilé, détournement du flux de sortie, interposition de printf, dup2,
--- et lecture de sa propre mémoire. Chaque correctif fermait un canal ; il en restait toujours un.
+-- 1. L'en-tête « Sandbox : … » des codes de départ décrit l'environnement réel d'exécution
+--    (audité, pas deviné). Les runtimes viennent désormais des images moodit-runner-*
+--    (docker/runners/) : Node 22 (images node:22) remplace le Node 20 de Piston pour JavaScript
+--    et TypeScript.
 --
--- Le harnais BOOLÉEN, lui, est noté par le modèle à DEUX PROCESSUS et DEUX UID (superviseur :
--- run_java_rpc, run_go_rpc, run_c_rpc, run_rust_rpc, run_csharp_rpc) : le harnais et le nonce
--- vivent dans un programme séparé, l'étudiant n'est qu'un répondeur. Il ne peut ni lire ni
--- modifier le harnais, ni forger son résultat — non parce qu'on le détecte, mais parce qu'il n'y
--- a plus rien à attaquer chez lui. L'appel de fonction et la POO restent naturels : les objets
--- sont proxifiés par POIGNÉE (l'instance vit chez l'étudiant).
+-- 2. Harnais des langages COMPILÉS : un CORPS QUI RENVOIE UN BOOLÉEN, seule forme que l'on sait
+--    noter SANS QUE L'ÉTUDIANT PUISSE FALSIFIER SON RÉSULTAT. Il est noté par le modèle à DEUX
+--    PROCESSUS et DEUX UID (superviseur : run_java_rpc, run_go_rpc, run_c_rpc, run_rust_rpc,
+--    run_csharp_rpc) : le harnais et le nonce vivent dans un programme séparé, l'étudiant n'est
+--    qu'un répondeur. Il ne peut ni lire ni modifier le harnais, ni forger son résultat — non
+--    parce qu'on le détecte, mais parce qu'il n'y a plus rien à attaquer chez lui. L'appel de
+--    fonction et la POO restent naturels : les objets sont proxifiés par POIGNÉE (l'instance
+--    vit chez l'étudiant).
 --
--- Portée : seuls les GABARITS changent (questions futures). Le format framework a ensuite été
--- RETIRÉ dans cette même PR : il n'avait jamais été déployé (main était à V3), donc aucune
--- question existante n'en dépendait, et le garder laissait un prof choisir sans le savoir un
--- chemin dont le verdict était contournable. Un harnais qui en porte le marqueur est désormais
--- refusé avec un diagnostic, et le corps booléen est la seule forme notée.
--- V7 étant ajoutée par cette même PR, on corrige par UPDATE (Flyway forward-only).
+--    Un vrai test du framework (JUnit, NUnit, go test, cargo test), compilé AVEC le code de
+--    l'étudiant, a été essayé pendant #116 puis écarté : le code noté partageait le processus
+--    qui détient le secret et calcule le verdict, et plusieurs canaux de forge ont été démontrés.
+--    Un harnais qui en porte le marqueur est refusé avec un diagnostic.
+--
+--    Seuls les GABARITS changent (questions futures). Les questions compilées déjà en base sont
+--    à rejouer contre ce noteur avant d'être soumises (deploy/check-compiled-harnesses.py, cf.
+--    deploy/DEPLOY.md). V2 étant fusionnée, on corrige par UPDATE (Flyway forward-only).
+UPDATE Language SET start_code_template =
+    replace(start_code_template, 'Node.js 20', 'Node.js 22')
+WHERE name IN ('JavaScript', 'TypeScript');
+
 UPDATE Language SET harness_template = ht.tpl
 FROM (VALUES
     ('Java', $hc$// HARNAIS (Java) — un corps qui RENVOIE UN BOOLÉEN. Il est compilé dans un

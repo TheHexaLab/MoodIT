@@ -128,7 +128,7 @@ class HarnessProjectsTest {
      * ne compile pas.
      *
      * <p>Les migrations sont cherchées par leur CONTENU, pas par leur nom : la DERNIÈRE qui écrit
-     * chaque colonne fait foi. Désigner {@code V9} en dur laisserait ce test vert sur un contenu
+     * chaque colonne fait foi. Désigner {@code V5} en dur laisserait ce test vert sur un contenu
      * périmé dès qu'une migration ultérieure retoucherait un gabarit — le défaut repasserait.
      */
     @Test
@@ -193,8 +193,8 @@ class HarnessProjectsTest {
      * Valeur EFFECTIVE d'un gabarit : les migrations sont rejouées dans l'ordre et le dernier bloc
      * non vide gagne.
      *
-     * <p>Une migration met à jour un SOUS-ENSEMBLE de langages — {@code V8} ne retouche que
-     * JavaScript. Prendre « la dernière migration qui écrit la colonne » désignerait donc un
+     * <p>Une migration met à jour un SOUS-ENSEMBLE de langages — {@code V5} ne retouche que les
+     * six compilés. Prendre « la dernière migration qui écrit la colonne » désignerait donc un
      * fichier où le langage cherché est absent : c'est ce que faisait la première version de ce
      * test, et elle échouait sur Java.
      */

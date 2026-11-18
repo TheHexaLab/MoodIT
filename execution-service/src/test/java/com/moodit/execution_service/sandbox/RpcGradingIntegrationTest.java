@@ -258,7 +258,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void rust_commented_field_graded_correctly() {
-        // La forme de la demo V9_1, avec un commentaire de champ. Les champs etaient lus sur la
+        // La forme de la demo V5_1, avec un commentaire de champ. Les champs etaient lus sur la
         // source BRUTE : « // en cm, environ » faisait perdre `hauteur`, et le litteral du
         // harnais ne compilait plus — 0 sur une reponse juste.
         String h = "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12";
@@ -1517,7 +1517,7 @@ class RpcGradingIntegrationTest {
     @Test
     void teacher_path_starting_from_defaults() {
         // Code de départ de la base (V2), complété par l'étudiant, noté par le GABARIT de harnais
-        // de la base (V9) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
+        // de la base (V5) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
         // le vérifiait, et le gabarit C# y appelait une méthode qui n'existe pas.
         record CaseSpec(String lang, String harnessCode, String code) { }
         List<CaseSpec> caseInput = List.of(

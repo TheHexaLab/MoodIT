@@ -1,11 +1,10 @@
--- #116 — DÉMO : retour des harnais COMPILÉS au corps qui renvoie un BOOLÉEN, forme que le
--- superviseur note sans que l'étudiant puisse falsifier son résultat (deux processus, deux UID).
+-- #116 — DÉMO : harnais COMPILÉS au corps qui renvoie un BOOLÉEN, forme que le superviseur note
+-- sans que l'étudiant puisse falsifier son résultat (deux processus, deux UID).
 --
--- Miroir de V9 pour les données de démo : V7_1 avait converti ces mêmes harnais vers les
--- frameworks de test, forme ergonomique mais structurellement falsifiable. On revient à
--- l'expression booléenne, qui passe par le modèle à deux processus — le harnais et le nonce
--- vivent ailleurs que chez l'étudiant, et les objets sont proxifiés par poignée (l'instance vit
--- chez lui, ses champs privés restent privés).
+-- Miroir de V5 pour les données de démo : les harnais de V2_3, écrits pour Piston (compilés avec
+-- le code de l'étudiant), passent à l'expression booléenne du modèle à deux processus — le
+-- harnais et le nonce vivent ailleurs que chez l'étudiant, et les objets sont proxifiés par
+-- poignée (l'instance vit chez lui, ses champs privés restent privés).
 --
 -- Quiz « Démo — Questions de code (multi-langages) » (GIF201, cf. V2_3). Ordres : 5 Go,
 -- 6 Rust, 7 C, 8 C++, 9 C#, 10 Java pour doubler(n) ; 15 Go, 16 Rust, 17 C++, 18 C#, 19 Java
