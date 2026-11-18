@@ -19,6 +19,7 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.transaction.TestTransaction;
 
 /**
  * Test d'intégration de la soumission ASYNCHRONE sur H2 (schéma généré depuis les entités).
@@ -74,6 +76,8 @@ class QuizServiceSubmitIT {
   private static final String USER_EMAIL = "eva@test.ca";
   private Integer quizId;
   private Integer questionId;
+  /** Vrai si le test a committé ses données : elles survivent alors au rollback et sont purgées. */
+  private boolean committed;
 
   @BeforeEach
   void seed() {
@@ -130,16 +134,17 @@ class QuizServiceSubmitIT {
     Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
     assertThat(attemptId).isNotNull();
 
-    // Vide le contexte : le job async relit la tentative dans une NOUVELLE transaction (contexte
-    // frais). Sans ça, le test partagerait le contexte de submit (collections non initialisées).
-    em.flush();
-    em.clear();
+    // Comme en prod : la tentative est COMMITTÉE avant la correction, qui tourne ensuite hors de
+    // toute transaction. La suppression se fait dans une transaction NOUVELLE (REQUIRES_NEW) :
+    // laissée dans la transaction du test, la tentative lui resterait invisible et survivrait.
+    TestTransaction.flagForCommit();
+    TestTransaction.end();
+    committed = true;
 
     // Correction (déclenchée manuellement) : code inévaluable → la tentative est supprimée.
     quizService.gradeAttempt(attemptId);
 
-    em.flush();
-    em.clear();
+    TestTransaction.start();
     // Rien ne subsiste : la tentative unique n'est pas consommée.
     assertThat(count("SELECT count(*) FROM attempt")).isZero();
     assertThat(count("SELECT count(*) FROM submission")).isZero();
@@ -177,6 +182,23 @@ class QuizServiceSubmitIT {
     assertThat(count("SELECT count(*) FROM attempt WHERE status = 'done'")).isEqualTo(1L);
     assertThat(count("SELECT count(*) FROM submission")).isEqualTo(1L);
     assertThat(count("SELECT count(*) FROM submission_test_case WHERE passed = TRUE")).isEqualTo(1L);
+  }
+
+  /** Purge les données committées (base H2 partagée par les tests de la classe). */
+  @AfterEach
+  void purgeCommitted() {
+    if (!committed) {
+      return;
+    }
+    if (!TestTransaction.isActive()) {
+      TestTransaction.start();
+    }
+    for (String table : List.of("submission_test_case", "submission", "attempt", "test_case",
+        "question", "quiz", "language", "q_type", "user_", "course")) {
+      em.getEntityManager().createNativeQuery("DELETE FROM " + table).executeUpdate();
+    }
+    TestTransaction.flagForCommit();
+    TestTransaction.end();
   }
 
   private QuizSubmissionDTO submissionWithCode(String code) {
