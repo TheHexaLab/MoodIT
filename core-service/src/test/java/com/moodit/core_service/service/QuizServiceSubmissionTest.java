@@ -383,6 +383,30 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Démarrage → chaque pending revient avec son pool (harnais ou non)")
+        void pendingGradings_aiguilleSelonLesHarnais() {
+            Question choiceOnly = question(40, SINGLE, 1.0, 0);
+            Quiz choiceQuiz = quiz(5, course(1), choiceOnly);
+            Attempt choiceAttempt = attempt(71, choiceQuiz, eva, 1, "pending");
+            when(attemptRepository.findByStatusOrderByIdAsc("pending"))
+                    .thenReturn(List.of(attempt, choiceAttempt));
+
+            assertThat(service.pendingGradings()).containsExactly(
+                    new AttemptSubmittedEvent(ATTEMPT_ID, true),
+                    new AttemptSubmittedEvent(71, false));
+            verifyNoInteractions(executionClient, realtimePublisher);
+            verify(attemptRepository, never()).deleteById(anyInt());
+        }
+
+        @Test
+        @DisplayName("Démarrage sans pending → liste vide")
+        void pendingGradings_aucun() {
+            when(attemptRepository.findByStatusOrderByIdAsc("pending")).thenReturn(List.of());
+
+            assertThat(service.pendingGradings()).isEmpty();
+        }
+
+        @Test
         @DisplayName("Correction refusée par l'executor → pending supprimé dans une NOUVELLE transaction, push failed")
         void abandon_supprimeDansUneNouvelleTransaction() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));

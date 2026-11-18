@@ -1,8 +1,12 @@
 package com.moodit.core_service.service;
 
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -21,7 +25,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * <p>Si l'executor refuse la tâche (file pleine), la tentative est abandonnée tout de suite
  * (supprimée, {@code quiz:attempt-failed} poussé) : sans cela elle resterait {@code "pending"} pour
  * toujours et l'index {@code uq_attempt_pending} bloquerait toute resoumission.
+ *
+ * <p>Les files des executors vivent en mémoire : un arrêt de core perd les corrections en attente
+ * ou en cours. Au démarrage, les tentatives restées {@code "pending"} en BD sont donc remises en
+ * correction, par le même aiguillage qu'une soumission.
  */
+@Slf4j
 @Component
 public class QuizGradingListener {
 
@@ -40,6 +49,30 @@ public class QuizGradingListener {
 
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
   public void onAttemptSubmitted(AttemptSubmittedEvent event) {
+    dispatch(event);
+  }
+
+  /**
+   * Reprend les corrections perdues par l'arrêt précédent de core. Une erreur de lecture est
+   * journalisée sans empêcher le démarrage : les tentatives seront reprises au suivant.
+   */
+  @EventListener(ApplicationReadyEvent.class)
+  public void resumePendingGradings() {
+    List<AttemptSubmittedEvent> pending;
+    try {
+      pending = quizService.pendingGradings();
+    } catch (RuntimeException e) {
+      log.error("Reprise des corrections pending impossible au démarrage", e);
+      return;
+    }
+    if (pending.isEmpty()) {
+      return;
+    }
+    log.warn("{} tentative(s) pending reprise(s) au démarrage", pending.size());
+    pending.forEach(this::dispatch);
+  }
+
+  private void dispatch(AttemptSubmittedEvent event) {
     Executor executor = event.needsSandbox() ? quizCodeExecutor : quizExecutor;
     try {
       executor.execute(() -> quizService.gradeAttempt(event.attemptId()));

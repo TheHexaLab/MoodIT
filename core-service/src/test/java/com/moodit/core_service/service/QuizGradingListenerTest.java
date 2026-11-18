@@ -8,7 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,5 +76,47 @@ class QuizGradingListenerTest {
 
     verify(quizService).abandonGrading(org.mockito.ArgumentMatchers.eq(9), same(rejected));
     verify(quizService, never()).gradeAttempt(any());
+  }
+
+  @Test
+  void demarrage_reprendChaquePendingSurSonPool() {
+    when(quizService.pendingGradings())
+        .thenReturn(List.of(new AttemptSubmittedEvent(11, true), new AttemptSubmittedEvent(12, false)));
+
+    listener.resumePendingGradings();
+
+    verify(codeExecutor).execute(any());
+    verify(quickExecutor).execute(any());
+    verify(quizService).gradeAttempt(11);
+    verify(quizService).gradeAttempt(12);
+  }
+
+  @Test
+  void demarrage_repriseRefusee_abandonneLaTentative() {
+    TaskRejectedException rejected = new TaskRejectedException("file pleine");
+    doThrow(rejected).when(codeExecutor).execute(any());
+    when(quizService.pendingGradings()).thenReturn(List.of(new AttemptSubmittedEvent(13, true)));
+
+    listener.resumePendingGradings();
+
+    verify(quizService).abandonGrading(org.mockito.ArgumentMatchers.eq(13), same(rejected));
+  }
+
+  @Test
+  void demarrage_sansPending_rienNestPlanifie() {
+    when(quizService.pendingGradings()).thenReturn(List.of());
+
+    listener.resumePendingGradings();
+
+    verifyNoInteractions(quickExecutor, codeExecutor);
+  }
+
+  @Test
+  void demarrage_lectureEnEchec_nEmpechePasLeDemarrage() {
+    when(quizService.pendingGradings()).thenThrow(new IllegalStateException("BD indisponible"));
+
+    listener.resumePendingGradings();
+
+    verifyNoInteractions(quickExecutor, codeExecutor);
   }
 }

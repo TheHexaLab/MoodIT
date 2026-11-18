@@ -19,6 +19,12 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
     /** Nombre de tentatives déjà faites (→ numéro de la prochaine, et garde tentative unique). */
     long countByQuiz_IdAndUser_Id(Integer quizId, Integer userId);
 
+    /**
+     * Tentatives d'un statut donné, plus anciennes d'abord : au démarrage de core, les
+     * {@code "pending"} dont la correction a été perdue (cf. QuizGradingListener).
+     */
+    List<Attempt> findByStatusOrderByIdAsc(String status);
+
     /** Une tentative précise, restreinte à son propriétaire (autorisation). */
     Optional<Attempt> findByIdAndUser_Id(Integer id, Integer userId);
 

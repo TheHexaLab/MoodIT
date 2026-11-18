@@ -29,7 +29,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  * </ul>
  *
  * <p>Une tâche refusée (file pleine) n'est jamais perdue en silence : le listener supprime alors la
- * tentative pending et prévient l'étudiant, qui peut resoumettre.
+ * tentative pending et prévient l'étudiant, qui peut resoumettre. Les files vivent en mémoire :
+ * une correction perdue par un arrêt de core est reprise au démarrage suivant (cf.
+ * QuizGradingListener#resumePendingGradings).
  */
 @Configuration
 @EnableAsync

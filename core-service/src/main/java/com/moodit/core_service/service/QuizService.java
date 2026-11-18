@@ -427,6 +427,24 @@ public class QuizService {
     }
 
     /**
+     * Tentatives encore {@code "pending"} en BD, à relancer au démarrage de core (cf.
+     * QuizGradingListener). Une correction vit seulement en mémoire, dans la file d'un executor :
+     * un arrêt de core (déploiement, OOM, redémarrage de l'hôte) perd celles en file ou en cours,
+     * et leurs tentatives resteraient {@code "pending"} pour toujours, l'index
+     * {@code uq_attempt_pending} refusant alors toute resoumission. Chacune revient avec le pool
+     * qui lui convient, comme à la soumission.
+     */
+    public List<AttemptSubmittedEvent> pendingGradings() {
+        TransactionTemplate readOnlyTx = new TransactionTemplate(transactionManager);
+        readOnlyTx.setReadOnly(true);
+        List<AttemptSubmittedEvent> pending = readOnlyTx.execute(status ->
+                attemptRepository.findByStatusOrderByIdAsc("pending").stream()
+                        .map(a -> new AttemptSubmittedEvent(a.getId(), needsSandbox(a.getQuiz())))
+                        .toList());
+        return pending == null ? List.of() : pending;
+    }
+
+    /**
      * Abandonne une correction qui n'a pas pu être planifiée (executor saturé, cf.
      * QuizGradingListener) : même traitement qu'une défaillance de correction, la tentative pending
      * est supprimée et l'auteur prévenu, il peut resoumettre.
