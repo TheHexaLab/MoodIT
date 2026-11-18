@@ -82,7 +82,7 @@ class CodeAssemblerLanguagesTest {
     void javascript_proxifie_les_classes_par_construction_rpc() {
         var a = assembler.assemble("JavaScript",
                 "class Pile { constructor(){ this.e=[]; } }\nconst taille = (p) => 0;",
-                "return new Pile() !== null;", "MOODIT_OK_c");
+                "return taille(new Pile()) === 0;", "MOODIT_OK_c");
         String grader = a.files().get(0).content();
 
         assertThat(grader)
@@ -97,7 +97,7 @@ class CodeAssemblerLanguagesTest {
     void javascript_ne_proxifie_pas_une_classe_au_nom_interne() {
         // Une classe nommée __moodit… ne doit pas redéclarer un symbole interne du noteur.
         var a = assembler.assemble("JavaScript", "class __moodit_K {}\nclass Pile {}",
-                "return true;", "MOODIT_OK_c");
+                "return new Pile() !== null && new __moodit_K() !== null;", "MOODIT_OK_c");
         String grader = a.files().get(0).content();
 
         assertThat(grader)
@@ -128,7 +128,7 @@ class CodeAssemblerLanguagesTest {
     void python_ignore_les_fonctions_et_classes_internes_de_l_etudiant() {
         var a = assembler.assemble("Python",
                 "def __moodit_rpc(x):\n    return 1\nclass __moodit_Faux:\n    pass\nasync def lire():\n    return 2",
-                "return True", "MOODIT_OK_py");
+                "return lire() == 2 and __moodit_Faux is not None", "MOODIT_OK_py");
         String grader = a.files().get(0).content();
 
         // Le vrai __moodit_rpc du noteur n'est pas écrasé par un proxy portant le même nom.

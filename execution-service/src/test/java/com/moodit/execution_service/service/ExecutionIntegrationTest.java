@@ -258,6 +258,26 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void helper_named_like_a_builtin_is_graded_when_the_harness_does_not_use_it() {
+        // Revue #246 : une fonction d'aide au nom d'une intégrée, que le harnais n'appelle
+        // pas, était refusée (« Nom réservé ») — 0 sur une réponse juste. Elle est notée
+        // normalement, et une réponse fausse reste fausse.
+        requireRuntime("python");
+        String py = "def max(a, b):\n    return a if a > b else b\n"
+                + "def plus_grand(a, b, c):\n    return max(a, max(b, c))";
+        assertThat(passes("Python", py, "return plus_grand(1, 9, 3) == 9")).isTrue();
+        assertThat(passes("Python", py.replace("a > b", "a < b"),
+                "return plus_grand(1, 9, 3) == 9")).isFalse();
+        requireRuntime("javascript");
+        assertThat(passes("JavaScript",
+                "function parseInt(s){ return Number(s); }\nfunction double(s){ return parseInt(s) * 2; }",
+                "return double('4') === 8;")).isTrue();
+        requireRuntime("bash");
+        assertThat(passes("Bash", "test() { echo \"$1\"; }\ncarre() { test $(( $1 * $1 )); }",
+                "[ \"$(carre 3)\" = 9 ]")).isTrue();
+    }
+
+    @Test
     void bash_proxy_returns_the_status_of_the_real_call() {
         // Le mandataire renvoyait toujours 0 : `est_pair 3` était vrai pour toute réponse, et
         // une réponse juste qui renvoie 1 pour un impair était notée fausse.

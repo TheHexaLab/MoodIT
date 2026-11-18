@@ -178,6 +178,7 @@ public class CodeAssembler {
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(PY_DEF, studentCode)) {
             if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
+            if (!harnessMentions(harnessCode, f)) continue;   // mandataire inutile, cf. la méthode
             names.add(f);
             proxies.append("def ").append(f).append("(*a):\n")
                     .append("    return __moodit_rpc({\"op\": \"call\", \"name\": \"").append(f)
@@ -185,6 +186,7 @@ public class CodeAssembler {
         }
         for (String c : matchAll(PY_CLASS, studentCode)) {
             if (c.startsWith("__moodit")) continue;
+            if (!harnessMentions(harnessCode, c)) continue;
             names.add(c);
             // NB : dans un corps de classe, un identifiant `__x` subit le name mangling Python
             // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
@@ -283,6 +285,21 @@ public class CodeAssembler {
     /** Début du diagnostic d'un nom soumis qui masque une fonction intégrée (suivi du nom). */
     static final String SHADOW_PREFIX = "Nom réservé : « ";
 
+    /**
+     * Le harnais emploie-t-il ce nom ? Seuls les symboles soumis que le harnais NOMME reçoivent
+     * un mandataire dans le noteur : un mandataire qu'il n'appelle pas ne sert à rien, et celui
+     * d'une fonction d'aide {@code max}, {@code sum} ou {@code test} y masquait l'intégrée du
+     * même nom — d'où un refus (« Nom réservé ») et un 0 sur une réponse juste, même quand le
+     * harnais ne s'en servait pas. Le refus ne vise donc plus que le nom que le harnais emploie.
+     *
+     * <p>Recherche du MOT dans le texte brut du harnais, chaînes et commentaires compris : dans
+     * le doute, le nom compte comme employé et garde son mandataire (comportement d'avant).
+     */
+    static boolean harnessMentions(String harnessCode, String name) {
+        return Pattern.compile("(?<![\\w$])" + Pattern.quote(name) + "(?![\\w$])")
+                .matcher(harnessCode == null ? "" : harnessCode).find();
+    }
+
     /** Liste de chaînes littérale (Python ou JavaScript) ; les noms viennent de motifs {@code \w}. */
     private static String pythonStringList(java.util.Collection<String> names) {
         return names.stream().map(CodeAssembler::pythonStringLiteral)
@@ -354,6 +371,9 @@ public class CodeAssembler {
         callables.removeAll(classes);
         callables.removeIf(n -> n.startsWith("__moodit"));   // pas de collision avec l'infra du noteur
         classes.removeIf(n -> n.startsWith("__moodit"));
+        // Mandataires des seuls noms que le harnais emploie (cf. harnessMentions).
+        callables.removeIf(n -> !harnessMentions(harnessCode, n));
+        classes.removeIf(n -> !harnessMentions(harnessCode, n));
         for (String f : callables) {
             proxies.append("function ").append(f).append("(...a){ return __moodit_rpc({op:'call',name:'")
                     .append(f).append("',args:a}).value; }\n");
@@ -553,6 +573,7 @@ public class CodeAssembler {
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(BASH_FUNC, studentCode)) {
             if (f.startsWith("__moodit")) continue;
+            if (!harnessMentions(harnessCode, f)) continue;   // cf. harnessMentions
             names.add(f);
             proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
         }

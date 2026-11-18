@@ -283,7 +283,7 @@ class CodeAssemblerTest {
         // Revue #246 : un mandataire `bool` masquait la fonction intégrée dans le VERDICT
         // (`bool(__moodit_harness())`), et tout harnais passait.
         var a = assembler.assemble("Python", "def bool(x):\n    return True\ndef f():\n    return 0",
-                "return f() == 1", "N");
+                "return bool(f()) == 1", "N");
         String grader = a.files().get(0).content();
         assertThat(grader)
                 .contains("__moodit_bool = __moodit_builtins.bool")
@@ -293,6 +293,51 @@ class CodeAssemblerTest {
                 .contains("[\"bool\", \"f\"] if hasattr(__moodit_builtins, __n)");
         assertThat(grader.indexOf("if __moodit_shadow:"))
                 .isLessThan(grader.indexOf("__moodit_subprocess.Popen"));
+    }
+
+    @Test
+    void helper_the_harness_does_not_name_gets_no_proxy_and_no_refusal() {
+        // Revue #246 : une fonction d'aide `max`, `sum`, `File` ou `test` que le harnais
+        // n'appelle pas était refusée (« Nom réservé ») — 0 sur une réponse juste. Sans
+        // mandataire dans le noteur, elle n'y masque plus rien et n'a plus à être refusée.
+        String py = assembler.assemble("Python",
+                "def max(a, b):\n    return a if a > b else b\ndef plus_grand(a, b, c):\n"
+                        + "    return max(a, max(b, c))\nclass sum:\n    pass",
+                "return plus_grand(1, 9, 3) == 9", "N").files().get(0).content();
+        assertThat(py)
+                .contains("[\"plus_grand\"] if hasattr(__moodit_builtins, __n)")
+                .contains("def plus_grand(*a):")
+                .doesNotContain("def max(*a):")
+                .doesNotContain("class sum:");
+
+        String js = assembler.assemble("JavaScript",
+                "class File { taille(){ return 1; } }\nfunction parseInt(x){ return 0; }\n"
+                        + "const double = (n) => n * 2;",
+                "return double(4) === 8;", "N").files().get(0).content();
+        assertThat(js)
+                .startsWith("const __moodit_shadow=[\"double\"]")
+                .contains("function double(...a)")
+                .doesNotContain("function parseInt(...a)")
+                .doesNotContain("const File = new Proxy");
+
+        String sh = assembler.assemble("Bash", "test() { echo 1; }\ncarre() { echo $(( $1 * $1 )); }",
+                "[ \"$(carre 3)\" = 9 ]", "N").files().get(0).content();
+        assertThat(sh)
+                .contains("for __moodit_n in carre; do")
+                .contains("carre() { __moodit_rpc carre \"$@\"; }")
+                .doesNotContain("test() { __moodit_rpc");
+    }
+
+    @Test
+    void harnessMentions_matches_whole_identifiers_only() {
+        assertThat(CodeAssembler.harnessMentions("return max(1, 2) == 2", "max")).isTrue();
+        assertThat(CodeAssembler.harnessMentions("return maximum(1, 2) == 2", "max")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return le_max(1, 2) == 2", "max")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "f")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "$f")).isTrue();
+        assertThat(CodeAssembler.harnessMentions(null, "f")).isFalse();
+        // Dans le doute (chaîne, commentaire), le nom compte comme employé.
+        assertThat(CodeAssembler.harnessMentions("return f() == 'max'", "max")).isTrue();
     }
 
     @Test
