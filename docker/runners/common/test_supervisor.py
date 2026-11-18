@@ -2157,6 +2157,99 @@ class Review246cTest(unittest.TestCase):
         self.assertIn("if (v == null) { return Hexe(null); }", server)
 
 
+class Review246dTest(unittest.TestCase):
+    """Revue #246 (suite) : échec de compilation du noteur, protocole Rust, `in` en C#,
+    dossiers Go de l'étudiant."""
+
+    def test_aborted_harness_build_has_its_own_prefix(self):
+        # Expirée ou tuée : pas de diagnostic, et JAMAIS le préfixe que
+        # deploy/check-compiled-harnesses.py classe BLOQUANT.
+        for expired, code in ((True, None), (True, 0), (False, -9)):
+            with self.subTest(expired=expired, code=code):
+                detail = supervisor.harness_build_failure(expired, code, "contre le code soumis",
+                                                          "")
+                self.assertTrue(detail.startswith(supervisor.HARNESS_BUILD_ABORTED))
+                self.assertFalse(detail.startswith(supervisor.HARNESS_BUILD_ERROR))
+                self.assertTrue(supervisor.is_harness_build_failure(detail))
+        detail = supervisor.harness_build_failure(False, 1, "contre le code soumis", "CS0117")
+        self.assertEqual(detail, supervisor.HARNESS_BUILD_ERROR + " contre le code soumis :\nCS0117")
+        self.assertTrue(supervisor.is_harness_build_failure(detail))
+        self.assertFalse(supervisor.is_harness_build_failure(
+            "Échec de compilation :\n" + supervisor.HARNESS_BUILD_ABORTED))
+        self.assertFalse(supervisor.is_harness_build_failure(None))
+
+    def test_aborted_harness_build_stays_inconclusive(self):
+        runners = dict(supervisor.RUNNERS)
+        directory = tempfile.mkdtemp()
+        box, base_env = supervisor.BOX, supervisor.base_env
+        supervisor.BOX = directory
+        supervisor.base_env = lambda case_dir: {"HOME": directory, "TMPDIR": directory}
+        try:
+            supervisor.RUNNERS["Java"] = lambda *a: (None, supervisor.harness_build_failure(
+                True, None, "contre le code soumis", ""))
+            issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+            self.assertTrue(issue.harness_build)
+            self.assertTrue(supervisor.inconclusive(issue))
+        finally:
+            supervisor.BOX, supervisor.base_env = box, base_env
+            supervisor.RUNNERS.clear()
+            supervisor.RUNNERS.update(runners)
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_rust_free_functions_named_like_object_ops(self):
+        # Une fonction libre `method` ou `new` était prise pour une opération objet : le
+        # serveur répondait « fonction inconnue » à une réponse juste.
+        methods = [("i32", "method", ["i32"]), ("i32", "new", [])]
+        grader = supervisor.rust_grader_source(methods, "method(3) == 6", "N")
+        self.assertIn('id.clone() + "|call|method"', grader)
+        self.assertIn('id.clone() + "|call|new"', grader)
+        server = supervisor.rust_server_source(methods, "fn method(x: i32) -> i32 { x * 2 }")
+        self.assertIn('} else if premier == "call" {', server)
+        self.assertIn('        "method" => {', server)
+        self.assertNotIn("premier.clone()", server)
+
+    def test_csharp_in_parameter_converted_by_value(self):
+        server = supervisor.cs_server_source(["Solution"])
+        self.assertIn("if (pt.IsByRef) { pt = pt.GetElementType(); }", server)
+        self.assertIn("Convert.ChangeType(brut, pt,", server)
+        self.assertNotIn("Convert.ChangeType(brut, attendus[i].ParameterType", server)
+
+    @unittest.skipUnless(hasattr(os, "chown") and os.geteuid() == 0,
+                         "chown vers l'UID étudiant : root requis (image runner)")
+    def test_go_student_dirs_reset_between_cases(self):
+        directory = tempfile.mkdtemp()
+        box = supervisor.BOX
+        supervisor.BOX = directory
+        try:
+            supervisor.reset_go_student_dirs()
+            for name in supervisor.GO_STUDENT_DIRS:
+                with open(os.path.join(directory, name, "plein"), "w") as f:
+                    f.write("x")
+            supervisor.reset_go_student_dirs(keep_cache=True)
+            self.assertEqual(os.listdir(os.path.join(directory, "gopath_etu")), [])
+            self.assertEqual(os.listdir(os.path.join(directory, "gocache_etu")), ["plein"])
+            # Un lien posé par l'étudiant est retiré, jamais suivi.
+            shutil.rmtree(os.path.join(directory, "gopath_etu"))
+            cible = tempfile.mkdtemp()
+            open(os.path.join(cible, "garde"), "w").close()
+            os.symlink(cible, os.path.join(directory, "gopath_etu"))
+            supervisor.reset_go_student_dirs(keep_cache=True)
+            self.assertFalse(os.path.islink(os.path.join(directory, "gopath_etu")))
+            self.assertTrue(os.path.exists(os.path.join(cible, "garde")))
+            shutil.rmtree(cible, ignore_errors=True)
+        finally:
+            supervisor.BOX = box
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_go_student_dirs_only_for_go(self):
+        # Les dossiers ne sont plus créés au démarrage pour tous les langages.
+        with open(supervisor.__file__, encoding="utf-8") as f:
+            source = f.read()
+        main_body = source.split("\ndef main():", 1)[1]
+        self.assertNotIn('for _d in ("gocache_etu", "gopath_etu")', main_body)
+        self.assertIn('if language == "go":\n', main_body)
+
+
 class SqliteExecTest(unittest.TestCase):
     """Revue #246 : le programme SQL porte les sentinelles au nonce, et le code soumis tourne
     dans le meme processus sqlite3. Mode -safe, et programme livre par stdin (root l'ouvre)."""

@@ -455,6 +455,28 @@ def kill_student_survivors():
         time.sleep(0.05)
 
 
+GO_STUDENT_DIRS = ("gocache_etu", "gopath_etu")
+
+
+def reset_go_student_dirs(keep_cache=False):
+    """(Re)crée VIDES les dossiers de build Go de l'étudiant, sauf le cache si keep_cache.
+
+    Ils appartiennent à l'UID étudiant (son compilateur y écrit) : un lien qu'il y aurait posé
+    est retiré sans être suivi (unlink ; rmtree ne suit pas les liens)."""
+    for name in GO_STUDENT_DIRS:
+        fpath = os.path.join(BOX, name)
+        if (keep_cache and name == "gocache_etu" and os.path.isdir(fpath)
+                and not os.path.islink(fpath)):
+            continue
+        if os.path.islink(fpath) or os.path.isfile(fpath):
+            os.unlink(fpath)
+        else:
+            shutil.rmtree(fpath, ignore_errors=True)
+        os.makedirs(fpath, exist_ok=True)
+        os.chown(fpath, STUDENT_UID, STUDENT_GID)
+        os.chmod(fpath, 0o700)
+
+
 def purge_shared_dirs():
     """Vide /tmp et /dev/shm entre deux cas : ces tmpfs survivent d'un cas a l'autre, et un
     fichier depose au cas N (un nonce exfiltre, un relais) etait lisible au cas N+1."""
@@ -944,6 +966,26 @@ def grading_incomplete(real_cases):
 
 # Début de TOUT message d'échec de compilation du noteur (voir CaseOutcome.harness_build).
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
+# Compilation du noteur EXPIRÉE ou TUÉE (temps limite, mémoire) : rien ne prouve que le harnais
+# est faux. Préfixe distinct pour que deploy/check-compiled-harnesses.py ne ferme pas un quiz
+# correct sur une machine chargée ; même drapeau harness_build (cause non concluante).
+HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
+
+
+def harness_build_failure(expired, code, against, diagnostic):
+    """Message d'échec de compilation du NOTEUR. FONCTION PURE (testée).
+
+    Une compilation expirée ou tuée par signal (code < 0) n'est pas un diagnostic du
+    compilateur : elle reçoit HARNESS_BUILD_ABORTED, jamais HARNESS_BUILD_ERROR."""
+    if expired or (code is not None and code < 0):
+        return (HARNESS_BUILD_ABORTED + " (temps limite de compilation dépassé ou compilateur "
+                "arrêté) : rejouer la correction.")
+    return HARNESS_BUILD_ERROR + " " + against + " :\n" + diagnostic
+
+
+def is_harness_build_failure(detail):
+    """Le détail vient-il d'un échec de compilation du NOTEUR ? FONCTION PURE (testée)."""
+    return (detail or "").startswith((HARNESS_BUILD_ERROR, HARNESS_BUILD_ABORTED))
 
 
 def inconclusive(outcome):
@@ -3265,7 +3307,7 @@ def rust_grader_source(methods, harness_code, nonce, obj_list=(), field_list=Non
         args = (" + \"|\" + " + body) if types else ""
         stubs.append('''fn %s(%s) -> %s {
     let id = moodit_id();
-    let requete = id.clone() + "|%s"%s;
+    let requete = id.clone() + "|call|%s"%s;
     let brut = moodit_appel(&id, &requete);
     %s
 }''' % (ident, params, ret, ident, args, parse))
@@ -3408,11 +3450,15 @@ fn moodit_serve() {
         let mut args = ligne.split('|');
         let id = args.next().unwrap_or("").to_string();
         let premier = args.next().unwrap_or("").to_string();
-        // Protocole : id|op|nom|poignée|args… pour `new`/`method`, id|fonction|args… sinon.
+        // Protocole : id|op|nom|poignée|args… pour `new`/`method`, id|call|fonction|args…
+        // pour une fonction libre. L'op « call » explicite (comme en C) : sans lui, une
+        // fonction libre nommée `new` ou `method` était prise pour une opération objet.
         let cle = if premier == "new" || premier == "method" {
             format!("{}|{}", premier, args.next().unwrap_or(""))
+        } else if premier == "call" {
+            args.next().unwrap_or("").to_string()
         } else {
-            premier.clone()
+            String::new()
         };
         let reponse = match cle.as_str() {
 %s
@@ -3706,11 +3752,13 @@ public static class MooditServer {
         object[] donnes = new object[attendus.Length];
         for (int i = 0; i < attendus.Length; i++) {
             string brut = parts[i + depart];
-            if (attendus[i].ParameterType == typeof(string)) {
+            Type pt = attendus[i].ParameterType;
+            if (pt.IsByRef) { pt = pt.GetElementType(); }   // parametre `in` : int& -> int
+            if (pt == typeof(string)) {
                 donnes[i] = Dehexe(brut);
                 continue;
             }
-            donnes[i] = Convert.ChangeType(brut, attendus[i].ParameterType,
+            donnes[i] = Convert.ChangeType(brut, pt,
                     System.Globalization.CultureInfo.InvariantCulture);
         }
         return donnes;
@@ -4335,8 +4383,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             os.path.join(case_dir, "nc.out"), os.path.join(case_dir, "nc.err"),
                             preexec_compile)
     if expired or code != 0:
-        return None, (HARNESS_BUILD_ERROR + " contre la signature du code soumis :\n"
-                      + read_capped(os.path.join(case_dir, "nc.err"))[:1500])
+        return None, harness_build_failure(expired, code, "contre la signature du code soumis",
+                                           read_capped(os.path.join(case_dir, "nc.err"))[:1500])
 
     # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
     with open(os.path.join(student_src, "MooditServer.java"), "w", encoding="utf-8") as f:
@@ -4457,7 +4505,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
             detail = (read_capped(os.path.join(case_dir, "cc.err"))
                       or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
             if label == "harnais":
-                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
             return None, "Échec de compilation :\n" + detail
     set_owner_mode(student_copy, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4512,7 +4560,7 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
             return None, "Échec de compilation :\n" + detail
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin)
@@ -4631,7 +4679,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4710,7 +4758,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
-                return None, HARNESS_BUILD_ERROR + " contre le code soumis :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
@@ -4766,7 +4814,7 @@ def execute_case(language, case, timeout_s):
         # Le préfixe est NOTRE texte (le message du compilateur ne vient qu'après) : le code
         # soumis ne peut pas le produire.
         outcome = CaseOutcome(False, compile_error, ran=False,
-                              harness_build=compile_error.startswith(HARNESS_BUILD_ERROR))
+                              harness_build=is_harness_build_failure(compile_error))
     if EXIT_STATE.killed_by_signal and not outcome.passed:
         outcome.killed = True
     if EXIT_STATE.expired and not outcome.passed:
@@ -4994,14 +5042,6 @@ def wait_for_files():
 def main():
     # AVANT tout chown/setuid : l'UID étudiant de ce conteneur est tiré au sort.
     randomize_student_uid()
-    # Caches de build ETUDIANTS : a lui, puisque le compilateur du code soumis tourne sous son
-    # UID. (job.json n'existe pas encore ici — il est DEPLACE dans /box par wait_for_files ;
-    # son verrouillage se fait donc apres, une fois charge.)
-    for _d in ("gocache_etu", "gopath_etu"):
-        _fpath = os.path.join(BOX, _d)
-        os.makedirs(_fpath, exist_ok=True)
-        os.chown(_fpath, STUDENT_UID, STUDENT_GID)
-        os.chmod(_fpath, 0o700)
     if not wait_for_files():
         print(json.dumps({"v": 1, "error": "fichiers du job non reçus"}))
         return
@@ -5028,6 +5068,11 @@ def main():
     if language not in RUNNERS:
         print(json.dumps({"v": 1, "error": "langage non pris en charge : " + language}))
         return
+    if language == "go":
+        # Dossiers de build ETUDIANTS, Go seulement : le compilateur du code soumis tourne sous
+        # son UID. Créés pour tous les langages, ils étaient un point d'écriture de l'étudiant
+        # jamais vidé, hors de cases/.
+        reset_go_student_dirs()
     timeout_s = max(1, min(MAX_RUN_TIMEOUT_S,
                            int(job.get("timeout_ms") or DEFAULT_RUN_TIMEOUT_S * 1000) // 1000))
     if language in ("java", "csharp"):
@@ -5137,6 +5182,12 @@ def main():
         # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
         kill_student_survivors()
         purge_shared_dirs()
+        if language == "go":
+            # GOPATH étudiant vidé à chaque cas (aucune dépendance : il ne sert à rien d'un cas
+            # à l'autre). Le GOCACHE est gardé : le vider recompilerait la bibliothèque standard
+            # à chaque cas. Le code soumis peut y écrire, mais n'y nuit qu'à SA propre note (cas
+            # suivants sautés, cause « espace ») : il ne peut pas y forger de verdict.
+            reset_go_student_dirs(keep_cache=True)
         # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
         # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
         # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
@@ -5145,7 +5196,8 @@ def main():
         # l'étudiant — ses seuls points d'écriture). Ne libérer que les caches de build laissait
         # un code qui écrit des fichiers saturer le tmpfs /box, partagé par tous les cas : les
         # suivants ne compilaient plus, canaris inclus, et la soumission — honnête mais boguée —
-        # était étiquetée « falsification probable ». Le gocache partagé (hors cases/) survit.
+        # était étiquetée « falsification probable ». Seule exception : le GOCACHE étudiant (Go
+        # seulement, hors cases/), gardé d'un cas à l'autre (voir reset_go_student_dirs).
         shutil.rmtree(os.path.join(BOX, "cases", str(case["index"])), ignore_errors=True)
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
