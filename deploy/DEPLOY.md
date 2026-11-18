@@ -195,7 +195,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > ```bash
 > # Juste après ./deploy/update.sh : rejoue tout, et ferme (is_published = false) les quiz
 > # publiés qui portent un BLOQUANT, le temps de corriger leurs harnais dans l'éditeur.
-> python3 deploy/check-compiled-harnesses.py --depublier
+> python3 deploy/check-compiled-harnesses.py --unpublish
 > ```
 >
 > Pour vérifier AVANT la mise en prod : une pile locale de cette version

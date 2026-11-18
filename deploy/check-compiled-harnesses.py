@@ -20,7 +20,7 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
 Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER, 1 sinon, 2 si l'inventaire est impossible.
-Avec --depublier, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
+Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
 pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié sans cette option.
 
 À lancer sur l'hôte de prod, APRÈS la mise en ligne de cette version (le noteur interrogé doit
@@ -181,7 +181,7 @@ def check_question(base_url, token, question):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--depublier", action="store_true",
+    parser.add_argument("--unpublish", action="store_true",
                         help="fermer les quiz publiés qui portent une question BLOQUANT")
     args = parser.parse_args()
     pg = os.environ.get("PG_CONTAINER", "moodit_postgres")
@@ -213,11 +213,11 @@ def main():
         counts[BLOCKING], counts[TO_CHECK], counts[OK]))
     if blocked_published:
         ids = ", ".join(str(i) for i in sorted(blocked_published))
-        if args.depublier:
+        if args.unpublish:
             psql(pg, "UPDATE Quiz SET is_published = false WHERE id IN (%s);" % ids)
             print("Quiz fermés (is_published = false) : %s" % ids)
         else:
-            print("Quiz publiés à corriger ou fermer : %s (--depublier pour les fermer)" % ids)
+            print("Quiz publiés à corriger ou fermer : %s (--unpublish pour les fermer)" % ids)
     return 1 if counts[BLOCKING] or counts[TO_CHECK] else 0
 
 

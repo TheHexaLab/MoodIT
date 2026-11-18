@@ -4175,9 +4175,9 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
     procs = []
     try:
         g_err, s_err = open_output(g_err_path), open_output(s_err_path)
-        grader_dir = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
-                                  stderr=g_err, preexec_fn=demote_grader)
-        procs.append(grader_dir)
+        grader_proc = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
+                                       stderr=g_err, preexec_fn=demote_grader)
+        procs.append(grader_proc)
         student_side = subprocess.Popen(student_cmd, cwd=cwd, env=s_env, stdin=req_r, stdout=rep_w,
                                     stderr=s_err, preexec_fn=demote_student)
         procs.append(student_side)
@@ -4185,7 +4185,7 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
             os.close(fd)            # le parent lâche les quatre extrémités : EOF se propage
         expired = False
         try:
-            code = grader_dir.wait(timeout=timeout_s)
+            code = grader_proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             code, expired = None, True
         for proc in procs:
@@ -4642,8 +4642,8 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     """Notation NON FALSIFIABLE d'un cas Go : harnais booléen, deux binaires, deux UID."""
     src = os.path.join(case_dir, "src")
     student_mod = os.path.join(case_dir, "etu")
-    grader_dir = os.path.join(case_dir, "noteur")
-    for d in (student_mod, grader_dir):
+    grader_src_dir = os.path.join(case_dir, "noteur")
+    for d in (student_mod, grader_src_dir):
         os.makedirs(d, exist_ok=True)
 
     student_source = ""
@@ -4687,10 +4687,10 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         f.write(go_student_without_main(student_source))
     with open(os.path.join(student_mod, "serveur.go"), "w", encoding="utf-8") as f:
         f.write(go_server_source(method_list, obj_list, field_list))
-    write_private(os.path.join(grader_dir, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
-    write_private(os.path.join(grader_dir, "noteur.go"),
+    write_private(os.path.join(grader_src_dir, "go.mod"), "module moodit_noteur\n\ngo 1.23\n")
+    write_private(os.path.join(grader_src_dir, "noteur.go"),
                  go_grader_source(method_list, harness, TOKENS.get(case_index) or "", obj_list, field_list))
-    os.chmod(grader_dir, 0o700)
+    os.chmod(grader_src_dir, 0o700)
 
     # Le module ETUDIANT lui appartient, et son build tourne sous SON UID avec CGO coupe : en
     # root avec cgo actif (la parade du Dockerfile etait perdue par le env= de Popen), un
@@ -4703,7 +4703,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     grader_bin = os.path.join(case_dir, "noteur_bin")
     for directory, out_value, label, env_c, preexec_c in (
             (student_mod, student_bin, "code soumis", student_build_env(build_area), preexec_student_compile),
-            (grader_dir, grader_bin, "harnais", env, preexec_compile)):
+            (grader_src_dir, grader_bin, "harnais", env, preexec_compile)):
         code, expired = run_proc(["go", "build", "-o", out_value, "."], directory, env_c,
                                 COMPILE_TIMEOUT_S, os.path.join(case_dir, "cc.out"),
                                 os.path.join(case_dir, "cc.err"), preexec_c)
@@ -4714,7 +4714,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
             return None, "Échec de compilation :\n" + detail
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
-                           grader_dir, grader_bin, student_mod, student_bin)
+                           grader_src_dir, grader_bin, student_mod, student_bin)
 
 
 RUNNERS = {
