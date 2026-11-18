@@ -32,7 +32,10 @@ FROM (VALUES
 // PROCESSUS SÉPARÉ, sous un UID séparé : le code de l'étudiant ne peut ni le lire, ni le
 // modifier, ni falsifier son résultat. Les objets sont proxifiés : l'instance vit chez lui.
 // Sandbox : JDK 25 (aucun réseau). Types échangeables : int, long, double, boolean, String.
-return Solution.solution() == ATTENDU;
+// Une String se compare avec .equals : la chaîne rendue par le code soumis est reconstruite
+// ici, ce n'est jamais la même instance qu'un littéral, et == vaudrait toujours faux.
+return Solution.solution() == ATTENDU;          // int, long, double, boolean
+// return "ATTENDU".equals(Solution.solution()); // String
 $hc$),
     ('C#', $hc$// HARNAIS (C#) — un corps qui RENVOIE UN BOOLÉEN, compilé dans un PROCESSUS
 // SÉPARÉ sous un UID séparé : ni lisible, ni modifiable, ni falsifiable par le code noté.
