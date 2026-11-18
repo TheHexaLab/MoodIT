@@ -12,9 +12,12 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
 
   BLOQUANT    le harnais ne compile pas contre la signature, ou la signature du code de
               départ n'utilise aucun type transportable : la question notera 0 à tout le monde ;
-  À VÉRIFIER  le code de départ ne compile pas seul, n'existe pas, ou le noteur n'a pas répondu :
-              le script ne peut pas conclure, rejouer à la main avec une solution (« Tester ») ;
-  OK          le harnais compile (qu'il passe ou non contre le code de départ incomplet).
+  À VÉRIFIER  rien ne prouve que le harnais a tourné : le code de départ ne compile pas seul ou
+              n'existe pas, le noteur n'a pas répondu ou a refusé le format, ou le détail n'est
+              pas reconnu : le script ne peut pas conclure, rejouer à la main avec une solution
+              (« Tester ») ;
+  OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
+              incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
 Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER, 1 sinon, 2 si l'inventaire est impossible.
 Avec --depublier, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
@@ -44,8 +47,19 @@ COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
 # du compilateur ne vient qu'APRÈS eux, le code soumis ne peut pas les produire.
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
 NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
-OWN_BUILD_ERROR = "Échec de compilation"
-TAMPERING = "⚠ Incohérence"   # posé par DockerEvaluator : verdict non fiable, rien à conclure
+
+# Débuts de détail qui PROUVENT que le harnais a compilé et tourné (liste blanche) : le noteur a
+# rendu faux, a relayé une exception du harnais, a vu le processus étudiant refuser un appel ou
+# se terminer, ou le couple a été interrompu au temps limite (lancé après les compilations).
+# Tout autre détail — message du superviseur ou de DockerEvaluator qu'on ne connaît pas encore,
+# stderr du code de départ — ne prouve rien : À VÉRIFIER, jamais OK (fail-closed).
+HARNESS_RAN = (
+    "Le harnais a renvoyé faux",
+    "[MOODIT] harnais:",
+    "[MOODIT] appel refuse par le code soumis",
+    "[MOODIT] processus etudiant termine",
+    "Interrompu (temps limite dépassé)",
+)
 
 BLOCKING = "BLOQUANT"
 TO_CHECK = "À VÉRIFIER"
@@ -79,10 +93,13 @@ def classify(detail, passed):
     text = detail or ""
     if text.startswith(HARNESS_BUILD_ERROR) or NO_TRANSPORTABLE_SIGNATURE in text:
         return BLOCKING
-    if text.startswith(OWN_BUILD_ERROR) or text.startswith(TAMPERING):
-        return TO_CHECK
-    # Le harnais a compilé et tourné ; il échoue contre un code de départ incomplet, c'est normal.
-    return OK
+    if text.startswith(HARNESS_RAN):
+        # Le harnais a compilé et tourné ; il échoue contre un code de départ incomplet, c'est
+        # normal.
+        return OK
+    # Échec de compilation du code de départ, falsification, erreur du noteur, refus du format
+    # (package, nom réservé…), stderr du code de départ : rien ne prouve que le harnais tourne.
+    return TO_CHECK
 
 
 def worst(statuses):
