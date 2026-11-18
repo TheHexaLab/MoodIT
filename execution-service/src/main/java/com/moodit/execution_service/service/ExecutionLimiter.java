@@ -17,7 +17,12 @@ import java.util.function.Supplier;
  *       ont chacun au plus {@code maxConcurrent - 1} places (dès que {@code maxConcurrent ≥ 2}).
  *       Chaque côté garde donc toujours au moins UNE place que l'autre ne peut pas prendre :
  *       ni une rafale de « Tester » n'affame les corrections, ni une file de corrections
- *       (fin d'examen) ne refuse tous les « Exécuter » pendant qu'elle se résorbe.</li>
+ *       (fin d'examen) ne refuse tous les « Exécuter » pendant qu'elle se résorbe.
+ *       <b>La garantie porte sur UNE place, pas sur {@code maxConcurrent - 1}</b> : core mène
+ *       {@code maxConcurrent - 1} corrections de front, mais dès que les appels publics tiennent
+ *       leurs {@code maxConcurrent - 1} places, une seule correction passe ; les autres
+ *       attendent {@code internalQueueWaitMs}, puis sont refusées (tentative supprimée,
+ *       l'étudiant resoumet).</li>
  *   <li><b>Globale</b> : au plus {@code maxConcurrent} conteneurs runner simultanés, tous appelants
  *       confondus (« Tester », « play », correction interne). Une exécution en trop attend une place
  *       au plus {@code queueWaitMs} (file d'attente courte), puis est refusée. La correction

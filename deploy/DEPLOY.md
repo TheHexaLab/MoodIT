@@ -322,7 +322,10 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
   `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod). Corrections et
   « Exécuter »/« Tester » ont **chacun au plus deux places** (`EXEC_MAX_CONCURRENT − 1`) : chaque
-  côté en garde toujours une, même pendant une rafale de l'autre. File d'attente publique
+  côté en garde toujours une, même pendant une rafale de l'autre. La garantie porte sur **une**
+  place, pas sur deux : quand deux « Tester » longs tiennent les deux places publiques, une
+  seule correction passe ; la seconde attend `EXEC_INTERNAL_QUEUE_WAIT_MS`, puis sa tentative
+  est supprimée et l'étudiant resoumet. File d'attente publique
   `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
   au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
