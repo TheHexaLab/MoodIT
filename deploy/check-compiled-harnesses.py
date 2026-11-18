@@ -10,12 +10,14 @@ reçoit 0 sur une tentative unique, sans panne visible. Ce script le détecte av
 Pour chaque question compilée qui a des cas, il envoie son CODE DE DÉPART et ses harnais à
 l'endpoint interne d'execution-service (le chemin de la correction), puis classe le verdict :
 
-  BLOQUANT    le harnais ne compile pas contre la signature, ou la signature du code de
-              départ n'utilise aucun type transportable : la question notera 0 à tout le monde ;
-  À VÉRIFIER  rien ne prouve que le harnais a tourné : le code de départ ne compile pas seul ou
-              n'existe pas, le noteur n'a pas répondu ou a refusé le format, ou le détail n'est
-              pas reconnu : le script ne peut pas conclure, rejouer à la main avec une solution
-              (« Tester ») ;
+  BLOQUANT    le harnais ne compile pas contre la signature : la question notera 0 à tout le
+              monde ;
+  À VÉRIFIER  rien ne prouve que le harnais a tourné : le code de départ ne compile pas seul,
+              n'existe pas ou ne déclare aucune fonction aux types transportables (aucune
+              fonction du tout, ou seulement des types non transportables : le superviseur ne
+              distingue pas les deux), le noteur n'a pas répondu ou a refusé le format, ou le
+              détail n'est pas reconnu : le script ne peut pas conclure, rejouer à la main avec
+              une solution (« Tester ») ;
   OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
@@ -91,8 +93,14 @@ def classify(detail, passed):
     if passed:
         return OK
     text = detail or ""
-    if text.startswith(HARNESS_BUILD_ERROR) or NO_TRANSPORTABLE_SIGNATURE in text:
+    if text.startswith(HARNESS_BUILD_ERROR):
         return BLOCKING
+    if NO_TRANSPORTABLE_SIGNATURE in text:
+        # Le superviseur rend le même message quand le code de départ déclare des fonctions aux
+        # types non transportables (question insoluble) et quand il n'en déclare AUCUNE
+        # (squelette à compléter : le harnais peut être juste). Rien ne prouve que le harnais
+        # casse : pas de fermeture automatique du quiz (--unpublish), rejouer à la main.
+        return TO_CHECK
     if text.startswith(HARNESS_RAN):
         # Le harnais a compilé et tourné ; il échoue contre un code de départ incomplet, c'est
         # normal.

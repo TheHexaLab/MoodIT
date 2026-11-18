@@ -32,8 +32,17 @@ class ClassifyTest(unittest.TestCase):
 
     def test_harnais_qui_ne_compile_pas_bloquant(self):
         self.assertEqual(chk.BLOCKING, chk.classify("Le harnais ne compile pas :\nerreur", False))
-        self.assertEqual(chk.BLOCKING, chk.classify(
-            "Aucune fonction exploitable (types acceptés : int, long)", False))
+
+    def test_code_de_depart_sans_fonction_transportable_a_verifier(self):
+        # Même message du superviseur pour un squelette sans aucune fonction (harnais peut-être
+        # juste) et pour des types non transportables : jamais BLOQUANT, donc jamais de quiz
+        # fermé par --unpublish sur ce seul message.
+        for detail in ("Aucune fonction exploitable dans le code soumis "
+                       "(types acceptés : int, long, double).",
+                       "Aucune méthode statique ni objet exploitable dans la classe Main "
+                       "(types acceptés : int, long, double, boolean, String)."):
+            with self.subTest(detail=detail):
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
 
     def test_messages_sans_preuve_a_verifier(self):
         # Messages réels du superviseur et de DockerEvaluator qui passaient OK avant le correctif :
