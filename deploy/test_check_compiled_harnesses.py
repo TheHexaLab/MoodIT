@@ -84,6 +84,24 @@ class ClassifyTest(unittest.TestCase):
             "cannot find function `carre` in this scope", "fn carres() {}"))
         self.assertEqual([], chk.missing_from_start_code("erreur de type", "fn f() {}"))
 
+    def test_nom_cite_en_commentaire_seulement_a_verifier(self):
+        # Le code de départ NOMME la fonction à écrire dans un commentaire, sans la déclarer :
+        # elle est absente, donc rien ne prouve que le harnais est faux — pas de quiz fermé.
+        detail = "Le harnais ne compile pas contre le code soumis :\n./noteur.go:9:9: undefined: carre"
+        for start in ("// A ecrire : func carre(n int) int\nfunc aide(n int) int { return n }",
+                      "/* TODO :\n   func carre(n int) int\n*/\nfunc aide(n int) int { return n }"):
+            with self.subTest(start=start):
+                self.assertEqual(["carre"], chk.missing_from_start_code("undefined: carre", start))
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
+        # Déclarée pour de bon (aux types non transportables) : toujours BLOQUANT.
+        declared = "// la fonction carre\nfunc carre(t []int) int { return 0 }"
+        self.assertEqual(chk.BLOCKING, chk.classify(detail, False, declared))
+
+    def test_without_comments(self):
+        self.assertEqual("int f;  ", chk.without_comments("int f; // carre"))
+        self.assertEqual("a   b", chk.without_comments("a /* x\ny */ b"))
+        self.assertEqual("", chk.without_comments(None))
+
     def test_code_de_depart_sans_fonction_transportable_a_verifier(self):
         # Même message du superviseur pour un squelette sans aucune fonction (harnais peut-être
         # juste) et pour des types non transportables : jamais BLOQUANT, donc jamais de quiz

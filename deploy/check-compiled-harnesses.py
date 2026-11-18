@@ -78,10 +78,26 @@ def missing_from_start_code(diagnostic, start_code):
 
     Un nom PRÉSENT dans le code de départ mais introuvable pour le harnais a été écarté par le
     générateur de bouchons (types non transportables) : la question est cassée. Un nom ABSENT
-    est une fonction que l'étudiant doit écrire : rien ne prouve que le harnais est faux."""
+    est une fonction que l'étudiant doit écrire : rien ne prouve que le harnais est faux.
+
+    La présence se lit HORS COMMENTAIRES : `// À écrire : func carre(n int) int` nomme la
+    fonction sans la déclarer, et la compter comme présente fermait un quiz au harnais juste."""
     names = {n for match in UNDEFINED_NAME.findall(diagnostic or "") for n in match if n}
-    return sorted(n for n in names
-                  if not re.search(r"\b%s\b" % re.escape(n), start_code or ""))
+    code = without_comments(start_code)
+    return sorted(n for n in names if not re.search(r"\b%s\b" % re.escape(n), code))
+
+
+# Commentaires des six langages compilés : `/* … */` et `// …` jusqu'à la fin de la ligne.
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def without_comments(code):
+    """Code sans ses commentaires `//` et `/* */`. FONCTION PURE (testée).
+
+    Lecture volontairement simple : un `//` dans une chaîne (« http://… ») coupe la fin de la
+    ligne. L'erreur va du bon côté — un nom de moins dans le code de départ donne À VÉRIFIER,
+    jamais une fermeture."""
+    return COMMENT.sub(" ", code or "")
 
 # Débuts de détail qui PROUVENT que le harnais a compilé et tourné (liste blanche) : le noteur a
 # rendu faux, a relayé une exception du harnais, a vu le processus étudiant refuser un appel ou
