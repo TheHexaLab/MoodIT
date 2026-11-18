@@ -2568,7 +2568,7 @@ def cpp_object_api(source):
         depths = _closings(src_text)[0]
         level = depths[begin] + 1
         position = begin + 1
-        for src_line in body.splitlines(True):
+        for src_line in _member_pieces(body, begin + 1, depths, level):
             line_begin = position + len(src_line) - len(src_line.lstrip())
             position += len(src_line)
             # Une ligne d'une classe IMBRIQUEE n'est pas un membre de celle-ci : ses methodes
@@ -2600,6 +2600,27 @@ def cpp_object_api(source):
         if ctors and method_list:
             result.append((class_ident, ctors, method_list))
     return result
+
+
+def _member_pieces(body, offset, depths, level):
+    """Corps de classe découpé en morceaux d'au plus UN membre chacun. FONCTION PURE (testée).
+
+    Coupe aux fins de ligne ET après chaque `;` ou `}` du niveau de la classe : sans cela, deux
+    membres sur une même ligne (`Rect(int w):w(w) {} int aire() {…}`) n'étaient vus que par le
+    premier, le constructeur faisait sauter la ligne, la méthode n'était pas proxifiée et une
+    réponse juste notait 0. `offset` est la position de `body` dans le source, `depths` vient de
+    code_depths (une `}` porte la profondeur APRÈS sa fermeture). Les morceaux, mis bout à bout,
+    redonnent `body`."""
+    pieces = []
+    start = 0
+    for i, c in enumerate(body):
+        cut = c == chr(10) or (c in ";}" and depths[offset + i] == level)
+        if cut:
+            pieces.append(body[start:i + 1])
+            start = i + 1
+    if start < len(body):
+        pieces.append(body[start:])
+    return pieces
 
 
 def _c_param_types(params):

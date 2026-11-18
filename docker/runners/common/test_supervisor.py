@@ -1681,6 +1681,25 @@ class Review28Test(unittest.TestCase):
                             "    virtual int aire() { return 0; }", "};", ""])
         self.assertEqual(supervisor.cpp_object_api(src), [("Rect", [["int"]], [("int", "aire", [])])])
 
+    def test_cpp_membres_sur_une_meme_ligne(self):
+        # Constructeur et méthode sur UNE ligne : la méthode n'était pas extraite (0 sur une
+        # réponse juste). Les sections d'accès en ligne restent respectées.
+        src = self.NL.join(["class Rect {", "    int w, h;", "public:",
+                            "    Rect(int w, int h):w(w),h(h) {} int aire() { return w*h; }",
+                            "private: int g() { return 0; } public: double k() { return 1; }",
+                            "};", ""])
+        self.assertEqual(supervisor.cpp_object_api(supervisor.blank_code(src)),
+                         [("Rect", [["int", "int"]], [("int", "aire", []), ("double", "k", [])])])
+
+    def test_member_pieces_redonnent_le_corps(self):
+        body = " int a; int f() { return 1; } int g();\n  Rect(int x) {}\n"
+        src = "class R {" + body + "};"
+        depths = supervisor.code_depths(src)
+        pieces = supervisor._member_pieces(body, len("class R {"), depths, 1)
+        self.assertEqual("".join(pieces), body)
+        self.assertEqual([p.strip() for p in pieces if p.strip()],
+                         ["int a;", "int f() { return 1; }", "int g();", "Rect(int x) {}"])
+
     def test_cs_method_named_Double(self):
         src = "class Solution { public static int Double(int n) { return 2 * n; } }"
         canon = supervisor.cs_canonical_types(src)
