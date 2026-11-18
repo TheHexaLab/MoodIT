@@ -9,7 +9,7 @@
 # souci de conversion de chemin sous Git Bash/Windows. Idempotent : ne
 # fait rien si des établissements existent déjà (FORCE=1 pour re-seeder malgré tout). Donne
 # l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code
-# multi-langages (harnais des compilés au format booléen non falsifiable depuis V5_1).
+# multi-langages (harnais des compilés au format booléen non falsifiable, cf. V2_3).
 #
 # Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V5). Ce script ne
 # migre PAS — il SÈME. Usage dev uniquement ; la prod réelle reste volontairement vierge.

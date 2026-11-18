@@ -258,7 +258,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void rust_commented_field_graded_correctly() {
-        // La forme de la demo V5_1, avec un commentaire de champ. Les champs etaient lus sur la
+        // La forme de la demo V2_3, avec un commentaire de champ. Les champs etaient lus sur la
         // source BRUTE : « // en cm, environ » faisait perdre `hauteur`, et le litteral du
         // harnais ne compilait plus — 0 sur une reponse juste.
         String h = "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12";
