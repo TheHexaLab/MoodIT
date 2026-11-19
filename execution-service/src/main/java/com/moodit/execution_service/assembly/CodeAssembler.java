@@ -459,6 +459,9 @@ public class CodeAssembler {
         //     milieu de ses propres locales (`buf`, `d`, `i`, `line`, `m`, `r`, `objs`, `hid`…) :
         //     une fonction soumise de l'un de ces noms rendait la variable du serveur, et une
         //     réponse juste était notée fausse.
+        //     Repli sur `exports` : pour `export const f = memo(…)`, tsc (module commonjs) n'émet
+        //     que `exports.f = …`, sans liaison locale, et l'`eval` levait « f is not defined ».
+        //     Dans un module ES, `exports` n'existe pas : l'erreur d'origine est relancée.
         String server = header
                 + "const __moodit_G=[].constructor.constructor('return this')();\n"
                 + "const __moodit_JSON=__moodit_G.JSON, __moodit_process=__moodit_G.process,"
@@ -466,7 +469,9 @@ public class CodeAssembler {
                 + "const __moodit_NL=__moodit_String.fromCharCode(10);\n"
                 + "__moodit_G.console.log=function(){}; __moodit_G.console.info=function(){};\n"
                 + studentCode
-                + "\nconst __moodit_get=(__moodit_n)=>eval(__moodit_n);\n"
+                + "\nconst __moodit_get=(__moodit_n)=>{ try{ return eval(__moodit_n); }"
+                + "catch(__moodit_e){ let __moodit_x; try{ __moodit_x=exports[__moodit_n]; }"
+                + "catch(__moodit_f){} if(__moodit_x===void 0) throw __moodit_e; return __moodit_x; } };\n"
                 + "function __moodit_serve(){ const __moodit_objs={}; let __moodit_hid=0, __moodit_buf='';\n"
                 + "__moodit_process.stdin.on('data', __moodit_d=>{ __moodit_buf+=__moodit_d; let __moodit_i;\n"
                 + "  while((__moodit_i=__moodit_buf.indexOf(__moodit_NL))>=0){"

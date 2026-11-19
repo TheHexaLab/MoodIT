@@ -121,7 +121,12 @@ class CodeAssemblerTest {
             // Après lui : résolution hors des locales de la boucle, et rien que des noms préfixés.
             String after = server.substring(student + "function i(x){ return x; }".length());
             assertThat(after)
-                    .startsWith("\nconst __moodit_get=(__moodit_n)=>eval(__moodit_n);\n")
+                    // `eval` d'abord ; `exports` n'est qu'un repli (cf. le test d'exécution
+                    // typescript_export_forms_are_graded : `export const f = memo(…)`).
+                    .startsWith("\nconst __moodit_get=(__moodit_n)=>{ try{ return eval(__moodit_n); }"
+                            + "catch(__moodit_e){ let __moodit_x; try{ __moodit_x=exports[__moodit_n]; }"
+                            + "catch(__moodit_f){} if(__moodit_x===void 0) throw __moodit_e;"
+                            + " return __moodit_x; } };\n")
                     .contains("__moodit_get(__moodit_m.name)(...__moodit_m.args)")
                     .contains("new (__moodit_get(__moodit_m.cls))(...__moodit_m.args)");
             String code = after.replaceAll("'[^']*'", "''");

@@ -1304,6 +1304,170 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void rust_type_and_function_named_like_the_prelude_do_not_reach_the_grader_runtime() {
+        // Le harnais NOMME `Vec` et `Ok` : leurs bouchons sont à la racine du noteur. Son runtime
+        // (Vec::new(), Vec<char>, le motif `Ok(l)`) vit dans `mod moodit_rt`, hors de leur portée ;
+        // à la racine, il ne compilait plus contre eux.
+        gradedThenWrong("Rust", "doubler(5) == 10 && Ok(2) == 3 && Vec { x: 3, y: 4 }.norme() == 7",
+                """
+                struct Vec {
+                    x: i32,
+                    y: i32,
+                }
+
+                impl Vec {
+                    fn norme(&self) -> i32 {
+                        self.x + self.y
+                    }
+                }
+
+                #[allow(non_snake_case)]
+                fn Ok(n: i32) -> i32 { n + 1 }
+
+                fn doubler(n: i32) -> i32 { n * 2 }
+                """, "self.x + self.y", "0");
+    }
+
+    @Test
+    void csharp_class_the_harness_names_like_a_class_the_grader_runtime_uses_is_graded() {
+        // Le harnais NOMME `Console` : son bouchon est une classe du niveau global, qui l'emporte
+        // sur `using System;`. Le runtime du noteur et le verdict (Console.Error, Console.Out)
+        // vivent dans `namespace MooditRt`, où `using global::System` passe avant elle.
+        gradedThenWrong("C#", "return new Console(1).Get() == 2;", """
+                class Console {
+                    int v;
+                    public Console(int a) { v = a; }
+                    public int Get() { return v + 1; }
+                }
+                """, "v + 1", "0");
+    }
+
+    @Test
+    void cpp_class_named_like_a_standard_type_under_using_namespace_std_is_graded() {
+        // Le serveur nomme la classe soumise `::pair` : avec `using namespace std;`, le nom nu
+        // désignait à la fois la classe soumise et std::pair.
+        gradedThenWrong("C++", "return pair(2, 3).somme() == 5;", """
+                #include <utility>
+                using namespace std;
+                class pair {
+                    int a, b;
+                public:
+                    pair(int x, int y) : a(x), b(y) {}
+                    int somme() { return a + b; }
+                };
+                """, "return a + b;", "return 0;");
+    }
+
+    @Test
+    void cpp_member_or_using_declaration_named_like_a_linked_symbol_is_graded() {
+        // Une méthode `free` définie hors de sa classe et un `using std::printf;` ne définissent
+        // aucun symbole de la libc : la réponse était refusée « nom réservé ».
+        gradedThenWrong("C++", "return Pile(3).free() == 3 && doubler(5) == 10;", """
+                #include <cstdio>
+                #include <cstdlib>
+                using std::printf;
+                using std::free;
+                class Pile {
+                    int n;
+                public:
+                    Pile(int a) : n(a) {}
+                    int free();
+                };
+                int Pile::free() { return n; }
+                int doubler(int n) { return n * 2; }
+                """, "return n;", "return 0;");
+    }
+
+    @Test
+    void cpp_overload_of_a_linked_symbol_is_graded_and_the_real_symbol_stays_refused() {
+        // Une surcharge (`free(Noeud *)`, `printf(int)`) porte un symbole décoré : elle ne
+        // remplace pas la fonction de la libc à laquelle le serveur est lié.
+        gradedThenWrong("C++", "return valeur(4) == 4 && suivant(1) == 2;", """
+                #include <cstdio>
+                #include <cstdlib>
+                struct Noeud { int v; };
+                int free(Noeud *n) { return n->v; }
+                int printf(int x) { return x + 1; }
+                int valeur(int a) { Noeud n; n.v = a; return free(&n); }
+                int suivant(int a) { return printf(a); }
+                """, "return n->v;", "return 0;");
+        // La signature de la libc, elle, reprend son symbole : refus nommé.
+        TestResult r = note("C++", "return doubler(5) == 10;", """
+                #include <cstdlib>
+                void free(void *p) { }
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("free");
+    }
+
+    @Test
+    void c_symbol_the_server_links_to_is_refused_by_name_however_it_is_written() {
+        // Écritures que le contrôle textuel ne reconnaît pas : le binaire, lui, porte le symbole.
+        // Type de retour sur sa propre ligne (C) :
+        TestResult c = note("C", "return doubler(5) == 10;", """
+                int
+                printf(const char *f, ...) { return 0; }
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(c.passed()).isFalse();
+        assertThat(c.detail()).contains("réservé").contains("printf");
+        // Paramètre écrit par un alias de type : même signature que la libc, pas une surcharge.
+        TestResult alias = note("C++", "return doubler(5) == 10;", """
+                #include <cstdlib>
+                typedef void *adresse;
+                void free(adresse p) noexcept { }
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(alias.passed()).isFalse();
+        assertThat(alias.detail()).contains("réservé").contains("free");
+        // Bloc `extern "C"` :
+        TestResult bloc = note("C++", "return doubler(5) == 10;", """
+                extern "C" {
+                void *malloc(unsigned long n) { return 0; }
+                }
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(bloc.passed()).isFalse();
+        assertThat(bloc.detail()).contains("réservé").contains("malloc");
+        // Une VARIABLE n'est jamais décorée, en C comme en C++ :
+        for (String language : List.of("C", "C++")) {
+            TestResult variable = note(language, "return doubler(5) == 10;", """
+                    int stdin = 3;
+                    int free;
+                    int doubler(int n) { return n * 2; }
+                    """);
+            assertThat(variable.passed()).as(language).isFalse();
+            assertThat(variable.detail()).as(language).contains("réservé").contains("free")
+                    .contains("stdin");
+        }
+    }
+
+    @Test
+    void c_names_that_define_no_linked_symbol_are_graded() {
+        // Le contrôle lit le binaire : ce qui n'y définit aucun symbole de la libc est du code
+        // ordinaire. Une statique que rien n'appelle n'y figure pas (C) ; un membre de classe y
+        // est décoré, même écrit avec une espace avant `::` (C++).
+        gradedThenWrong("C", "return doubler(5) == 10;", """
+                static int malloc(int x) { return x; }
+                static void *realloc(void *p, unsigned long n) { return 0; }
+                int doubler(int n) { return n * 2; }
+                """, "n * 2", "0");
+        gradedThenWrong("C++", "return Pile(3).free() == 3 && doubler(5) == 10;", """
+                class Pile {
+                public:
+                    static int stdout;
+                    int n;
+                    Pile(int a) : n(a) {}
+                    int free();
+                };
+                int Pile ::stdout = 7;
+                int Pile ::free() { return n + stdout - 7; }
+                int doubler(int n) { return n * 2; }
+                """, "n * 2", "0");
+    }
+
+    @Test
     void java_public_class_is_the_object() {
         // La classe publique s'appelle Rectangle : c'est elle qu'on instancie, et il n'y a
         // AUCUNE méthode statique. Exiger une statique refusait cette question.

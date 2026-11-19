@@ -2663,23 +2663,19 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
                        and w not in ("f", "Rect", "aire")}
             self.assertEqual(foreign, set(), "noms hors du serveur : %s" % sorted(foreign))
 
-    def test_c_submission_defining_a_symbol_the_server_links_to_is_named(self):
-        # Le serveur est lié à quelques symboles de la libc : un code soumis qui en DÉFINIT un
-        # le remplace pour tout le programme. Refus nommé, plutôt qu'un appel refusé ou un
-        # temps limite sans explication.
-        def defined(src):
-            return supervisor.c_server_symbols_defined(supervisor.blank_code(src))
-        self.assertEqual(defined("int printf(int x) { return x; }\n"), ["printf"])
-        self.assertEqual(defined("int stdin = 3;\nint f(int x) { return x; }\n"), ["stdin"])
-        self.assertEqual(defined("static int malloc(int x) { return x; }\nint free;\n"),
-                         ["malloc", "free"])
-        # Un APPEL, une locale, un champ ou une simple déclaration ne définissent rien.
-        self.assertEqual(defined(
-            "#include <stdio.h>\nint f(int x) { printf(\"%d\", x); int free = 0; return free; }\n"),
-            [])
-        self.assertEqual(defined(
-            "int printf(const char *, ...);\nextern void *stdout;\nstruct S { int free; };\n"
-            "int y = printf(\"a\");\n"), [])
+    def test_c_symbols_defined_in_binary_keeps_only_bare_names(self):
+        # Sortie réelle de `nm --defined-only` dans l'image : la copie de relocalisation d'un
+        # symbole de la libc porte sa version, une surcharge C++ est décorée.
+        clean = ("0000000000404050 B stdin@GLIBC_2.2.5\n0000000000404040 B stdout@GLIBC_2.2.5\n"
+                 "00000000004011d6 T _Z4freeP1N\n0000000000401136 T doubler\n"
+                 "0000000000401196 t moodit_jeton\n")
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(clean), [])
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(
+            clean + "00000000004011b6 T printf\n0000000000404060 B stdout\n"
+                    "00000000004011c6 t malloc\n00000000004011d6 T free\n"),
+            ["printf", "malloc", "free", "stdout"])
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(""), [])
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(None), [])
 
     def test_cpp_object_dispatch_locals_are_prefixed(self):
         _, branches = supervisor.cpp_object_dispatch([("Rect", [["int"]], [("int", "aire", [])])])

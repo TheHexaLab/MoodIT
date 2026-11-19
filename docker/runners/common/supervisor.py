@@ -3216,35 +3216,20 @@ static const char *moodit_jeton(void) {
 # avec la `printf` de l'étudiant.
 C_SERVER_SYMBOLS = ("printf", "fflush", "fgets", "strtol", "strtod", "realloc", "malloc", "calloc",
                     "free", "stdin", "stdout")
-C_SERVER_SYMBOL_DEF = re.compile(
-    r"(?<![\w.>])(%s)\s*(?:\([^;{}]*\)\s*\{|=|;|\[)" % "|".join(C_SERVER_SYMBOLS))
 
 
-def c_server_symbols_defined(source):
-    """Symboles de C_SERVER_SYMBOLS que le code soumis DÉFINIT au niveau du fichier.
+def c_symbols_defined_in_binary(nm_output):
+    """Symboles de C_SERVER_SYMBOLS que le BINAIRE du code soumis définit lui-même.
 
-    FONCTION PURE (testée). `source` est déjà passé par blank_code (ni chaînes ni commentaires).
-    Seul le niveau 0 compte : un appel `printf(…)` ou une locale `int free = 0;` dans une
-    fonction ne définit rien. Une définition statique compte aussi, par prudence : le refus est
-    nommé, et ces noms ne sont pas ceux d'une réponse d'étudiant."""
-    depths = code_depths(source)
-    found = []
-    for hit in C_SERVER_SYMBOL_DEF.finditer(source or ""):
-        if depths[hit.start(1)] != 0:
-            continue
-        # Une DÉCLARATION sans corps (`int printf(const char *, ...);`, `extern FILE *stdin;`)
-        # ne définit rien : seuls un corps de fonction ou une variable sans `extern` comptent.
-        line_start = source.rfind("\n", 0, hit.start(1)) + 1
-        before = source[line_start:hit.start(1)]
-        # Une ligne de préprocesseur (`#define malloc(x) …`) ne définit aucun symbole de lien.
-        if (not before.strip() or before.lstrip().startswith("#")
-                or re.search(r"\bextern\b|\breturn\b|[=(,]", before)):
-            continue
-        if hit.group(0).rstrip().endswith(";") and "(" in hit.group(0):
-            continue
-        if hit.group(1) not in found:
-            found.append(hit.group(1))
-    return found
+    FONCTION PURE (testée). `nm_output` est la sortie de `nm --defined-only`. Le contrôle se fait
+    sur le BINAIRE, pas sur le texte : lire la source refusait à tort une méthode `Pile::free`,
+    un `using std::free;` ou une surcharge C++, et laissait passer un type de retour sur sa
+    propre ligne, un bloc `extern "C"` ou un paramètre écrit par un alias de type. Un symbole que
+    la libc fournit porte sa version (`stdout@GLIBC_2.2.5`, copie de relocalisation) ; une
+    surcharge C++ et un membre de classe sont décorés (`_Z4freeP1N`). Seul le nom NU est une
+    définition du code soumis, locale (`t`) ou globale (`T`)."""
+    names = {line.split()[-1] for line in (nm_output or "").splitlines() if line.split()}
+    return [n for n in C_SERVER_SYMBOLS if n in names]
 
 
 def c_server_source(methods, student_source, cpp=False, obj_list=()):
@@ -5073,10 +5058,6 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
     harness = harness_rpc_body(case_dir) or ""
-    linked = c_server_symbols_defined(extraction)
-    if linked:
-        return None, reserved_name_message(
-            linked, "la bibliothèque standard, dont le programme de correction se sert")
     # Le noteur ne recoit que les bouchons que le HARNAIS EMPLOIE : un bouchon que le harnais
     # ne nomme pas ne sert a rien, et son #define y detournerait un outil de la bibliotheque.
     # En C, une fonction d'aide `abs` que le harnais n'appelle pas n'est donc plus refusee
@@ -5137,6 +5118,20 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
             if label == "harnais":
                 return None, harness_build_failure(expired, code, "contre le code soumis", detail)
             return None, "Échec de compilation :\n" + detail
+        if label == "code soumis":
+            # Symboles de la libc redéfinis par le code soumis, lus sur le BINAIRE (cf.
+            # c_symbols_defined_in_binary). Sous l'UID étudiant, comme la compilation. Si nm
+            # échoue, pas de refus : ce n'est qu'un diagnostic nommé, à la place d'un appel
+            # refusé ou d'un temps limite inexpliqué.
+            nm_out = os.path.join(case_dir, "nm.out")
+            code, expired = run_proc(["nm", "--defined-only", out_value], cwd_c, env_c,
+                                     COMPILE_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
+                                     preexec_c)
+            linked = [] if expired or code != 0 else c_symbols_defined_in_binary(
+                read_capped(nm_out))
+            if linked:
+                return None, reserved_name_message(
+                    linked, "la bibliothèque standard, dont le programme de correction se sert")
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin)

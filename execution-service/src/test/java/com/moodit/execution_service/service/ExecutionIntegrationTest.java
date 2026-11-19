@@ -344,6 +344,44 @@ class ExecutionIntegrationTest {
         assertThat(passes("TypeScript", ts.replace("n * 2", "0"), h)).isFalse();
     }
 
+    @Test
+    void typescript_export_forms_are_graded() {
+        // `export const f = <appel>` : tsc n'émet que `exports.f = …`, sans liaison locale. Le
+        // serveur résolvait le nom par `eval` seulement — « f is not defined », réponse juste
+        // notée fausse. Les autres formes d'export passent par la liaison locale.
+        requireRuntime("typescript");
+        String ts = "const memo = (g: any): any => g;\n"
+                + "export const doubler = memo((n: number): number => n * 2);\n"
+                + "export const tripler = (n: number): number => n * 3;\n"
+                + "export default class Rect { a: number; constructor(a: number){ this.a = a; }"
+                + " aire(): number { return this.a; } }\n";
+        String h = "return doubler(2) === 4 && tripler(2) === 6 && new Rect(3).aire() === 3;";
+        assertThat(passes("TypeScript", ts, h)).isTrue();
+        assertThat(passes("TypeScript", ts.replace("n * 2", "0"), h)).isFalse();
+        assertThat(passes("TypeScript", ts.replace("n * 3", "0"), h)).isFalse();
+        assertThat(passes("TypeScript", ts.replace("return this.a;", "return 0;"), h)).isFalse();
+        String fn = "export default function doubler(n: number): number { return n * 2; }\n";
+        assertThat(passes("TypeScript", fn, "return doubler(5) === 10;")).isTrue();
+        assertThat(passes("TypeScript", fn.replace("n * 2", "0"), "return doubler(5) === 10;"))
+                .isFalse();
+    }
+
+    @Test
+    void javascript_exported_symbols_are_graded() {
+        // Un fichier JavaScript qui porte `export` est chargé par Node comme module ES : le
+        // serveur n'y dispose ni de `require` ni d'`exports`.
+        requireRuntime("javascript");
+        String js = "const memo = (g) => g;\n"
+                + "export function doubler(n){ return n * 2; }\n"
+                + "export const tripler = memo((n) => n * 3);\n"
+                + "export class Rect { constructor(a){ this.a = a; } aire(){ return this.a; } }\n";
+        String h = "return doubler(2) === 4 && tripler(2) === 6 && new Rect(3).aire() === 3;";
+        assertThat(passes("JavaScript", js, h)).isTrue();
+        assertThat(passes("JavaScript", js.replace("n * 2", "0"), h)).isFalse();
+        assertThat(passes("JavaScript", js.replace("n * 3", "0"), h)).isFalse();
+        assertThat(passes("JavaScript", js.replace("return this.a;", "return 0;"), h)).isFalse();
+    }
+
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {
