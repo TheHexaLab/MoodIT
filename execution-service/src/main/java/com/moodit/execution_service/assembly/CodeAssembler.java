@@ -192,10 +192,10 @@ public class CodeAssembler {
             // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
             proxies.append("class ").append(c).append(":\n")
                     .append("    def __init__(self, *a):\n")
-                    .append("        object.__setattr__(self, \"_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
+                    .append("        object.__setattr__(self, \"__moodit_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
                     .append(c).append("\", \"args\": list(a)})[\"handle\"])\n")
                     .append("    def __getattr__(self, name):\n")
-                    .append("        h = object.__getattribute__(self, \"_h\")\n")
+                    .append("        h = object.__getattribute__(self, \"__moodit_h\")\n")
                     .append("        def _call(*a):\n")
                     .append("            return globals()[\"__moodit_rpc\"]({\"op\": \"method\", \"handle\": h, \"name\": name, \"args\": list(a)})[\"value\"]\n")
                     .append("        return _call\n");
@@ -250,32 +250,37 @@ public class CodeAssembler {
                 + "try:\n    __moodit_p.stdin.close()\nexcept Exception:\n    pass\n"
                 + "__moodit_sys.exit(0 if __moodit_r else 1)\n";
         // Boucle RPC dans une FONCTION → ses variables ne polluent pas les globals (symboles étudiant).
-        String server = "import sys as __moodit_sys, json as __moodit_json\n"
+        // Les fonctions INTÉGRÉES dont la boucle a besoin sont prises dans `builtins`, AVANT le
+        // code soumis : celui-ci s'exécute dans le même module, et une fonction d'aide `print`,
+        // `len`, `str`, `getattr` ou `globals` (ou une classe `Exception`) y remplaçait
+        // l'intégrée. Le serveur répondait alors avec la fonction de l'étudiant — une réponse
+        // juste notée fausse, ou une trace Python en guise de diagnostic.
+        String server = "import sys as __moodit_sys, json as __moodit_json, builtins as __moodit_b\n"
                 + studentCode
                 + "\ndef __moodit_serve():\n"
                 + "    objs = {}\n"
                 + "    for line in __moodit_sys.stdin:\n"
                 + "        try: m = __moodit_json.loads(line)\n"
-                + "        except Exception: continue\n"
+                + "        except __moodit_b.Exception: continue\n"
                 + "        try:\n"
                 + "            op = m.get('op')\n"
                 + "            if op == 'call':\n"
-                + "                r = {'ok': True, 'value': globals()[m['name']](*m['args'])}\n"
+                + "                r = {'ok': True, 'value': __moodit_b.globals()[m['name']](*m['args'])}\n"
                 + "            elif op == 'new':\n"
-                + "                h = len(objs); objs[h] = globals()[m['class']](*m['args']); r = {'ok': True, 'handle': h}\n"
+                + "                h = __moodit_b.len(objs); objs[h] = __moodit_b.globals()[m['class']](*m['args']); r = {'ok': True, 'handle': h}\n"
                 + "            elif op == 'method':\n"
-                + "                r = {'ok': True, 'value': getattr(objs[m['handle']], m['name'])(*m['args'])}\n"
+                + "                r = {'ok': True, 'value': __moodit_b.getattr(objs[m['handle']], m['name'])(*m['args'])}\n"
                 + "            else:\n"
                 + "                r = {'ok': False, 'error': 'op inconnu'}\n"
-                + "        except Exception as e:\n"
-                + "            r = {'ok': False, 'error': str(e)}\n"
+                + "        except __moodit_b.Exception as e:\n"
+                + "            r = {'ok': False, 'error': __moodit_b.str(e)}\n"
                 // L'identifiant reçu est RENVOYÉ : c'est ce qui rattache la réponse à SON appel.
                 + "        r['id'] = m.get('id')\n"
                 // Retour à la ligne AVANT la réponse (comme en PHP) : un `print(…, end="")` du
                 // code soumis partage ce tampon et se collait au début de la ligne de réponse,
                 // qui n'était alors plus reconnue — le couple s'attendait jusqu'au temps limite,
                 // et une réponse JUSTE était notée « Interrompu ».
-                + "        print('\\n' + __moodit_json.dumps(r), flush=True)\n"
+                + "        __moodit_b.print('\\n' + __moodit_json.dumps(r), flush=True)\n"
                 + "__moodit_serve()\n";
         return new Assembled("python", List.of(
                 new RunnerExec.File("grader.py", grader),
@@ -342,10 +347,15 @@ public class CodeAssembler {
     // ── JavaScript / TypeScript ─────────────────────────────────────────────────
 
     /** Symboles JS de premier niveau : fonctions/const/let/var (appelables) et classes. */
+    // `export` (et `export default`) facultatif : c'est l'écriture ordinaire d'un module
+    // TypeScript, et sans lui une `export function f` ne recevait pas de mandataire — le harnais
+    // ne trouvait pas `f`, et une réponse juste était notée fausse.
+    private static final String JS_EXPORT = "(?:export\\s+(?:default\\s+)?)?";
     private static final Pattern JS_CALLABLE = Pattern.compile(
-            "(?m)^(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
-                    + "|(?m)^(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
-    private static final Pattern JS_CLASS = Pattern.compile("(?m)^class\\s+([A-Za-z_$][\\w$]*)");
+            "(?m)^" + JS_EXPORT + "(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
+                    + "|(?m)^" + JS_EXPORT + "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
+    private static final Pattern JS_CLASS = Pattern.compile(
+            "(?m)^" + JS_EXPORT + "(?:abstract\\s+)?class\\s+([A-Za-z_$][\\w$]*)");
 
     /**
      * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
@@ -393,7 +403,7 @@ public class CodeAssembler {
                 // (`Number(f()) === 3` passait avec un `Number` qui renvoie 3). EN TÊTE, avant
                 // tout usage d'un nom que le mandataire hissé pourrait déjà masquer.
                 + "const __moodit_shadow=" + pythonStringList(names) + ".filter(function(n){"
-                + " return (n in globalThis) || [\"require\",\"module\",\"exports\",\"__filename\","
+                + " return (n in [].constructor.constructor('return this')()) || [\"require\",\"module\",\"exports\",\"__filename\","
                 + "\"__dirname\",\"globalThis\"].indexOf(n)>=0; });\n"
                 + "if(__moodit_shadow.length){ const __moodit_msg=" + pythonStringLiteral(SHADOW_PREFIX)
                 + "+__moodit_shadow[0]+" + pythonStringLiteral(
@@ -437,27 +447,47 @@ public class CodeAssembler {
                 + "if(__moodit_r) process.stderr.write(\"" + nonce + "\");\n"
                 + "try{ __moodit_child.stdin.end(); }catch(e){}\n"
                 + "process.exit(__moodit_r?0:1);\n";
-        // Boucle RPC dans une FONCTION → ses variables ne polluent pas la portée des symboles étudiant.
+        // Le serveur partage le MODULE du code soumis, et en JavaScript tout nom se masque : une
+        // fonction soumise est hissée en tête du module, une `const` y ouvre une zone morte.
+        // Deux règles, donc :
+        //  1. les objets globaux dont la boucle a besoin (JSON, process, String, console) sont pris
+        //     sur l'objet global AVANT le code soumis, par un chemin qui ne nomme AUCUN
+        //     identifiant (`[].constructor.constructor` est Function) : une fonction d'aide
+        //     `JSON`, `String` ou `process` ne les remplace plus ;
+        //  2. un symbole soumis est résolu par `__moodit_get`, déclarée au niveau du module, où la
+        //     seule locale est son paramètre préfixé. La boucle le faisait par un `eval` écrit au
+        //     milieu de ses propres locales (`buf`, `d`, `i`, `line`, `m`, `r`, `objs`, `hid`…) :
+        //     une fonction soumise de l'un de ces noms rendait la variable du serveur, et une
+        //     réponse juste était notée fausse.
         String server = header
-                + "const __moodit_NL=String.fromCharCode(10);\n"
-                + "console.log=function(){}; console.info=function(){};\n"
+                + "const __moodit_G=[].constructor.constructor('return this')();\n"
+                + "const __moodit_JSON=__moodit_G.JSON, __moodit_process=__moodit_G.process,"
+                + " __moodit_String=__moodit_G.String;\n"
+                + "const __moodit_NL=__moodit_String.fromCharCode(10);\n"
+                + "__moodit_G.console.log=function(){}; __moodit_G.console.info=function(){};\n"
                 + studentCode
-                + "\nfunction __moodit_serve(){ const objs={}; let hid=0, buf='';\n"
-                + "process.stdin.on('data', d=>{ buf+=d; let i;\n"
-                + "  while((i=buf.indexOf(__moodit_NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
-                + "    let m; try{ m=JSON.parse(line); }catch(e){ continue; }\n"
-                + "    let r;\n"
+                + "\nconst __moodit_get=(__moodit_n)=>eval(__moodit_n);\n"
+                + "function __moodit_serve(){ const __moodit_objs={}; let __moodit_hid=0, __moodit_buf='';\n"
+                + "__moodit_process.stdin.on('data', __moodit_d=>{ __moodit_buf+=__moodit_d; let __moodit_i;\n"
+                + "  while((__moodit_i=__moodit_buf.indexOf(__moodit_NL))>=0){"
+                + " const __moodit_line=__moodit_buf.slice(0,__moodit_i);"
+                + " __moodit_buf=__moodit_buf.slice(__moodit_i+1);\n"
+                + "    let __moodit_m; try{ __moodit_m=__moodit_JSON.parse(__moodit_line); }catch(__moodit_e){ continue; }\n"
+                + "    let __moodit_r;\n"
                 + "    try {\n"
-                + "      if(m.op==='call') r={ok:true,value: eval(m.name)(...m.args)};\n"
-                + "      else if(m.op==='new'){ const h=hid++; objs[h]=new (eval(m.cls))(...m.args); r={ok:true,handle:h}; }\n"
-                + "      else if(m.op==='method') r={ok:true,value: objs[m.handle][m.name](...m.args)};\n"
-                + "      else r={ok:false,error:'op inconnu'};\n"
-                + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
+                + "      if(__moodit_m.op==='call') __moodit_r={ok:true,value: __moodit_get(__moodit_m.name)(...__moodit_m.args)};\n"
+                + "      else if(__moodit_m.op==='new'){ const __moodit_h=__moodit_hid++;"
+                + " __moodit_objs[__moodit_h]=new (__moodit_get(__moodit_m.cls))(...__moodit_m.args);"
+                + " __moodit_r={ok:true,handle:__moodit_h}; }\n"
+                + "      else if(__moodit_m.op==='method') __moodit_r={ok:true,value:"
+                + " __moodit_objs[__moodit_m.handle][__moodit_m.name](...__moodit_m.args)};\n"
+                + "      else __moodit_r={ok:false,error:'op inconnu'};\n"
+                + "    } catch(__moodit_e){ __moodit_r={ok:false,error:__moodit_String(__moodit_e && __moodit_e.message || __moodit_e)}; }\n"
                 // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
-                + "    r.id=m.id;\n"
+                + "    __moodit_r.id=__moodit_m.id;\n"
                 // Retour à la ligne AVANT la réponse : même motif qu'en Python et en PHP — un
                 // `process.stdout.write("x")` sans saut de ligne la contaminait.
-                + "    process.stdout.write(__moodit_NL+JSON.stringify(r)+__moodit_NL);\n"
+                + "    __moodit_process.stdout.write(__moodit_NL+__moodit_JSON.stringify(__moodit_r)+__moodit_NL);\n"
                 + "  }}); }\n__moodit_serve();\n";
         return new Assembled(runtimeName, List.of(
                 new RunnerExec.File(graderName, grader),

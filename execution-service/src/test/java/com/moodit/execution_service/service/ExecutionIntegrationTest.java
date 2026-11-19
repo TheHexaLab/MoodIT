@@ -288,6 +288,62 @@ class ExecutionIntegrationTest {
         assertThat(passes("Bash", "est_pair() { return 1; }", "est_pair 4")).isFalse();
     }
 
+    // Balayage systématique des collisions de noms (#246), côté SERVEUR : le code soumis partage
+    // le module du serveur généré, qui ne doit dépendre d'aucun nom que l'étudiant peut porter.
+
+    @Test
+    void python_helper_named_like_a_builtin_the_server_uses_is_graded() {
+        requireRuntime("python");
+        String py = "def print(x):\n    return None\ndef len(x):\n    return 99\n"
+                + "def str(x):\n    return 'z'\ndef globals():\n    return {}\n"
+                + "class R:\n    def __init__(self, a):\n        self.a = a\n"
+                + "    def aire(self):\n        print(self.a)\n        return self.a\n"
+                + "def doubler(n):\n    return n * 2\n";
+        String h = "return doubler(5) == 10 and R(3).aire() == 3 and R(4).aire() == 4";
+        assertThat(passes("Python", py, h)).isTrue();
+        assertThat(passes("Python", py.replace("n * 2", "0"), h)).isFalse();
+    }
+
+    @Test
+    void javascript_function_named_like_a_server_local_is_graded() {
+        // `i`, `m`, `r`, `d`, `line`, `buf`… étaient les locales de la boucle du serveur, où un
+        // `eval` résolvait le nom demandé : il rendait la variable du serveur.
+        String h = "return i(1) === 2 && m(1) === 3 && r(1) === 4 && line(7) === 7"
+                + " && new objs(2).d() === 2;";
+        for (String language : List.of("JavaScript", "TypeScript")) {
+            requireRuntime(language.toLowerCase());
+            String js = "function i(x){ return x + 1; }\nfunction m(x){ return x + 2; }\n"
+                    + "const r = (x) => x + 3;\nfunction line(x){ return x; }\n"
+                    + "class objs { constructor(a){ this.a = a; } d(){ return this.a; } }\n";
+            assertThat(passes(language, js, h)).as(language).isTrue();
+            assertThat(passes(language, js.replace("x + 1", "0"), h)).as(language).isFalse();
+        }
+    }
+
+    @Test
+    void javascript_helper_named_like_a_global_the_server_uses_is_graded() {
+        // Fonction hissée (`function JSON`) ou zone morte (`const process`) : les deux
+        // remplaçaient l'objet global dans le module du serveur.
+        requireRuntime("javascript");
+        String js = "function JSON(x){ return x; }\nfunction String(x){ return 'z'; }\n"
+                + "const process = 3;\nconst console = { log(){} };\n"
+                + "function doubler(n){ return n * 2 + process - 3; }\n";
+        assertThat(passes("JavaScript", js, "return doubler(5) === 10;")).isTrue();
+        assertThat(passes("JavaScript", js.replace("n * 2", "0"), "return doubler(5) === 10;"))
+                .isFalse();
+    }
+
+    @Test
+    void typescript_exported_function_and_class_are_graded() {
+        requireRuntime("typescript");
+        String ts = "export function doubler(n: number): number { return n * 2; }\n"
+                + "export class Rect { a: number; constructor(a: number){ this.a = a; }"
+                + " aire(): number { return this.a; } }\n";
+        String h = "return doubler(2) === 4 && new Rect(3).aire() === 3;";
+        assertThat(passes("TypeScript", ts, h)).isTrue();
+        assertThat(passes("TypeScript", ts.replace("n * 2", "0"), h)).isFalse();
+    }
+
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {

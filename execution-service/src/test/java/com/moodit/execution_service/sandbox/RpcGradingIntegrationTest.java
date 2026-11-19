@@ -654,10 +654,11 @@ class RpcGradingIntegrationTest {
         String c = "int abs(int x) { return x < 0 ? -x : x; }\n"
                 + "int distance(int a, int b) { return abs(a - b); }\n";
         assertThat(note("C", "return distance(2, 5) == 3;", c).passed()).isTrue();
-        // En C++, la redéfinition heurte <stdlib.h> dans le programme de l'étudiant : le refus
-        // nommé est conservé.
-        assertThat(note("C++", "return distance(2, 5) == 3;", c).detail())
-                .contains("réservé").contains("abs");
+        // En C++ aussi : le serveur n'inclut plus <stdlib.h> après le code soumis, la
+        // redéfinition n'y heurte plus rien.
+        assertThat(note("C++", "return distance(2, 5) == 3;", c).passed()).isTrue();
+        assertThat(note("C++", "return distance(2, 5) == 3;", c.replace("-x : x", "0 : 0"))
+                .passed()).isFalse();
     }
 
     @Test
@@ -1124,6 +1125,182 @@ class RpcGradingIntegrationTest {
                     .isTrue();
             assertThat(note(language, h, code.replace("x * 2", "0")).passed()).isFalse();
         }
+    }
+
+    // Balayage systématique des collisions de noms (#246) : chaque identifiant du code généré et
+    // des bibliothèques qu'il importe, essayé comme fonction, fonction d'aide, variable, type,
+    // méthode et champ soumis, par compilation réelle. Les cas ci-dessous sont un témoin par
+    // famille de défauts trouvée ; la version fausse de chaque réponse doit rester fausse.
+
+    private void gradedThenWrong(String language, String harness, String code, String right,
+            String wrong) {
+        TestResult r = note(language, harness, code);
+        assertThat(r.passed()).as(language + " : " + (r.detail() == null ? "" : r.detail()))
+                .isTrue();
+        assertThat(note(language, harness, code.replace(right, wrong)).passed()).isFalse();
+    }
+
+    @Test
+    void rust_constants_statics_and_prelude_aliases_do_not_reach_the_generated_code() {
+        // Une `const id` ou un `static args` faisait d'un `let id = …` du serveur un MOTIF de
+        // constante ; `type Result<T>` (idiome courant) remplaçait celui du prélude.
+        gradedThenWrong("Rust", "doubler(5) == 10 && Point { i: 3, parts: 4 }.somme() == 7", """
+                type Result<T> = std::result::Result<T, String>;
+                const id: i32 = 4;
+                static args: i32 = 1;
+                const i: i32 = 0;
+
+                fn doubler(n: i32) -> i32 { n * 2 }
+
+                struct Point {
+                    i: i32,
+                    parts: i32,
+                }
+
+                impl Point {
+                    fn somme(&self) -> i32 {
+                        self.i + self.parts
+                    }
+                }
+                """, "n * 2", "0");
+    }
+
+    @Test
+    void rust_impl_written_on_one_line_is_graded() {
+        gradedThenWrong("Rust", "(R { v: 3 }).get() == 3",
+                "struct R { v: i32 }\nimpl R { fn get(&self) -> i32 { self.v } }\n",
+                "self.v }", "0 }");
+    }
+
+    @Test
+    void c_names_of_the_standard_library_are_ordinary_names_for_a_submission() {
+        // Le serveur n'inclut plus aucun en-tête : une fonction d'aide `index`, `div` ou
+        // `remove`, un `typedef … uint` et une macro `abs(x)` ne heurtent plus stdio/stdlib/string.
+        gradedThenWrong("C", "return dist(-3) == 3 && moitie(8) == 4;", """
+                #define abs(x) ((x) < 0 ? -(x) : (x))
+                #define TRUE 1
+                typedef unsigned int uint;
+                int index(int x) { return x; }
+                int div(int a, int b) { return a / b; }
+                int remove(int x) { return x - 1; }
+                int dist(int a) { return abs(index(a)); }
+                int moitie(int a) { return div(a, 2); }
+                """, "a / b", "0");
+    }
+
+    @Test
+    void cpp_helper_named_like_the_c_library_is_graded_not_refused() {
+        gradedThenWrong("C++", "return dist(-3) == 3;", """
+                int abs(int x) { return x < 0 ? -x : x; }
+                int index(int x) { return x; }
+                int dist(int a) { return abs(index(a)); }
+                """, "-x : x", "0 : 0");
+    }
+
+    @Test
+    void cpp_using_namespace_std_does_not_make_the_generated_call_ambiguous() {
+        // `divides`, `plus`, `modulus`… sont des types de <functional> : avec `using namespace
+        // std;`, l'appel nu du serveur était ambigu.
+        gradedThenWrong("C++", "return divides(4) == 2 && plus(1) == 2;", """
+                #include <algorithm>
+                #include <functional>
+                using namespace std;
+                int divides(int a) { return a / 2; }
+                int plus(int a) { return a + 1; }
+                """, "a / 2", "0");
+    }
+
+    @Test
+    void cpp_method_named_like_a_function_the_stub_calls_is_graded() {
+        gradedThenWrong("C++", "return Rect(2).atoi() == 2 && Rect(5).snprintf() == 6;", """
+                class Rect {
+                    int v;
+                public:
+                    Rect(int a) : v(a) {}
+                    int atoi() { return v; }
+                    int snprintf() { return v + 1; }
+                };
+                """, "return v;", "return 0;");
+    }
+
+    @Test
+    void c_submission_defining_a_symbol_the_server_links_to_is_refused_by_name() {
+        TestResult r = note("C", "return doubler(5) == 10;", """
+                int printf(int x) { return x; }
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("printf");
+    }
+
+    @Test
+    void cpp_class_named_like_a_library_function_is_refused_by_name() {
+        TestResult r = note("C++", "return remove(3).get() == 3;", """
+                class remove { int v; public: remove(int a) : v(a) {} int get() { return v; } };
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("remove");
+        // Classe d'aide que le harnais ne nomme pas : ni bouchon ni refus.
+        gradedThenWrong("C++", "return via(3) == 3;", """
+                class remove { int v; public: remove(int a) : v(a) {} int get() { return v; } };
+                int via(int a) { return remove(a).get(); }
+                """, "return v;", "return 0;");
+    }
+
+    @Test
+    void go_package_declaration_hiding_a_predeclared_name_is_refused_by_name() {
+        TestResult r = note("Go", "return doubler(5) == 10",
+                "package main\n\nvar string = 3\n\nfunc doubler(n int) int { return n * 2 }\n");
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains("réservé").contains("string");
+        // Un nom prédéclaré dont le serveur ne se sert pas reste un nom ordinaire.
+        gradedThenWrong("Go", "return doubler(5) == 10",
+                "package main\n\nvar max = 10\n\nfunc doubler(n int) int { return n * 2 }\n",
+                "n * 2", "0");
+    }
+
+    @Test
+    void java_class_named_like_a_class_the_grader_uses_is_graded() {
+        gradedThenWrong("Java", "return new PrintStream(3).get() == 3;", """
+                class PrintStream {
+                    int v;
+                    PrintStream(int a) { v = a; }
+                    int get() { return v; }
+                }
+                """, "return v;", "return 0;");
+    }
+
+    @Test
+    void csharp_method_named_like_a_framework_class_is_graded() {
+        // `Convert` : le nom le plus naturel d'un exercice de conversion.
+        gradedThenWrong("C#", "return Solution.Convert(1.5) == 3.0 && Solution.System(2) == 3;", """
+                class Solution {
+                    public static double Convert(double c) { return c * 2; }
+                    public static int System(int n) { return n + 1; }
+                }
+                """, "c * 2", "0");
+    }
+
+    @Test
+    void csharp_class_named_like_a_framework_class_is_graded() {
+        gradedThenWrong("C#", "return new Type(1).Get() == 2;", """
+                class Type {
+                    int v;
+                    public Type(int a) { v = a; }
+                    public int Get() { return v + 1; }
+                }
+                """, "v + 1", "0");
+        gradedThenWrong("C#", "return Solution.Via(1) == 2;", """
+                class Console {
+                    public int v;
+                    public Console(int a) { v = a; }
+                    public int Get() { return v + 1; }
+                }
+                class Exception { }
+                class Solution {
+                    public static int Via(int x) { return new Console(x).Get(); }
+                }
+                """, "v + 1", "0");
     }
 
     @Test

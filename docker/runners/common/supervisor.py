@@ -1413,15 +1413,15 @@ def java_grader_source(harness_code, nonce):
 
     FONCTION PURE (testée). stdin/stdout sont le tube vers le processus étudiant ; le nonce part
     sur stderr, que l'étudiant ne tient pas. Une exception du harnais vaut faux (fail-closed)."""
-    return """import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-
+    # AUCUN import : les bouchons des classes soumises sont compilés avec le noteur, dans le même
+    # paquet, et un import à nom simple l'emporte sur eux. Une classe soumise `PrintStream` ou
+    # `BufferedReader` devenait, dans le harnais, celle de java.io — « le harnais ne compile
+    # pas » sur une réponse juste. Les quatre classes sont donc nommées en entier.
+    return """
 final class MooditRpc {
-    private static final BufferedReader ENTREE =
-            new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-    private static final PrintStream SORTIE = System.out;
+    private static final java.io.BufferedReader ENTREE = new java.io.BufferedReader(
+            new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8));
+    private static final java.io.PrintStream SORTIE = System.out;
 
     private MooditRpc() {}
 
@@ -1896,6 +1896,34 @@ def go_hidden_names(names, harness_code):
     refused_packages = [n for n in packages if harness_mentions(harness_code, n)]
     hidden = [n for n in reserved + packages if n not in refused + refused_packages]
     return refused, refused_packages, hidden
+
+
+GO_PACKAGE_DECL = re.compile(r"^(?:func|type|var|const)\s+(\w+)", re.M)
+GO_PACKAGE_GROUP = re.compile(r"^(?:var|const|type)\s*\(\s*\n(.*?)^\)", re.M | re.S)
+
+
+def go_package_names(source):
+    """TOUS les noms déclarés au niveau du paquet par le code soumis. FONCTION PURE (testée).
+
+    Fonctions de toute signature, types, variables et constantes, formes groupées comprises
+    (`var ( a = 1 ; b, c int )`). Une méthode (`func (r T) f()`) n'est pas un nom de paquet."""
+    names = list(GO_PACKAGE_DECL.findall(source or ""))
+    for body in GO_PACKAGE_GROUP.findall(source or ""):
+        for line in body.splitlines():
+            hit = re.match(r"\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)", line)
+            if hit:
+                names += [n.strip() for n in hit.group(1).split(",")]
+    return list(dict.fromkeys(names))
+
+
+def go_server_hidden(source):
+    """Noms de paquet soumis qui masquent un identifiant dont le SERVEUR généré a besoin.
+
+    FONCTION PURE (testée). Le serveur est compilé dans le paquet de l'étudiant : une
+    `var string = …`, une `const true = …` ou une `func int(xs []int) int` (signature non
+    transportable, donc absente des bouchons) l'empêchait de compiler — « Échec de compilation »
+    dans un fichier que l'étudiant n'a pas écrit."""
+    return [n for n in go_package_names(source) if n in GO_SERVER_PREDECLARED]
 
 
 def go_without_hidden(methods, obj_list, hidden):
@@ -2853,7 +2881,10 @@ def _c_param_types(params):
 
 
 def cpp_object_stub(obj_list):
-    """Bouchons OBJET C++ : classe à poignée, constructeurs et méthodes relayés. PURE (testée)."""
+    """Bouchons OBJET C++ : classe à poignée, constructeurs et méthodes relayés. PURE (testée).
+
+    Les fonctions de la libc sont appelées QUALIFIÉES (`::atoi`, `::snprintf`) : dans le corps
+    d'un membre, une méthode soumise du même nom l'emportait sur la fonction globale."""
     pieces = []
     for klass, ctors, method_list in obj_list:
         body = ["class %s {" % klass, "    int __h;", "public:"]
@@ -2864,10 +2895,10 @@ def cpp_object_stub(obj_list):
             body += ["    %s(%s) {" % (klass, params),
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
-                      '        snprintf(requete, sizeof requete, "%%s|new|%s%s", id%s);'
+                      '        ::snprintf(requete, sizeof requete, "%%s|new|%s%s", id%s);'
                       % (c_dispatch_key(klass, types), fmt, args),
                       "        moodit_envoie(requete);",
-                      "        __h = atoi(moodit_valeur(id));",
+                      "        __h = ::atoi(moodit_valeur(id));",
                       "    }"]
         for ret, ident, types in method_list:
             params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
@@ -2877,10 +2908,10 @@ def cpp_object_stub(obj_list):
             body += ["    %s %s(%s) {" % (ret, ident, params),
                       "        char id[40], requete[4096];",
                       "        moodit_identifiant(id);",
-                      '        snprintf(requete, sizeof requete, "%%s|method|%s.%s|%%d%s", id, __h%s);'
+                      '        ::snprintf(requete, sizeof requete, "%%s|method|%s.%s|%%d%s", id, __h%s);'
                       % (klass, c_dispatch_key(ident, types), fmt, args),
                       "        moodit_envoie(requete);",
-                      "        return %s(moodit_valeur(id));" % reader,
+                      "        return ::%s(moodit_valeur(id));" % reader,
                       "    }"]
         body.append("};")
         pieces.append("\n".join(body))
@@ -2896,37 +2927,55 @@ def c_dispatch_key(ident, types):
     return "%s(%s)" % (ident, ",".join(types))
 
 
+# Lecture d'un argument côté SERVEUR : fonctions du runtime sans en-tête (C_SERVER_RUNTIME).
+C_SERVER_READ = {"int": "moodit_lit_int", "long": "moodit_lit_long", "double": "moodit_lit_double"}
+
+
 def cpp_object_dispatch(obj_list):
-    """Aiguillage OBJET côté étudiant : une pile PAR CLASSE, construction réelle. PURE (testée)."""
+    """Aiguillage OBJET côté étudiant : une table PAR CLASSE, construction réelle. PURE (testée).
+
+    Table de pointeurs et `new`, sans `<vector>` : le serveur n'inclut AUCUN en-tête (cf.
+    C_SERVER_RUNTIME), et `new K(…)` ne demande à la classe ni copie ni déplacement."""
     stacks, branches = [], []
     for klass, ctors, method_list in obj_list:
-        stacks.append("static std::vector<%s> moodit_objets_%s;" % (klass, klass))
+        # `::K` : avec un `using namespace std;` soumis, une classe `list` ou `pair` était
+        # ambiguë pour le serveur ; le nom qualifié désigne celle du code soumis.
+        stacks.append("static ::%s **moodit_objets_%s = 0;\nstatic int moodit_n_%s = 0;"
+                      % (klass, klass, klass))
         for types in ctors:
             reads = "\n".join(
                 "        %s moodit_a%d = %s(moodit_jeton());"
-                % (t, i, C_READ[t])
+                % (t, i, C_SERVER_READ[t])
                 for i, t in enumerate(types))
             args = ", ".join("moodit_a%d" % i for i in range(len(types)))
-            branches.append('''    if (strcmp(moodit_op, "new") == 0 && strcmp(moodit_nom, "%s") == 0) {
+            branches.append("""    if (moodit_egal(moodit_op, "new") && moodit_egal(moodit_nom, "%s")) {
 %s
-        moodit_objets_%s.push_back(%s(%s));
-        printf("\\n%%s|ok|%%d\\n", moodit_id, (int) moodit_objets_%s.size() - 1);
-        fflush(stdout);
+        moodit_objets_%s = (::%s **) moodit_realloc(
+            moodit_objets_%s, (moodit_n_%s + 1) * sizeof(::%s *));
+        moodit_objets_%s[moodit_n_%s++] = new ::%s(%s);
+        moodit_printf("\\n%%s|ok|%%d\\n", moodit_id, moodit_n_%s - 1);
+        moodit_fflush(moodit_stdout);
         return;
-    }''' % (c_dispatch_key(klass, types), reads, klass, klass, args, klass))
+    }""" % (c_dispatch_key(klass, types), reads, klass, klass, klass, klass, klass, klass, klass,
+            klass, args, klass))
         for ret, ident, types in method_list:
             reads = "\n".join(
                 "        %s moodit_a%d = %s(moodit_jeton());"
-                % (t, i, C_READ[t])
+                % (t, i, C_SERVER_READ[t])
                 for i, t in enumerate(types))
             args = ", ".join("moodit_a%d" % i for i in range(len(types)))
-            branches.append('''    if (strcmp(moodit_op, "method") == 0 && strcmp(moodit_nom, "%s.%s") == 0) {
-        int moodit_h = atoi(moodit_jeton());
+            branches.append("""    if (moodit_egal(moodit_op, "method") && moodit_egal(moodit_nom, "%s.%s")) {
+        int moodit_h = moodit_lit_int(moodit_jeton());
+        if (moodit_h < 0 || moodit_h >= moodit_n_%s) {
+            moodit_printf("\\n%%s|err|objet inconnu\\n", moodit_id);
+            moodit_fflush(moodit_stdout);
+            return;
+        }
 %s
-        printf("\\n%%s|ok|%s\\n", moodit_id, moodit_objets_%s[moodit_h].%s(%s));
-        fflush(stdout);
+        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, moodit_objets_%s[moodit_h]->%s(%s));
+        moodit_fflush(moodit_stdout);
         return;
-    }''' % (klass, c_dispatch_key(ident, types), reads, C_TYPES[ret], klass, ident, args))
+    }""" % (klass, c_dispatch_key(ident, types), klass, reads, C_TYPES[ret], klass, ident, args))
     return "\n".join(stacks), "\n\n".join(branches)
 
 
@@ -3110,68 +3159,157 @@ int main(void) {
 '''
 
 
+# Runtime du SERVEUR C/C++ : AUCUN en-tête. Le serveur est compilé dans l'unité du code soumis,
+# APRÈS lui : tout `#include` y déclarait des centaines de noms que l'étudiant a le droit de
+# porter quand il n'inclut pas l'en-tête lui-même — une fonction d'aide `index`, `remove`,
+# `div`, `rand`, `select`, `exit`…, un `typedef … uint`, une macro `#define abs(x) …` (essais
+# dans l'image : environ 300 noms de stdio/stdlib/string faisaient échouer la compilation d'une
+# réponse juste). Les rares fonctions de la libc dont le serveur a besoin sont donc déclarées
+# sous un nom `moodit_`, liées au symbole réel par une étiquette d'assembleur (extension gcc et
+# g++), et le reste — comparaison, recherche d'un caractère — est écrit ici.
+C_SERVER_RUNTIME = r"""
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int moodit_printf(const char *, ...) __asm__("printf");
+extern int moodit_fflush(void *) __asm__("fflush");
+extern char *moodit_fgets(char *, int, void *) __asm__("fgets");
+extern long moodit_strtol(const char *, char **, int) __asm__("strtol");
+extern double moodit_strtod(const char *, char **) __asm__("strtod");
+extern void *moodit_realloc(void *, __SIZE_TYPE__) __asm__("realloc");
+extern void *moodit_stdin __asm__("stdin");
+extern void *moodit_stdout __asm__("stdout");
+#ifdef __cplusplus
+}
+#endif
+
+static char moodit_ligne[8192];
+static char *moodit_reste;
+
+static int moodit_egal(const char *moodit_x, const char *moodit_y) {
+    while (*moodit_x && *moodit_x == *moodit_y) { moodit_x++; moodit_y++; }
+    return *moodit_x == *moodit_y;
+}
+
+static char *moodit_cherche(char *moodit_x, char moodit_c) {
+    for (; *moodit_x; moodit_x++) { if (*moodit_x == moodit_c) { return moodit_x; } }
+    return 0;
+}
+
+static int moodit_lit_int(const char *moodit_x) { return (int) moodit_strtol(moodit_x, 0, 10); }
+static long moodit_lit_long(const char *moodit_x) { return moodit_strtol(moodit_x, 0, 10); }
+static double moodit_lit_double(const char *moodit_x) { return moodit_strtod(moodit_x, 0); }
+
+static const char *moodit_jeton(void) {
+    if (!moodit_reste) { return "0"; }
+    char *moodit_debut = moodit_reste;
+    char *moodit_sep = moodit_cherche(moodit_debut, '|');
+    if (moodit_sep) { *moodit_sep = 0; moodit_reste = moodit_sep + 1; } else { moodit_reste = 0; }
+    return moodit_debut;
+}
+"""
+
+
+# Symboles de la libc auxquels le serveur est LIÉ (étiquettes d'assembleur de C_SERVER_RUNTIME),
+# et l'allocateur dont ils dépendent. Un code soumis qui DÉFINIT l'un d'eux au niveau du fichier
+# le remplace à l'édition de liens pour tout le programme : le serveur écrirait ses réponses
+# avec la `printf` de l'étudiant.
+C_SERVER_SYMBOLS = ("printf", "fflush", "fgets", "strtol", "strtod", "realloc", "malloc", "calloc",
+                    "free", "stdin", "stdout")
+C_SERVER_SYMBOL_DEF = re.compile(
+    r"(?<![\w.>])(%s)\s*(?:\([^;{}]*\)\s*\{|=|;|\[)" % "|".join(C_SERVER_SYMBOLS))
+
+
+def c_server_symbols_defined(source):
+    """Symboles de C_SERVER_SYMBOLS que le code soumis DÉFINIT au niveau du fichier.
+
+    FONCTION PURE (testée). `source` est déjà passé par blank_code (ni chaînes ni commentaires).
+    Seul le niveau 0 compte : un appel `printf(…)` ou une locale `int free = 0;` dans une
+    fonction ne définit rien. Une définition statique compte aussi, par prudence : le refus est
+    nommé, et ces noms ne sont pas ceux d'une réponse d'étudiant."""
+    depths = code_depths(source)
+    found = []
+    for hit in C_SERVER_SYMBOL_DEF.finditer(source or ""):
+        if depths[hit.start(1)] != 0:
+            continue
+        # Une DÉCLARATION sans corps (`int printf(const char *, ...);`, `extern FILE *stdin;`)
+        # ne définit rien : seuls un corps de fonction ou une variable sans `extern` comptent.
+        line_start = source.rfind("\n", 0, hit.start(1)) + 1
+        before = source[line_start:hit.start(1)]
+        # Une ligne de préprocesseur (`#define malloc(x) …`) ne définit aucun symbole de lien.
+        if (not before.strip() or before.lstrip().startswith("#")
+                or re.search(r"\bextern\b|\breturn\b|[=(,]", before)):
+            continue
+        if hit.group(0).rstrip().endswith(";") and "(" in hit.group(0):
+            continue
+        if hit.group(1) not in found:
+            found.append(hit.group(1))
+    return found
+
+
 def c_server_source(methods, student_source, cpp=False, obj_list=()):
-    """Programme ÉTUDIANT C/C++ : son code (main renommé) + aiguillage typé. PURE (testée)."""
+    """Programme ÉTUDIANT C/C++ : son code (main renommé) + aiguillage typé. PURE (testée).
+
+    Après le code soumis, le serveur n'emploie QUE des mots-clés, des noms `moodit_` et les
+    noms des fonctions et classes soumises (cf. C_SERVER_RUNTIME)."""
     branches = []
     for ret, ident, types in methods:
         reads = []
         for i, t in enumerate(types):
-            conv = C_READ[t]
-            reads.append("        %s moodit_a%d = %s(moodit_jeton());" % (t, i, conv))
+            reads.append("        %s moodit_a%d = %s(moodit_jeton());" % (t, i, C_SERVER_READ[t]))
         # Locales et paramètres PRÉFIXÉS `moodit_` : en C comme en C++, un paramètre masque une
         # fonction du même nom. Avec `id`, `op`, `nom` et `a0`, une `int id(int x)` soumise
         # devenait un appel sur un `const char *` — le programme de l'étudiant ne compilait plus.
         args = ", ".join("moodit_a%d" % i for i in range(len(types)))
-        branches.append("""    if (strcmp(moodit_op, "call") == 0 && strcmp(moodit_nom, "%s") == 0) {
+        # En C++, appel QUALIFIÉ `::f(…)` : avec un `using namespace std;` soumis, une fonction
+        # `divides`, `modulus`, `plus` ou `identity` portait le nom d'un type de la bibliothèque
+        # et l'appel nu du serveur était ambigu — la réponse ne compilait plus.
+        scope = "::" if cpp else ""
+        branches.append("""    if (moodit_egal(moodit_op, "call") && moodit_egal(moodit_nom, "%s")) {
 %s
-        printf("\\n%%s|ok|%s\\n", moodit_id, %s(%s));
-        fflush(stdout);
+        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, %s%s(%s));
+        moodit_fflush(moodit_stdout);
         return;
-    }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], ident, args))
+    }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], scope, ident, args))
     stacks, object_branches = cpp_object_dispatch(obj_list)
     return ("#define main __moodit_student_main\n"
             + (student_source or "")
             + "\n#undef main\n"
-            + ("#include <vector>\n" if obj_list else "")
-            + C_RUNTIME + stacks + r'''
-static char *moodit_reste;
-
-/* Decoupage a la main : strsep n'est pas dans l'ISO C17 (-std=c17), et ceci compile aussi en C++. */
-static const char *moodit_jeton(void) {
-    if (!moodit_reste) { return "0"; }
-    char *debut = moodit_reste;
-    char *sep = strchr(debut, '|');
-    if (sep) { *sep = '\0'; moodit_reste = sep + 1; } else { moodit_reste = NULL; }
-    return debut;
-}
+            + C_SERVER_RUNTIME + stacks + r"""
 
 /* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
 static void moodit_traite(const char *moodit_id, const char *moodit_op,
                           const char *moodit_nom) {
-''' + "\n".join(branches) + "\n\n" + object_branches + r'''
-    printf("\n%s|err|fonction inconnue\n", moodit_id);
-    fflush(stdout);
+""" + "\n".join(branches) + "\n\n" + object_branches + r"""
+    moodit_printf("\n%s|err|fonction inconnue\n", moodit_id);
+    moodit_fflush(moodit_stdout);
 }
 
 int main(void) {
-    while (fgets(moodit_ligne, sizeof moodit_ligne, stdin)) {
-        char *fin = strchr(moodit_ligne, '\n');
-        if (fin) { *fin = '\0'; }
+    while (moodit_fgets(moodit_ligne, (int) sizeof moodit_ligne, moodit_stdin)) {
+        char *moodit_fin = moodit_cherche(moodit_ligne, '\n');
+        if (moodit_fin) { *moodit_fin = 0; }
         moodit_reste = moodit_ligne;
-        const char *id = moodit_jeton();
-        const char *op = moodit_jeton();
-        const char *nom = moodit_jeton();
-        moodit_traite(id, op, nom);
+        const char *moodit_i = moodit_jeton();
+        const char *moodit_o = moodit_jeton();
+        const char *moodit_n = moodit_jeton();
+        moodit_traite(moodit_i, moodit_o, moodit_n);
     }
     return 0;
 }
-''')
+""")
 
 
 # ─────────────────── Rust : bouchon et aiguillage TYPÉS, protocole texte ───────────────────
 # Pas de serde dans l'image (aucun réseau à la compilation) : même protocole texte que C.
 
-RUST_FN = re.compile(r"^[ \t]*(?:pub\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)", re.M)
+# `fn` en debut de ligne OU apres `{`, `}`, `;` : `impl R { fn aire(&self) -> i32 { … } }` sur
+# une seule ligne est du Rust valide, et l'ancre de debut de ligne seule ne voyait ni cette
+# methode ni une seconde fonction sur la meme ligne — « aucune fonction exploitable » sur une
+# reponse juste. Le niveau d'accolades (code_depths) ecarte ensuite les fonctions imbriquees.
+RUST_FN = re.compile(
+    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)]*\))?\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
+    re.M)
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
 
@@ -3203,8 +3341,19 @@ def rust_signatures(source):
 
 RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
 RUST_IMPL = re.compile(r"^[ \t]*impl\s+(\w+)\s*\{", re.M)
-RUST_FN_IN_IMPL = re.compile(
-    r"^[ \t]*(?:pub\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)", re.M)
+
+
+def rust_impl_functions(body):
+    """Fonctions DIRECTES d'un bloc `impl` (accolade ouvrante comprise) → [(nom, params, retour)].
+
+    FONCTION PURE (testee). Une fonction imbriquee dans une methode n'est pas une methode du
+    type : elle est ecartee par son niveau d'accolades, comme pour les fonctions libres."""
+    depths = code_depths(body)
+    return [(hit.group(1), hit.group(2), hit.group(3)) for hit in RUST_FN.finditer(body)
+            if depths[hit.start(1)] == 1]
+
+
+
 def rust_send_args(types):
     """Serialisation des arguments Rust sur le fil. FONCTION PURE (testee).
 
@@ -3242,7 +3391,7 @@ def rust_object_api(source):
         # Plusieurs blocs `impl` pour le meme type se CUMULENT : le constructeur d'un premier
         # bloc etait perdu quand les methodes venaient d'un second.
         ctors, method_list = by_type.setdefault(typ, ([], []))
-        for ident, params, ret in RUST_FN_IN_IMPL.findall(body):
+        for ident, params, ret in rust_impl_functions(body):
             pieces = [p.strip() for p in params.split(",") if p.strip()]
             takes_self = bool(pieces) and pieces[0].endswith("self")
             # Seul un EMPRUNT (`&self`, `&mut self`, `&'a self`) se proxifie : le serveur
@@ -3326,7 +3475,7 @@ def rust_mut_receivers(source):
         except ValueError:
             continue
         finish = block_end(src_text, begin)
-        for _, params, _ in RUST_FN_IN_IMPL.findall(src_text[begin:finish]):
+        for _, params, _ in rust_impl_functions(src_text[begin:finish]):
             first_item = (params.split(",")[0] if params else "").strip()
             if first_item.replace(" ", "").startswith("&mutself"):
                 mutants.add(typ)
@@ -3369,10 +3518,13 @@ def rust_object_stub(obj_list, field_list=None):
             for ident, types in ctors:
                 params = ", ".join("a%d: %s" % (i, t) for i, t in enumerate(types))
                 send_args = rust_send_args(types)
+                # Locales PRÉFIXÉES : nommées comme les champs, un champ `parts` masquait
+                # l'itérateur dont les champs suivants sont lus.
                 reads = "\n".join(
-                    "        let %s = %s;" % (n, RUST_CONV[t] % 'parts.next().unwrap_or("")')
+                    "        let moodit_c_%s = %s;"
+                    % (n, RUST_CONV[t] % 'parts.next().unwrap_or("")')
                     for n, t in field_list[typ])
-                literal = ", ".join(n for n, _ in field_list[typ])
+                literal = ", ".join("%s: moodit_c_%s" % (n, n) for n, _ in field_list[typ])
                 body.append('''    fn %s(%s) -> %s {
         let id = moodit_id();
         let brut = moodit_appel(&id, &(id.clone() + "|new|%s::%s"%s));
@@ -3433,7 +3585,8 @@ def rust_object_dispatch(obj_list, field_list=None):
     field_list = field_list or {}
     stacks, branches = [], []
     for typ, ctors, method_list in obj_list:
-        stacks.append("    let mut moodit_%s: Vec<%s> = Vec::new();" % (typ.lower(), typ))
+        # `crate::` : l'aiguillage vit dans le module du serveur (cf. rust_server_source).
+        stacks.append("    let mut moodit_%s: Vec<crate::%s> = Vec::new();" % (typ.lower(), typ))
         if typ in field_list:
             # Locales PRÉFIXÉES : nommées comme les champs, un champ `id` ou `args` (banal)
             # masquait la locale du serveur du même nom — la réponse partait avec la valeur du
@@ -3442,7 +3595,7 @@ def rust_object_dispatch(obj_list, field_list=None):
                 '                let moodit_c_%s = %s;'
                 % (n, RUST_CONV[t] % 'args.next().unwrap_or("")')
                 for n, t in field_list[typ])
-            literal = "%s { %s }" % (typ, ", ".join("%s: moodit_c_%s" % (n, n)
+            literal = "crate::%s { %s }" % (typ, ", ".join("%s: moodit_c_%s" % (n, n)
                                                     for n, _ in field_list[typ]))
             branches.append('''            "new|%s" => {
 %s
@@ -3454,7 +3607,8 @@ def rust_object_dispatch(obj_list, field_list=None):
                     '                let a%d = %s;'
                     % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types))
-                call_expr = "%s::%s(%s)" % (typ, ident, ", ".join("a%d" % i for i in range(len(types))))
+                call_expr = "crate::%s::%s(%s)" % (typ, ident,
+                                                   ", ".join("a%d" % i for i in range(len(types))))
                 rets = "".join(
                     '                                + "|" + &moodit_hexe(&moodit_cree.%s)' % n
                     if t == "String"
@@ -3475,8 +3629,8 @@ def rust_object_dispatch(obj_list, field_list=None):
                     '                let a%d = %s;'
                     % (i, RUST_CONV[t] % 'args.next().unwrap_or("")')
                     for i, t in enumerate(types))
-                call_expr = "%s::%s(%s)" % (typ, ident,
-                                        ", ".join("a%d" % i for i in range(len(types))))
+                call_expr = "crate::%s::%s(%s)" % (typ, ident,
+                                                   ", ".join("a%d" % i for i in range(len(types))))
                 branches.append('''            "new|%s::%s" => {
 %s
                 moodit_%s.push(%s);
@@ -3517,12 +3671,14 @@ def rust_grader_source(methods, harness_code, nonce, obj_list=(), field_list=Non
     let brut = moodit_appel(&id, &requete);
     %s
 }''' % (ident, params, ret, ident, args, parse))
-    return '''// Imports ALIASES : le serveur partage le fichier du code soumis, et un `use` identique
-// chez l etudiant levait E0252 (import en double) sur du code valide. Les methodes de
-// trait marchent des que le trait est en portee, quel que soit son nom.
+    return '''// MODULE A PART pour le runtime : les bouchons portent, a la racine, les noms choisis par
+// l'etudiant (fonctions, types). Un module enfant ne voit aucun nom de la racine sans le nommer :
+// une `fn Ok`, une `struct Vec` ou une `struct String` soumises n'y prennent la place de rien.
+mod moodit_rt {
+
 use std::io::{BufRead as MooditBufRead, Write as MooditWrite};
 
-fn moodit_hexe(s: &str) -> String {
+pub fn moodit_hexe(s: &str) -> String {
     // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
     let mut sortie = String::from("H");
     for octet in s.as_bytes() {
@@ -3531,7 +3687,7 @@ fn moodit_hexe(s: &str) -> String {
     sortie
 }
 
-fn moodit_dehexe(v: &str) -> String {
+pub fn moodit_dehexe(v: &str) -> String {
     let v = v.trim();
     if !v.starts_with('H') {
         return v.to_string();
@@ -3547,7 +3703,7 @@ fn moodit_dehexe(v: &str) -> String {
     String::from_utf8_lossy(&octets).to_string()
 }
 
-fn moodit_id() -> String {
+pub fn moodit_id() -> String {
     // Identifiant IMPRÉVISIBLE par appel, tiré de /dev/urandom : sans lui, le code noté — dont
     // le stdout EST le canal de réponse — pouvait imprimer la réponse attendue avant la question.
     let mut brut = [0u8; 8];
@@ -3556,7 +3712,7 @@ fn moodit_id() -> String {
     brut.iter().map(|o| format!("{:02x}", o)).collect()
 }
 
-fn moodit_appel(id: &str, requete: &str) -> String {
+pub fn moodit_appel(id: &str, requete: &str) -> String {
     println!("{}", requete);
     std::io::stdout().flush().unwrap();
     let entree = std::io::stdin();
@@ -3578,6 +3734,13 @@ fn moodit_appel(id: &str, requete: &str) -> String {
     std::process::exit(3);
 }
 
+}
+
+#[allow(unused_imports)]
+use moodit_rt::{moodit_appel, moodit_dehexe, moodit_hexe, moodit_id};
+#[allow(unused_imports)]
+use ::std::io::Write as MooditWrite;
+
 %s
 
 %s
@@ -3587,14 +3750,14 @@ fn moodit_harnais() -> bool {
 }
 
 fn main() {
-    let ok = std::panic::catch_unwind(moodit_harnais).unwrap_or(false);
+    let ok = ::std::panic::catch_unwind(moodit_harnais).unwrap_or(false);
     if ok {
         eprintln!();
         eprintln!("%s");
-        std::io::stderr().flush().unwrap();
-        std::process::exit(0);
+        ::std::io::stderr().flush().unwrap();
+        ::std::process::exit(0);
     }
-    std::process::exit(1);
+    ::std::process::exit(1);
 }
 ''' % ("\n\n".join(stubs), rust_object_stub(obj_list, field_list),
        "\n".join("    " + l if l.strip() else l for l in (harness_code or "").splitlines()),
@@ -3621,6 +3784,13 @@ def rust_server_source(methods, student_source, obj_list=(), field_list=None):
         branches.append('        "%s" => {\n%s\n            format!("{}|ok|{}", id, %s)\n        }'
                    % (ident, "\n".join(reads), call_expr))
     return '''%s
+
+// MODULE A PART : un module enfant ne voit AUCUN nom du module parent sans le nommer. Le serveur
+// partageait la portee du code soumis, et tout nom soumis pouvait y prendre la place d'un des
+// siens : une `const id` ou un `static args` (un motif `let id = …` les designe alors, et ne
+// lie plus rien), un `type Result<T> = …` (idiome courant), une `struct Vec`. Ici, le code
+// soumis n'est atteint que par un chemin `crate::` explicite.
+mod moodit_srv {
 
 // ALIASES : le serveur partage le fichier du code soumis, et un `use std::io::Write;` chez
 // l'etudiant (banal pour un flush) levait E0252, nom defini deux fois. Les methodes de trait
@@ -3652,7 +3822,7 @@ fn moodit_dehexe(v: &str) -> String {
     String::from_utf8_lossy(&octets).to_string()
 }
 
-fn moodit_serve() {
+pub fn moodit_serve() {
 %s
     let entree = std::io::stdin();
     for ligne in entree.lock().lines() {
@@ -3680,8 +3850,10 @@ fn moodit_serve() {
     }
 }
 
+}
+
 fn main() {
-    moodit_serve();
+    moodit_srv::moodit_serve();
 }
 ''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
 
@@ -3761,17 +3933,20 @@ def cs_send_args(types):
         # corrigé en C/C++). C'est bien G17 et non « R » : la documentation .NET déconseille R
         # pour l'aller-retour d'un double, et le runner tourne sur mono.
         else ' + "|" + a%d.ToString("G17", '
-             'System.Globalization.CultureInfo.InvariantCulture)' % i if t == "double"
-        else ' + "|" + Convert.ToString(a%d, '
-             'System.Globalization.CultureInfo.InvariantCulture)' % i
+             'global::System.Globalization.CultureInfo.InvariantCulture)' % i if t == "double"
+        else ' + "|" + global::System.Convert.ToString(a%d, '
+             'global::System.Globalization.CultureInfo.InvariantCulture)' % i
         for i, t in enumerate(types))
 
 
+# `global::System.…` dans tout ce qui est émis DANS une classe-bouchon : ses membres portent les
+# noms choisis par l'étudiant, et une méthode `Convert` (exercice de conversion) ou `System`
+# y masquait la classe ou l'espace de noms du framework — « le harnais ne compile pas ».
 # Gabarits de lecture : `v` est le NOM DE L'ARGUMENT, a remplacer par « (v » seulement — un
 # remplacement de « v » nu changeait InvariantCulture en InbrutariantCulture (le harnais ne
 # compilait plus des qu'une methode rendait un double).
 CS_READ = {"int": "int.Parse(v)", "long": "long.Parse(v)",
-              "double": "double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)",
+              "double": "double.Parse(v, global::System.Globalization.CultureInfo.InvariantCulture)",
               "bool": "bool.Parse(v)", "string": "MooditRpc.Dehexe(v)"}
 
 
@@ -3832,12 +4007,19 @@ def cs_grader_source(methods, harness_code, nonce, klass, ctors=(), instance=())
         string brut = MooditRpc.Appel(id, id + "|%s"%s);
         return %s;
     }''' % (ret, ident, params, rpc_name(ident, types), args, reader))
+    # Le RUNTIME vit dans son espace de noms, `using` à l'intérieur (cf. cs_server_source) : les
+    # bouchons portent, au niveau global, les noms choisis par l'étudiant. Les `using` du niveau
+    # global ne servent qu'au harnais du prof ; le verdict (Main) est rendu par le runtime.
     return '''using System;
 using System.IO;
+using MooditRpc = MooditRt.MooditRpc;
 
-static class MooditRpc {
-    static readonly System.Security.Cryptography.RandomNumberGenerator ALEA =
-        System.Security.Cryptography.RandomNumberGenerator.Create();
+namespace MooditRt {
+using global::System;
+
+public static class MooditRpc {
+    static readonly global::System.Security.Cryptography.RandomNumberGenerator ALEA =
+        global::System.Security.Cryptography.RandomNumberGenerator.Create();
 
     // Identifiant IMPRÉVISIBLE par appel : sans lui, le code noté — dont le stdout EST le canal
     // de réponse — pouvait imprimer la réponse attendue avant même la question.
@@ -3847,7 +4029,7 @@ static class MooditRpc {
         // null voyage en JETON « N » (une chaîne, même vide, commence par « H ») : rendu par
         // « H » vide, il arrivait en "" — `== null` noté faux sur une réponse juste.
         if (s == null) { return "N"; }
-        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s);
+        byte[] brut = global::System.Text.Encoding.UTF8.GetBytes(s);
         return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
     }
 
@@ -3859,7 +4041,7 @@ static class MooditRpc {
         for (int i = 0; i < octets.Length; i++) {
             octets[i] = Convert.ToByte(v.Substring(1 + i * 2, 2), 16);
         }
-        return System.Text.Encoding.UTF8.GetString(octets);
+        return global::System.Text.Encoding.UTF8.GetString(octets);
     }
 
     public static string Id() {
@@ -3885,6 +4067,25 @@ static class MooditRpc {
         Environment.Exit(3);
         return "";
     }
+
+    public static int Verdict(Func<bool> harnais, string nonce) {
+        bool ok;
+        try {
+            ok = harnais();
+        } catch (Exception e) {
+            Console.Error.WriteLine("[MOODIT] harnais: " + e.Message);
+            ok = false;
+        }
+        if (ok) {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(nonce);
+            Console.Error.Flush();
+            return 0;
+        }
+        return 1;
+    }
+}
+
 }
 
 public class %s {
@@ -3903,20 +4104,7 @@ public static class MooditGrader {
     }
 
     public static int Main(string[] args) {
-        bool ok;
-        try {
-            ok = Harnais();
-        } catch (Exception e) {
-            Console.Error.WriteLine("[MOODIT] harnais: " + e.Message);
-            ok = false;
-        }
-        if (ok) {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("%s");
-            Console.Error.Flush();
-            return 0;
-        }
-        return 1;
+        return MooditRpc.Verdict(Harnais, "%s");
     }
 }
 ''' % (klass, cs_object_stub(klass, ctors, instance), "\n\n".join(stubs),
@@ -3929,13 +4117,25 @@ def cs_server_source(classes, namespaces=()):
 
     Les espaces de noms du code soumis sont importés : sans cela, `typeof(Solution)` ne
     trouvait pas une classe écrite dans `namespace Quiz { … }`."""
-    return "".join("using %s;\n" % n for n in namespaces) + '''using System;
-using System.Reflection;
+    # ESPACE DE NOMS À PART, avec ses `using` À L'INTÉRIEUR : à l'intérieur d'un espace de noms,
+    # ses propres imports passent AVANT les types de l'espace global. Écrit au niveau global, le
+    # serveur voyait une classe soumise `Type`, `Console`, `Convert` ou `Exception` prendre la
+    # place de celle de System, et le programme de l'étudiant ne compilait plus. Les classes
+    # soumises, elles, sont nommées HORS de cet espace (MooditCibles), là où elles l'emportent.
+    return "".join("using %s;\n" % n for n in namespaces) + '''
+static class MooditCibles {
+    public static readonly global::System.Type PRINCIPALE = typeof(%s);
+    public static readonly global::System.Type[] TOUTES = { %s };
+}
+
+namespace MooditSrv {
+using global::System;
+using global::System.Reflection;
 
 public static class MooditServer {
     // Objets construits CHEZ L'ÉTUDIANT : le noteur n'en connaît que la poignée.
-    static readonly System.Collections.Generic.List<object> OBJETS =
-        new System.Collections.Generic.List<object>();
+    static readonly global::System.Collections.Generic.List<object> OBJETS =
+        new global::System.Collections.Generic.List<object>();
 
     // Chaîne → HEXADÉCIMAL sur le fil : le protocole est à champs séparés par « | » et à une
     // ligne par message, donc un « | » ou un saut de ligne dans la valeur décalait tout l'appel.
@@ -3943,7 +4143,7 @@ public static class MooditServer {
         // null voyage en JETON « N » (une chaîne, même vide, commence par « H ») : rendu par
         // « H » vide, il arrivait en "" — `== null` noté faux sur une réponse juste.
         if (s == null) { return "N"; }
-        byte[] brut = System.Text.Encoding.UTF8.GetBytes(s);
+        byte[] brut = global::System.Text.Encoding.UTF8.GetBytes(s);
         return "H" + BitConverter.ToString(brut).Replace("-", "").ToLowerInvariant();
     }
 
@@ -3955,7 +4155,7 @@ public static class MooditServer {
         for (int i = 0; i < octets.Length; i++) {
             octets[i] = Convert.ToByte(v.Substring(1 + i * 2, 2), 16);
         }
-        return System.Text.Encoding.UTF8.GetString(octets);
+        return global::System.Text.Encoding.UTF8.GetString(octets);
     }
 
     static object[] Convertis(ParameterInfo[] attendus, string[] parts, int depart) {
@@ -3969,7 +4169,7 @@ public static class MooditServer {
                 continue;
             }
             donnes[i] = Convert.ChangeType(brut, pt,
-                    System.Globalization.CultureInfo.InvariantCulture);
+                    global::System.Globalization.CultureInfo.InvariantCulture);
         }
         return donnes;
     }
@@ -4011,13 +4211,13 @@ public static class MooditServer {
         // défaut ne garantit pas. La documentation .NET déconseille « R » pour un double.
         if (v is double) {
             return ((double) v).ToString("G17",
-                    System.Globalization.CultureInfo.InvariantCulture);
+                    global::System.Globalization.CultureInfo.InvariantCulture);
         }
         if (v is float) {
             return ((float) v).ToString("G9",
-                    System.Globalization.CultureInfo.InvariantCulture);
+                    global::System.Globalization.CultureInfo.InvariantCulture);
         }
-        return Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture);
+        return Convert.ToString(v, global::System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public static int Main(string[] args) {
@@ -4029,7 +4229,7 @@ public static class MooditServer {
             string reponse;
             try {
                 if (nom == "new") {
-                    Type cible2 = typeof(%s);
+                    Type cible2 = global::MooditCibles.PRINCIPALE;
                     bool construit = false;
                     foreach (var c in cible2.GetConstructors(
                             BindingFlags.Public | BindingFlags.NonPublic
@@ -4068,7 +4268,7 @@ public static class MooditServer {
                 MethodInfo cible = null;
                 // Toutes les classes du code soumis, principale d'abord : meme perimetre
                 // que l'extraction et que le bouchon, qui aplatit leurs statiques.
-                foreach (Type __t in new Type[] { %s }) {
+                foreach (Type __t in global::MooditCibles.TOUTES) {
                     foreach (MethodInfo m in __t.GetMethods(
                             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
                         if (m.Name == Base(nom) && Signe(m.GetParameters(), nom, parts.Length - 2)) {
@@ -4093,6 +4293,8 @@ public static class MooditServer {
         }
         return 0;
     }
+}
+
 }
 ''' % (classes[0], ", ".join("typeof(" + c + ")" for c in classes))
 
@@ -4723,7 +4925,7 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     # C# n'a pas d'inclusion textuelle a la compilation, mais le serveur est compile AVEC le
     # code soumis : meme regime que les autres — sous l'UID etudiant, dans son chantier.
     for cmd, label, cwd_c, env_c, preexec_c in (
-            (["mcs", "-main:MooditServer", "-out:" + student_bin, student_src, student_copy],
+            (["mcs", "-main:MooditSrv.MooditServer", "-out:" + student_bin, student_src, student_copy],
              "code soumis", build_area, student_build_env(build_area), preexec_student_compile),
             (["mcs", "-main:MooditGrader", "-out:" + grader_bin, grader_src],
              "harnais", case_dir, env, preexec_compile)):
@@ -4871,6 +5073,10 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
     harness = harness_rpc_body(case_dir) or ""
+    linked = c_server_symbols_defined(extraction)
+    if linked:
+        return None, reserved_name_message(
+            linked, "la bibliothèque standard, dont le programme de correction se sert")
     # Le noteur ne recoit que les bouchons que le HARNAIS EMPLOIE : un bouchon que le harnais
     # ne nomme pas ne sert a rien, et son #define y detournerait un outil de la bibliotheque.
     # En C, une fonction d'aide `abs` que le harnais n'appelle pas n'est donc plus refusee
@@ -4880,16 +5086,22 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     # Refus AVANT toute compilation : une fonction soumise au nom d'une fonction ou d'une macro
     # de la bibliotheque standard fournie au harnais (fabs, sqrt, isnan, abs, true…) prendrait
     # sa place dans le harnais (voir c_grader_source).
-    # En C++, TOUS les noms restent sondes : le serveur genere inclut <stdlib.h> apres le code
-    # soumis, et une `int abs(int)` de liaison C++ y heurte la declaration de liaison C (essai
-    # dans l'image : « conflicting declaration with 'C' linkage »). Mieux vaut ce refus nomme
-    # qu'un echec de compilation sur un en-tete. En C, la redefinition est admise.
-    probed = method_list if ext == "cpp" else grader_methods
+    # Seuls les noms que le HARNAIS emploie sont sondes, en C comme en C++. Le C++ les sondait
+    # tous tant que le serveur incluait <stdlib.h> apres le code soumis (une `int abs(int)` de
+    # liaison C++ y heurtait la declaration de liaison C) ; il n'inclut plus aucun en-tete
+    # (C_SERVER_RUNTIME), et une fonction d'aide `abs` ou `index` y est du code ordinaire.
+    probed = grader_methods
     # Les noms reserves a l'IMPLEMENTATION (`__x`, `_X`) restent refuses pour TOUTE fonction
     # soumise, harnais ou pas : controle textuel, sans compilation.
+    # Même règle pour les CLASSES (C++) : seules celles que le harnais nomme reçoivent un
+    # bouchon, et leur nom est sondé avec ceux des fonctions. Un bouchon `class remove` ou
+    # `class time` heurtait la fonction du même nom des en-têtes du noteur — « le harnais ne
+    # compile pas », sans que le prof ni l'étudiant puissent en deviner la cause.
+    grader_objects = [o for o in obj_list if harness_mentions(harness, o[0])]
     reserved = c_implementation_reserved([ident for _, ident, _ in method_list])
-    reserved += [n for n in c_reserved_names([ident for _, ident, _ in probed], compiler, std,
-                                             case_dir, env) if n not in reserved]
+    reserved += [n for n in c_reserved_names(
+        [ident for _, ident, _ in probed] + [o[0] for o in grader_objects], compiler, std,
+        case_dir, env) if n not in reserved]
     if reserved:
         return None, reserved_name_message(
             reserved, "la bibliothèque standard (math.h, stdbool.h, stdio.h, stdlib.h, string.h)")
@@ -4902,7 +5114,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         f.write(c_server_source(method_list, student_source, cpp=(ext == "cpp"), obj_list=obj_list))
     set_owner_mode(student_src, STUDENT_UID, STUDENT_GID, 0o600)
     write_private(grader_src, c_grader_source(grader_methods, harness, TOKENS.get(case_index) or "",
-                                          cpp=(ext == "cpp"), obj_list=obj_list))
+                                          cpp=(ext == "cpp"), obj_list=grader_objects))
     student_bin = os.path.join(build_area, "etu_bin")
     grader_bin = os.path.join(case_dir, "noteur_bin")
     # Le code soumis est compile SOUS L'UID ETUDIANT, dans un chantier qui ne contient que
@@ -4967,6 +5179,9 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
                  + [name for type_name, ctors, _ in obj_list
                     for name in [type_name] + [c[0] for c in ctors]])
     reserved, packages, hidden = go_hidden_names(submitted, harness)
+    # Toute déclaration de paquet compte pour le serveur, pas seulement celles qui reçoivent un
+    # bouchon : variables, constantes, types sans méthode, fonctions non transportables.
+    reserved = list(dict.fromkeys(reserved + go_server_hidden(extraction)))
     if reserved:
         return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
     if packages:

@@ -696,7 +696,7 @@ class ObjectApiTest(unittest.TestCase):
         self.assertIn("struct Rectangle {\n    largeur: i32,\n    hauteur: i32,\n}", stub_src)
         self.assertIn('"|new|Rectangle"', stub_src)
         stacks, branches = supervisor.rust_object_dispatch(obj_list, field_list)
-        self.assertIn("let mut moodit_rectangle: Vec<Rectangle>", stacks)
+        self.assertIn("let mut moodit_rectangle: Vec<crate::Rectangle>", stacks)
         self.assertIn('"new|Rectangle" =>', branches)
         self.assertIn('"new|Rectangle::new" =>', branches)
         self.assertIn('"method|Rectangle.aire" =>', branches)
@@ -724,8 +724,8 @@ class ObjectApiTest(unittest.TestCase):
         self.assertIn("class Rectangle {", stub_src)
         self.assertIn('"%s|new|Rectangle(int,int)|%d|%d"', stub_src)
         stacks, branches = supervisor.cpp_object_dispatch(obj_list)
-        self.assertIn("static std::vector<Rectangle> moodit_objets_Rectangle;", stacks)
-        self.assertIn('strcmp(moodit_nom, "Rectangle.aire()")', branches)
+        self.assertIn("static ::Rectangle **moodit_objets_Rectangle = 0;", stacks)
+        self.assertIn('moodit_egal(moodit_nom, "Rectangle.aire()")', branches)
 
     def test_java_stub_when_public_class_is_the_object(self):
         # Classe publique `Rectangle`, AUCUNE méthode statique : le bouchon de premier niveau
@@ -992,11 +992,12 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         # Les écritures sur l'ERREUR standard ne sont pas des réponses : ce sont des diagnostics,
         # et le noteur ne les lit pas comme telles.
         emitted = _re.compile(
-            r"(?:System[.]out[.]print|fmt[.]Print|\bprint!|Console[.]Out[.]Write|\bprintf)[(]")
+            r"(?:System[.]out[.]print|fmt[.]Print|\bprint!|Console[.]Out[.]Write|\bprintf"
+            r"|\bmoodit_printf)[(]")
         for ident, factory in self.DISPATCHERS:
             source = factory()
             sites = [l.strip() for l in source.splitlines()
-                     if emitted.search(l) and "stderr" not in l]
+                     if emitted.search(l) and "stderr" not in l and "__asm__" not in l]
             self.assertTrue(sites, "aucun site de réponse trouvé en " + ident)
             for site in sites:
                 self.assertIn(chr(92) + "n", site.split("(", 1)[1][:24],
@@ -1665,11 +1666,11 @@ class Review28Test(unittest.TestCase):
         # Chaque surcharge porte SA cle, des deux cotes du fil.
         for dedup_key in ("Rect()", "Rect(int,int)"):
             self.assertIn("|new|" + dedup_key, stub)
-            self.assertIn('strcmp(moodit_nom, "%s")' % dedup_key, branches)
+            self.assertIn('moodit_egal(moodit_nom, "%s")' % dedup_key, branches)
         server = supervisor.c_server_source([("int", "f", ["int"]), ("int", "f", ["double"])],
                                              "", cpp=True)
-        self.assertIn('strcmp(moodit_nom, "f(int)")', server)
-        self.assertIn('strcmp(moodit_nom, "f(double)")', server)
+        self.assertIn('moodit_egal(moodit_nom, "f(int)")', server)
+        self.assertIn('moodit_egal(moodit_nom, "f(double)")', server)
 
     def test_c_stub_not_static(self):
         grader_dir = supervisor.c_grader_source([("int", "abs", ["int"])], "return abs(-1) == 1;", "1")
@@ -2452,7 +2453,7 @@ class Review246eTest(unittest.TestCase):
             ("Calculatrice", [[]], [("int", "additionner", ["int", "int"])]),
             ("Base", [["int"]], [("int", "g", [])])])
         self.assertIn("    Calculatrice() {", supervisor.cpp_object_stub(obj_list))
-        self.assertIn("moodit_objets_Calculatrice.push_back(Calculatrice());",
+        self.assertIn("moodit_objets_Calculatrice[moodit_n_Calculatrice++] = new ::Calculatrice();",
                       supervisor.cpp_object_dispatch(obj_list)[1])
 
     # ── Rust ─────────────────────────────────────────────────────────────────────────────
@@ -2470,7 +2471,7 @@ class Review246eTest(unittest.TestCase):
             self.assertEqual([t for t, _, _ in obj_list], ["Calculatrice"], declaration)
             # Structure unité côté noteur : le harnais écrit `Calculatrice` ou `Calculatrice {}`.
             self.assertIn("struct Calculatrice;", supervisor.rust_object_stub(obj_list, fields))
-            self.assertIn("moodit_calculatrice.push(Calculatrice {  });",
+            self.assertIn("moodit_calculatrice.push(crate::Calculatrice {  });",
                           supervisor.rust_object_dispatch(obj_list, fields)[1])
         self.assertEqual(supervisor.rust_struct_fields("struct P(i32);\n"), {})
 
@@ -2568,9 +2569,12 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
             server = supervisor.c_server_source([("int", "id", ["int"]), ("int", "nom", ["int"])],
                                                  "", cpp=cpp)
             self.assertIn("moodit_traite(const char *moodit_id, const char *moodit_op,", server)
-            self.assertIn("int moodit_a0 = atoi(moodit_jeton());", server)
-            self.assertIn('moodit_id, id(moodit_a0));', server)
-            self.assertIn('moodit_id, nom(moodit_a0));', server)
+            self.assertIn("int moodit_a0 = moodit_lit_int(moodit_jeton());", server)
+            # En C++, l'appel est qualifié : `using namespace std;` rendait ambiguë une fonction
+            # soumise au nom d'un type de la bibliothèque (`divides`, `modulus`, `plus`…).
+            scope = "::" if cpp else ""
+            self.assertIn('moodit_id, %sid(moodit_a0));' % scope, server)
+            self.assertIn('moodit_id, %snom(moodit_a0));' % scope, server)
             traite = server.split("static void moodit_traite(", 1)[1].split("\nint main(void)")[0]
             self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|a0)(?![\w(\"])", traite))
 
@@ -2585,11 +2589,103 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
             self.assertEqual(supervisor.c_signatures(
                 "int f(const int n, long m) { return 0; }\n", cpp=cpp), [("int", "f", ["int", "long"])])
 
+    def test_rust_functions_are_read_wherever_they_start_on_the_line(self):
+        # `impl R { fn get(&self) -> i32 { self.v } }` sur une ligne : la méthode n'était pas
+        # vue (ancre de début de ligne), et une réponse juste rendait « aucune fonction
+        # exploitable ». Même chose pour une seconde fonction sur la même ligne.
+        one_line = "struct R { v: i32 }\nimpl R { fn get(&self) -> i32 { self.v } }\n"
+        self.assertEqual(supervisor.rust_object_api(one_line), [("R", [], [("i32", "get", [])])])
+        two = "struct R { v: i32 }\nimpl R {\n    fn new(a: i32) -> R { R { v: a } } pub fn get(&self) -> i32 { self.v }\n}\n"
+        self.assertEqual(supervisor.rust_object_api(two),
+                         [("R", [("new", ["i32"])], [("i32", "get", [])])])
+        self.assertEqual(
+            supervisor.rust_signatures("fn a(x: i32) -> i32 { x } fn b(x: i32) -> i32 { x }\n"),
+            [("i32", "a", ["i32"]), ("i32", "b", ["i32"])])
+        # Une fonction IMBRIQUÉE n'est ni une méthode du type ni une fonction libre.
+        nested = ("struct R { v: i32 }\nimpl R {\n    fn get(&self) -> i32 {\n"
+                  "        fn aide(x: i32) -> i32 { x }\n        aide(self.v)\n    }\n}\n")
+        self.assertEqual(supervisor.rust_object_api(nested), [("R", [], [("i32", "get", [])])])
+        self.assertEqual(supervisor.rust_signatures(
+            "fn a(x: i32) -> i32 {\n    fn dedans(y: i32) -> i32 { y }\n    dedans(x)\n}\n"),
+            [("i32", "a", ["i32"])])
+        self.assertEqual(supervisor.rust_mut_receivers(
+            "struct R { v: i32 }\nimpl R { fn inc(&mut self) -> i32 { self.v += 1; self.v } }\n"),
+            {"R"})
+
+    def test_rust_server_lives_in_its_own_module(self):
+        # Un module enfant ne voit aucun nom du parent sans le nommer : une `const id`, un
+        # `static args`, un `type Result<T>` ou une `struct Vec` soumis ne peuvent plus prendre
+        # la place d'un nom du serveur.
+        obj_list = [("Rect", [("new", ["i32"])], [("i32", "aire", [])])]
+        server = supervisor.rust_server_source([("i32", "f", ["i32"])], "const id: i32 = 1;\n",
+                                               obj_list)
+        head, module = server.split("\nmod moodit_srv {\n", 1)
+        self.assertIn("const id: i32 = 1;", head)
+        self.assertNotIn("fn moodit_", head)
+        body, tail = module.rsplit("\n}\n\nfn main() {\n", 1)
+        self.assertEqual(tail, "    moodit_srv::moodit_serve();\n}\n")
+        self.assertIn("pub fn moodit_serve() {", body)
+        # Tout ce qui vient du code soumis est atteint par un chemin absolu.
+        self.assertIn("crate::f(a0)", body)
+        self.assertIn("Vec<crate::Rect>", body)
+        self.assertIn("crate::Rect::new(a0)", body)
+        self.assertIsNone(re.search(r"(?<!crate::)\bRect\b(?!\")", body.replace("|Rect", "")))
+
+    def test_go_package_names_cover_every_kind_of_declaration(self):
+        src = ("package main\n\nvar string = 3\nconst (\n\ttrue = 1\n\tautre, len = 2, 3\n)\n"
+               "type nil struct{}\nfunc int(xs []int) int { return 0 }\n"
+               "func (r nil) panic() int { return 0 }\nvar (\n\tx int\n)\n")
+        self.assertEqual(supervisor.go_package_names(src),
+                         ["string", "nil", "int", "true", "autre", "len", "x"])
+        # Une MÉTHODE n'est pas un nom de paquet : `panic` ne masque rien.
+        self.assertEqual(supervisor.go_server_hidden(src), ["string", "nil", "int", "true", "len"])
+        self.assertEqual(supervisor.go_server_hidden("package main\n\nvar max = 3\n"), [])
+
+    def test_c_server_includes_no_header_and_names_only_its_own_identifiers(self):
+        # Compilé APRÈS le code soumis, dans la même unité : tout en-tête y déclarait des
+        # centaines de noms que l'étudiant a le droit de porter (une fonction d'aide `index`,
+        # `remove`, `div`, `rand`, `exit`…, une macro `abs(x)`), et sa réponse ne compilait plus.
+        keywords = set("""static extern const char int long double void if else return while for
+            sizeof new ifdef endif __asm__ __SIZE_TYPE__ __cplusplus define undef main C
+            __moodit_student_main""".split())
+        cases = (
+            (False, [("int", "f", ["int", "long", "double"])], ()),
+            (True, [("double", "f", ["double"])], [("Rect", [["int"]], [("int", "aire", ["int"])])]),
+        )
+        for cpp, methods, obj_list in cases:
+            server = supervisor.c_server_source(methods, "", cpp=cpp, obj_list=obj_list)
+            self.assertNotIn("#include", server)
+            # Hors chaînes, littéraux de caractère et commentaires.
+            code = re.sub(r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'" + r"|/\*.*?\*/", " ",
+                          server, flags=re.S)
+            foreign = {w for w in re.findall(r"[A-Za-z_]\w*", code)
+                       if not w.startswith("moodit_") and w not in keywords
+                       and w not in ("f", "Rect", "aire")}
+            self.assertEqual(foreign, set(), "noms hors du serveur : %s" % sorted(foreign))
+
+    def test_c_submission_defining_a_symbol_the_server_links_to_is_named(self):
+        # Le serveur est lié à quelques symboles de la libc : un code soumis qui en DÉFINIT un
+        # le remplace pour tout le programme. Refus nommé, plutôt qu'un appel refusé ou un
+        # temps limite sans explication.
+        def defined(src):
+            return supervisor.c_server_symbols_defined(supervisor.blank_code(src))
+        self.assertEqual(defined("int printf(int x) { return x; }\n"), ["printf"])
+        self.assertEqual(defined("int stdin = 3;\nint f(int x) { return x; }\n"), ["stdin"])
+        self.assertEqual(defined("static int malloc(int x) { return x; }\nint free;\n"),
+                         ["malloc", "free"])
+        # Un APPEL, une locale, un champ ou une simple déclaration ne définissent rien.
+        self.assertEqual(defined(
+            "#include <stdio.h>\nint f(int x) { printf(\"%d\", x); int free = 0; return free; }\n"),
+            [])
+        self.assertEqual(defined(
+            "int printf(const char *, ...);\nextern void *stdout;\nstruct S { int free; };\n"
+            "int y = printf(\"a\");\n"), [])
+
     def test_cpp_object_dispatch_locals_are_prefixed(self):
         _, branches = supervisor.cpp_object_dispatch([("Rect", [["int"]], [("int", "aire", [])])])
-        self.assertIn("int moodit_h = atoi(moodit_jeton());", branches)
-        self.assertIn("moodit_objets_Rect[moodit_h].aire()", branches)
-        self.assertIn("Rect(moodit_a0)", branches)
+        self.assertIn("int moodit_h = moodit_lit_int(moodit_jeton());", branches)
+        self.assertIn("moodit_objets_Rect[moodit_h]->aire()", branches)
+        self.assertIn("new ::Rect(moodit_a0)", branches)
         self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|h|a0)(?![\w(\"])", branches))
 
 

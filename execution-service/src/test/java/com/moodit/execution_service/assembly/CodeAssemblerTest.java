@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,6 +74,78 @@ class CodeAssemblerTest {
         assertThat(a.files().get(0).content())
                 .contains("function doubler(...a)")     // proxy RPC de la fonction
                 .contains("unlinkSync('grader.js')");   // auto-suppression du noteur
+    }
+
+    /**
+     * Le serveur partage le module du code soumis : après lui, il ne doit plus nommer que ses
+     * propres identifiants. Un nom nu d'intégrée ou d'objet global y serait celui que l'étudiant
+     * a pu redéfinir (fonction d'aide {@code print}, {@code JSON}, variable {@code process}…).
+     */
+    @Test
+    void python_server_takes_its_builtins_before_the_submitted_code() {
+        var a = assembler.assemble("Python", "def print(x):\n    return None\ndef f():\n    return 5",
+                "return f() == 5", "N");
+        String server = a.files().get(1).content();
+        assertThat(server).startsWith(
+                "import sys as __moodit_sys, json as __moodit_json, builtins as __moodit_b\n");
+        String loop = server.substring(server.indexOf("def __moodit_serve():"));
+        assertThat(loop)
+                .contains("__moodit_b.globals()[m['name']]")
+                .contains("__moodit_b.len(objs)")
+                .contains("__moodit_b.getattr(objs[m['handle']], m['name'])")
+                .contains("__moodit_b.str(e)")
+                .contains("except __moodit_b.Exception")
+                .contains("__moodit_b.print('\\n' + __moodit_json.dumps(r), flush=True)");
+        assertThat(loop).doesNotContainPattern("(?<![.\\w])(print|len|str|getattr|globals)\\(");
+        // L'attribut de la poignée ne peut plus porter le nom d'une méthode soumise.
+        var withClass = assembler.assemble("Python", "class R:\n    def _h(self):\n        return 1",
+                "return R()._h() == 1", "N");
+        assertThat(withClass.files().get(0).content())
+                .contains("\"__moodit_h\"").doesNotContain("\"_h\"");
+    }
+
+    @Test
+    void javascript_server_names_only_its_own_identifiers_after_the_submitted_code() {
+        for (String language : List.of("JavaScript", "TypeScript")) {
+            var a = assembler.assemble(language, "function i(x){ return x; }",
+                    "return i(1) === 1;", "N");
+            String server = a.files().get(1).content();
+            // Objets globaux pris AVANT le code soumis, sans nommer d'identifiant masquable.
+            int student = server.indexOf("function i(x)");
+            assertThat(server.substring(0, student))
+                    .as(language)
+                    .contains("const __moodit_G=[].constructor.constructor('return this')();")
+                    .contains("__moodit_JSON=__moodit_G.JSON")
+                    .contains("__moodit_process=__moodit_G.process")
+                    .contains("__moodit_String=__moodit_G.String");
+            // Après lui : résolution hors des locales de la boucle, et rien que des noms préfixés.
+            String after = server.substring(student + "function i(x){ return x; }".length());
+            assertThat(after)
+                    .startsWith("\nconst __moodit_get=(__moodit_n)=>eval(__moodit_n);\n")
+                    .contains("__moodit_get(__moodit_m.name)(...__moodit_m.args)")
+                    .contains("new (__moodit_get(__moodit_m.cls))(...__moodit_m.args)");
+            String code = after.replaceAll("'[^']*'", "''");
+            assertThat(code).doesNotContainPattern(
+                    "(?<![.\\w$])(JSON|process|String|console|objs|hid|buf|line)\\b");
+            assertThat(code).doesNotContainPattern("(?<![.\\w$])(d|i|m|r|h|e)(?![\\w$:])");
+        }
+    }
+
+    @Test
+    void typescript_exported_symbols_get_a_proxy() {
+        // `export function f` est l'écriture ordinaire d'un module TypeScript : sans mandataire,
+        // le harnais ne trouvait pas `f` et une réponse juste était notée fausse.
+        var a = assembler.assemble("TypeScript",
+                "export function doubler(n: number): number { return n * 2; }\n"
+                        + "export const tripler = (n: number): number => n * 3;\n"
+                        + "export default class Rect { aire(): number { return 1; } }\n"
+                        + "export abstract class Forme { }\n",
+                "return doubler(1) === 2 && tripler(1) === 3 && new Rect().aire() === 1;", "N");
+        assertThat(a.files().get(0).content())
+                .contains("function doubler(...a)")
+                .contains("function tripler(...a)")
+                .contains("const Rect = new Proxy(")
+                .doesNotContain("const Forme");      // le harnais ne la nomme pas
     }
 
     @Test
@@ -347,7 +420,7 @@ class CodeAssemblerTest {
         String grader = a.files().get(0).content();
         assertThat(grader)
                 .startsWith("const __moodit_shadow=[\"Number\", \"f\"]")
-                .contains("(n in globalThis)")
+                .contains("(n in [].constructor.constructor('return this')())")
                 .contains("\"require\"");
         var ts = assembler.assemble("TypeScript", "function parseInt(x: string): number { return 3; }",
                 "return parseInt('1') === 3;", "N");
