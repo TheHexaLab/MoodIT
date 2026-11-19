@@ -312,6 +312,32 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void missing_or_unknown_canary_verdict_is_a_failure_not_a_grade() {
+        // Revue #246 : seul « incoherents » était relu. Un superviseur régressé qui omettait le
+        // champ (ou rendait une valeur inconnue) voyait ses « réussi » acceptés, sans que rien
+        // n'atteste que les canaris avaient été jugés. Panne (502), sur les deux chemins.
+        for (String verdict : List.of("", ",\"canaries\":\"OK\"", ",\"canaries\":null",
+                ",\"canaries\":true")) {
+            supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
+                    + "{\"index\":1,\"passed\":true}],\"events\":[]" + verdict + "}");
+            assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                    .as(verdict).isInstanceOf(SandboxException.class)
+                    .hasMessageContaining("canaris");
+            assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null,
+                    DockerEvaluator.PUBLIC_WALL_MS))
+                    .as(verdict).isInstanceOf(SandboxException.class);
+        }
+        // Témoins : les verdicts sans accusation laissent passer les notes du superviseur.
+        for (String verdict : List.of("ok", "aucun", "indetermines")) {
+            supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
+                    + "{\"index\":1,\"passed\":false}],\"events\":[],\"canaries\":\"" + verdict + "\"}");
+            List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
+            assertThat(results.get(0).passed()).as(verdict).isTrue();
+            assertThat(results.get(1).passed()).as(verdict).isFalse();
+        }
+    }
+
+    @Test
     void no_dockerfile_leaves_a_dangling_continuation() throws java.io.IOException {
         // Un `\` en fin de ligne suivi d'une ligne VIDE fait avaler l'instruction suivante par
         // le RUN en cours. L'image ne se construit plus, et le message d'erreur accuse la

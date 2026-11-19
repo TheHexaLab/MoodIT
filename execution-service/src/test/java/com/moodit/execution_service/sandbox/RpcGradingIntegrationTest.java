@@ -323,6 +323,28 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void java_helper_class_named_like_java_lang_is_graded() {
+        // Revue #246 : une `class Long` d'aide, que le harnais ne nomme pas, recevait un bouchon
+        // dans le paquet du noteur, où il masquait java.lang.Long pour le runtime généré —
+        // « Le harnais ne compile pas » et 0 sur une réponse juste. Plus de bouchon pour elle.
+        String h = "return Solution.doubler(2) == 4;";
+        String code = """
+                public class Solution {
+                    static int doubler(int n) { return new Long(n).get() * 2; }
+                }
+
+                class Long {
+                    private final int v;
+                    Long(int v) { this.v = v; }
+                    int get() { return v; }
+                }
+                """;
+        TestResult right = note("Java", h, code);
+        assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
+        assertThat(note("Java", h, code.replace("* 2", "* 3")).passed()).isFalse();
+    }
+
+    @Test
     void csharp_long_type_names_graded_correctly() {
         // `String` EST `string`, `Int32` EST `int` : aucun bouchon n'etait genere et une reponse
         // juste etait notee 0. Garde l'APPEL : l'extraction C# passe par cs_canonical_types.

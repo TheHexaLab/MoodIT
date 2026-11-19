@@ -1259,7 +1259,7 @@ class SecondaryClassesTest(unittest.TestCase):
 
     def test_java_server_covers_every_class(self):
         server = supervisor.java_server_source(["Solution", "Outils", "Solution$Interne"])
-        self.assertIn('new String[] {"Solution", "Outils", "Solution$Interne"}', server)
+        self.assertIn('new java.lang.String[] {"Solution", "Outils", "Solution$Interne"}', server)
         self.assertNotIn("__CLASSES__", server)
 
 
@@ -2019,6 +2019,46 @@ class Review246bTest(unittest.TestCase):
         self.assertEqual(supervisor.java_shadowed_names(
             ["Process"], "// Process\nreturn \"Process\".length() == 7;"), [])
         self.assertEqual(supervisor.java_shadowed_names(["Rectangle"], "new Rectangle(1, 2)"), [])
+
+    def test_java_lang_named_helper_class_gets_no_stub(self):
+        # Une `class Long` d'aide, que le harnais ne nomme pas : son bouchon masquait
+        # java.lang.Long dans le runtime du noteur (`Long.toHexString`) — « Le harnais ne
+        # compile pas » sur une réponse juste. Elle n'a plus de bouchon ; les autres le gardent.
+        long_class = ("Long", [["int"]], [("int", "get", [])])
+        rect = ("Rectangle", [["int", "int"]], [("int", "aire", [])])
+        nested = ("Solution.Object", [[]], [("int", "f", [])])
+        harness = "// Long\nreturn Solution.doubler(2) == 4 && new Rectangle(1, 2).aire() == 2;"
+        kept = supervisor.java_grader_objects([long_class, rect, nested], harness)
+        self.assertEqual(kept, [rect])
+        stub = supervisor.java_stub_source("Solution", [("int", "doubler", ["int"])], kept)
+        self.assertNotIn("class Long", stub)
+        self.assertIn("final class Rectangle", stub)
+        # Nommée par le harnais : le bouchon reste (et java_shadowed_names la refuse en amont).
+        self.assertEqual(supervisor.java_grader_objects([long_class], "return new Long(1).get() == 1;"),
+                         [long_class])
+
+    def test_java_server_names_java_lang_types_in_full(self):
+        # Le serveur est compilé dans le paquet du code soumis : une `class Long` (ou String,
+        # Object…) soumise masquait le type de java.lang, et le serveur ne compilait plus.
+        source = supervisor.java_server_source(["Solution", "Long"])
+        self.assertIn("public static void main(java.lang.String[] args)", source)
+        self.assertIn("type == java.lang.Long.class", source)
+        # Les noms des classes soumises restent des chaînes intactes, rien n'est qualifié deux fois.
+        self.assertIn('new java.lang.String[] {"Solution", "Long"}', source)
+        self.assertNotIn("java.lang.java.lang", source)
+        # Plus AUCUN type de java.lang en nom simple dans le serveur généré.
+        bare = supervisor.blank_code(source)
+        for name in supervisor.JAVA_LANG_TYPES:
+            self.assertIsNone(re.search(r"(?<![\w.$@])%s(?![\w$])" % name, bare), name)
+        # Un nom déjà qualifié, un membre et une annotation ne sont pas touchés.
+        self.assertEqual(supervisor.java_qualify_lang("java.lang.String a; x.Long; @Override Longue"),
+                         "java.lang.String a; x.Long; @Override Longue")
+
+    def test_python_grader_runs_isolated_from_its_directory(self):
+        # Sans -I, sys.path[0] = /box/src, inscriptible par le code soumis : un module déposé
+        # là était importé PAR LE NOTEUR (via l'`import numpy` du harnais) et y lisait le nonce.
+        _, run_cmd = supervisor.exec_commands("python", "grader.py")
+        self.assertEqual(run_cmd, ["python3", "-I", "grader.py"])
 
     def test_java_instance_method_null_string_is_null(self):
         source = supervisor.java_grader_source("return true;", "N")

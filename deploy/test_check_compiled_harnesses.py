@@ -178,6 +178,15 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.OK, chk.TO_CHECK]))
         self.assertEqual(chk.BLOCKING, chk.worst([chk.TO_CHECK, chk.BLOCKING, chk.OK]))
 
+    def test_exec_port_suit_l_environnement_du_conteneur(self):
+        # Le port était en dur : sur un autre port, tout sortait « À VÉRIFIER ».
+        self.assertEqual(9191, chk.exec_port(["PATH=/usr/bin", "EXEC_SERVICE_PORT=9191"]))
+        self.assertEqual(9191, chk.exec_port(["EXEC_SERVICE_PORT= 9191 "]))
+        # Variable absente, vide ou illisible : le défaut du service.
+        self.assertEqual(8085, chk.exec_port(["PATH=/usr/bin", ""]))
+        self.assertEqual(8085, chk.exec_port(["EXEC_SERVICE_PORT="]))
+        self.assertEqual(8085, chk.exec_port(["EXEC_SERVICE_PORT=abc", "AUTRE_EXEC_SERVICE_PORT=1"]))
+
 
 if __name__ == "__main__":
     unittest.main()

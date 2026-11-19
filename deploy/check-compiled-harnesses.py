@@ -31,7 +31,8 @@ pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié s
 être le nouveau) : `python3 deploy/check-compiled-harnesses.py`. Variables d'environnement :
   PG_CONTAINER    conteneur Postgres (défaut moodit_postgres) ;
   EXEC_CONTAINER  conteneur execution-service (défaut moodit_execution) ;
-  EXEC_URL        URL d'execution-service, sinon l'IP du conteneur sur son réseau Docker
+  EXEC_URL        URL d'execution-service, sinon l'IP du conteneur sur son réseau Docker et
+                  le port de son EXEC_SERVICE_PORT (8085 par défaut)
                   (joignable depuis un hôte Linux ; sous Docker Desktop, donner EXEC_URL) ;
   INTERNAL_TOKEN  jeton interne, sinon lu dans l'environnement du conteneur execution-service.
 Le jeton n'est jamais affiché.
@@ -198,6 +199,23 @@ def psql(container, sql):
                stdin=sql)
 
 
+DEFAULT_EXEC_PORT = 8085
+
+
+def exec_port(env_lines):
+    """Port d'écoute d'execution-service, lu dans l'environnement de son conteneur (lignes
+    NOM=valeur de `docker inspect`). FONCTION PURE (testée).
+
+    Le service écoute sur EXEC_SERVICE_PORT (défaut 8085, cf. application.properties). Avec le
+    port en dur, un déploiement sur un autre port voyait chaque appel refusé, et toutes les
+    questions sortaient « À VÉRIFIER » sans que rien ne désigne la cause."""
+    for line in env_lines:
+        name, _, value = line.partition("=")
+        if name == "EXEC_SERVICE_PORT" and value.strip().isdigit():
+            return int(value.strip())
+    return DEFAULT_EXEC_PORT
+
+
 def exec_url(container):
     if os.environ.get("EXEC_URL"):
         return os.environ["EXEC_URL"].rstrip("/")
@@ -205,7 +223,9 @@ def exec_url(container):
               "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", container]).split()
     if not ip:
         raise RuntimeError("IP du conteneur %s introuvable (donner EXEC_URL)" % container)
-    return "http://%s:8085" % ip[0]
+    env_lines = run(["docker", "inspect", "-f",
+                     "{{range .Config.Env}}{{println .}}{{end}}", container]).splitlines()
+    return "http://%s:%d" % (ip[0], exec_port(env_lines))
 
 
 def internal_token(container):

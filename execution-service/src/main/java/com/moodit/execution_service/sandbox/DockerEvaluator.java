@@ -58,6 +58,9 @@ public class DockerEvaluator {
      * verdicts partiels (« non exécuté : budget dépassé »), ce qui reste lisible pour le prof.
      */
     public static final long PUBLIC_WALL_MS = 4 * 60_000;
+    /** Verdicts des canaris que le superviseur sait rendre (cf. canary_verdict, supervisor.py). */
+    private static final java.util.Set<String> CANARY_VERDICTS =
+            java.util.Set.of("ok", "aucun", "indetermines", "incoherents");
     /** Marge laissée au superviseur pour clore et imprimer son JSON avant le mur. */
     private static final long CLOSING_MARGIN_MS = 20_000;
 
@@ -358,7 +361,18 @@ public class DockerEvaluator {
         // Les canaris sont lus AVANT : un verdict de falsification ne doit jamais devenir une
         // tentative a reprendre. Le superviseur le garantit deja ; Java ne lui fait pas confiance
         // aveuglement (defense en profondeur, comme pour les verdicts ci-dessous).
-        boolean canariesInconsistent = "incoherents".equals(root.path("canaries").asString(""));
+        // Le verdict des canaris est EXIGÉ, et parmi les valeurs connues : le superviseur ne
+        // transmet pas les résultats des canaris eux-mêmes, ce champ est donc tout ce que Java
+        // peut relire. Absent ou inconnu (superviseur régressé, sortie d'un autre format), rien
+        // ne dit que les canaris ont été jugés : c'est une panne (502), jamais une note —
+        // sans cette garde, les « réussi » d'une telle sortie étaient acceptés tels quels.
+        String canaries = root.path("canaries").asString("");
+        if (!CANARY_VERDICTS.contains(canaries)) {
+            log.warn("Verdict des canaris absent ou inconnu (« {} »)", truncate(canaries));
+            throw new SandboxException(
+                    "Réponse du superviseur de notation incomplète (verdict des canaris)");
+        }
+        boolean canariesInconsistent = "incoherents".equals(canaries);
         if (internal && !canariesInconsistent && root.path("incomplet").asBoolean(false)) {
             log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
             throw new SandboxException(

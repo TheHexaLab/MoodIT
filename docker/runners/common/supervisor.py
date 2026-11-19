@@ -1408,6 +1408,25 @@ def java_shadowed_names(class_names, harness_code):
             if n in JAVA_LANG_TYPES and re.search(r"\b%s\b" % re.escape(n), bare)]
 
 
+def java_grader_objects(obj_list, harness_code):
+    """Classes soumises qui reçoivent un bouchon dans le noteur. PURE (testée).
+
+    Une classe au nom d'un type de java.lang que le harnais n'emploie PAS n'en reçoit pas : son
+    bouchon, compilé dans le paquet du noteur, y masquait le vrai type pour le runtime généré
+    (`Long.toHexString`, `String`, `Object`…) — « Le harnais ne compile pas » et 0 sur une
+    réponse juste qui déclare une `class Long` d'aide. Même critère que java_shadowed_names :
+    le nom est soit refusé (le harnais l'emploie), soit sans bouchon (il ne l'emploie pas).
+    Pour une classe imbriquée (Solution.Long), c'est le dernier segment qui compte."""
+    bare = blank_code(harness_code or "")
+    kept = []
+    for entry in obj_list:
+        simple = entry[0].rsplit(".", 1)[-1]
+        if simple in JAVA_LANG_TYPES and not re.search(r"\b%s\b" % re.escape(simple), bare):
+            continue
+        kept.append(entry)
+    return kept
+
+
 def java_grader_source(harness_code, nonce):
     """Programme NOTEUR : runtime RPC + harnais booléen du prof + nonce.
 
@@ -1599,12 +1618,8 @@ def indent_java(body):
     return "\n".join("        " + l if l.strip() else l for l in (body or "").splitlines())
 
 
-def java_server_source(class_names):
-    """Programme ÉTUDIANT : son code, plus une boucle qui répond aux appels par RÉFLEXION.
-
-    FONCTION PURE (testée). Aucun nonce, aucun harnais, aucun attendu : ce processus ne peut
-    rien apprendre du verdict, et rien de ce qu'il écrit ne peut le produire."""
-    return """import java.lang.reflect.Method;
+# Serveur RPC du code soumis (cf. java_server_source, qui qualifie les types de java.lang).
+JAVA_SERVER_TEMPLATE = """import java.lang.reflect.Method;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -1809,7 +1824,31 @@ public final class MooditServer {
         return parts.toArray();
     }
 }
-""".replace("__CLASSES__", ", ".join(chr(34) + n + chr(34) for n in class_names))
+"""
+
+
+def java_qualify_lang(source):
+    """Qualifie (`java.lang.String`) chaque type de java.lang nommé simplement. PURE (testée).
+
+    Le serveur généré est compilé DANS le paquet du code soumis : une classe soumise du même
+    nom (`class Long`, `class String`) l'emporte sur l'import implicite de java.lang, et le
+    serveur ne compilait plus — « Erreur interne du noteur » et 0 sur une réponse juste. Les
+    noms déjà qualifiés (précédés d'un point) et les annotations sont laissés tels quels."""
+    return JAVA_LANG_WORD.sub(r"java.lang.\1", source)
+
+
+JAVA_LANG_WORD = re.compile(r"(?<![\w.$@])(%s)(?![\w$])"
+                            % "|".join(sorted(JAVA_LANG_TYPES, key=len, reverse=True)))
+
+
+def java_server_source(class_names):
+    """Programme ÉTUDIANT : son code, plus une boucle qui répond aux appels par RÉFLEXION.
+
+    FONCTION PURE (testée). Aucun nonce, aucun harnais, aucun attendu : ce processus ne peut
+    rien apprendre du verdict, et rien de ce qu'il écrit ne peut le produire. Les noms des
+    classes soumises sont insérés APRÈS la qualification : ce sont des chaînes, à garder."""
+    return java_qualify_lang(JAVA_SERVER_TEMPLATE).replace(
+        "__CLASSES__", ", ".join(chr(34) + n + chr(34) for n in class_names))
 
 
 # ─────────────────────────── Go : bouchon et aiguillage TYPÉS ───────────────────────────
@@ -4819,8 +4858,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                          "est" if len(shadowed) == 1 else "sont",
                          "" if len(shadowed) == 1 else "s"))
     write_private(os.path.join(grader_src, klass + ".java"),
-                 java_stub_source(klass, method_list, obj_list, own_ctors, own_instance,
-                                  class_statics))
+                 java_stub_source(klass, method_list, java_grader_objects(obj_list, harness),
+                                  own_ctors, own_instance, class_statics))
     write_private(os.path.join(grader_src, "MooditGrader.java"),
                  java_grader_source(harness, TOKENS.get(case_index) or ""))
     code, expired = run_proc(["javac", "-encoding", "UTF-8", "-d", grader_classes,
@@ -5341,7 +5380,14 @@ EXEC_DEFAULT_TIMEOUT_S = 3
 def exec_commands(runtime, entry):
     """(commande de compilation ou None, commande d'exécution) pour un runtime donné."""
     if runtime == "python":
-        return None, ["python3", entry]
+        # -I (mode isolé) : le dossier du script n'entre PAS dans sys.path, pas plus que le
+        # site utilisateur ($HOME est inscriptible) ni PYTHONPATH. Sans lui, sys.path[0] valait
+        # /box/src, que le serveur étudiant peut écrire : un `import numpy` du harnais (ou tout
+        # module pas encore chargé, y compris ceux que numpy importe à son tour) était résolu
+        # d'abord dans ce dossier, et un fichier `pickle.py` déposé par le code soumis
+        # s'exécutait DANS le noteur — où il lisait le nonce. Le noteur n'importe rien de son
+        # dossier ; student_server.py est lancé à part (sys.executable), sans cette option.
+        return None, ["python3", "-I", entry]
     if runtime == "javascript":
         return None, ["node", entry]
     if runtime == "typescript":

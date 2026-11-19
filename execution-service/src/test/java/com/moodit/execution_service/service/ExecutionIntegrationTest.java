@@ -234,6 +234,39 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void python_module_dropped_next_to_the_grader_cannot_forge_the_verdict() {
+        // Revue #246 : le noteur tournait avec son dossier (inscriptible par le code soumis) en
+        // tête de sys.path. Un harnais qui importe une bibliothèque faisait charger, DANS le
+        // noteur, les modules que le code soumis y avait déposés — ils y lisaient le nonce.
+        requireRuntime("python");
+        String harness = "import numpy as np\nreturn bool(np.isclose(carre(3.0), 9.0))";
+        String payload = "import sys\n"
+                + "f = sys._getframe()\n"
+                + "while f is not None:\n"
+                + "    for c in f.f_code.co_consts:\n"
+                + "        if isinstance(c, str) and c.startswith('MOODIT_OK_'):\n"
+                + "            sys.stderr.write(c)\n"
+                + "    f = f.f_back\n"
+                + "raise ImportError('x')\n";
+        String forged = "import sys\n"
+                + "__p = " + pythonLiteral(payload) + "\n"
+                + "for __n in ('numpy', 'pickle', 'ast', 'platform', 'statistics', 'decimal',\n"
+                + "            'datetime', 'copy', 'threading', 'inspect', 'textwrap'):\n"
+                + "    if __n not in sys.modules:\n"
+                + "        open(__n + '.py', 'w').write(__p)\n"
+                + "def carre(x):\n    return 0\n";
+        assertThat(passes("Python", forged, harness)).isFalse();
+        // Témoins : le même harnais note normalement une réponse juste, et refuse une fausse.
+        assertThat(passes("Python", "def carre(x):\n    return x * x", harness)).isTrue();
+        assertThat(passes("Python", "def carre(x):\n    return 0", harness)).isFalse();
+    }
+
+    /** Littéral chaîne Python entre guillemets simples (texte ASCII de test). */
+    private static String pythonLiteral(String text) {
+        return "'" + text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'";
+    }
+
+    @Test
     void javascript_submitted_global_name_cannot_forge_the_verdict() {
         requireRuntime("javascript");
         assertThat(passes("JavaScript", "function Number(x){ return 3; }\nfunction f(){ return 0; }",
