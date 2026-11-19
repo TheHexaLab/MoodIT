@@ -2677,6 +2677,63 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
         self.assertEqual(supervisor.c_symbols_defined_in_binary(""), [])
         self.assertEqual(supervisor.c_symbols_defined_in_binary(None), [])
 
+    def test_c_versioned_function_is_a_submitted_definition_versioned_data_is_not(self):
+        # Une DONNÉE versionnée est la copie de relocalisation d'un symbole de la libc ; une
+        # FONCTION versionnée ne peut venir que du code soumis (`.symver mon_free,free@@GLIBC…`).
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(
+            "0000000000404050 B stdin@GLIBC_2.2.5\n0000000000404040 B stdout@GLIBC_2.2.5\n"), [])
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(
+            "0000000000401126 T free@@GLIBC_2.2.5\n0000000000401136 t printf@GLIBC_2.2.5\n"
+            "0000000000404040 B stdout@GLIBC_2.2.5\n"), ["printf", "free"])
+        # Texte ou lignes, avec ou sans fin de ligne.
+        self.assertEqual(supervisor.c_symbols_defined_in_binary(
+            ["0000000000401126 T malloc\n", "\n", "U\n"]), ["malloc"])
+
+    def test_c_nm_output_is_read_whole_not_head_and_tail(self):
+        # Au-delà du plafond, read_capped ne rend que la tête et la queue : une coupure au milieu
+        # de `liste_free` fabriquait le nom `free` (réponse honnête refusée), et une vraie
+        # redéfinition placée au milieu n'était plus vue.
+        cap = supervisor.OUTPUT_CAP
+        line = "0000000000401126 T %s\n"
+        padding = "".join(line % ("a_%06d" % i) for i in range(cap // 20))
+        filler = "".join(line % ("z_%06d" % i) for i in range(cap // 20))
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "nm.out")
+            # 1. Coupure fabriquée : la tête de read_capped (cap // 2 octets) s'arrête sur `free`,
+            #    au milieu de `free_liste`.
+            cut = "0000000000401126 T free"
+            room = cap // 2 - len(cut)
+            whole = room // len(line % "a_000000") - 1
+            head = padding[:whole * len(line % "a_000000")]
+            head += line % ("p" * (room - len(head) - len(line % "")))
+            self.assertEqual(len(head + cut), cap // 2)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(head + cut + "_liste\n" + filler + filler)
+            self.assertGreater(os.path.getsize(path), cap)
+            self.assertEqual(supervisor.c_symbols_defined_in_binary(
+                supervisor.read_capped(path)), ["free"])          # le défaut d'origine
+            self.assertEqual(supervisor.c_binary_linked_symbols(0, False, path), [])
+            # 2. Redéfinition au milieu : invisible par tête + queue, vue en entier.
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(padding + line % "free" + filler)
+            self.assertEqual(supervisor.c_symbols_defined_in_binary(
+                supervisor.read_capped(path)), [])                # le défaut d'origine
+            self.assertEqual(supervisor.c_binary_linked_symbols(0, False, path), ["free"])
+
+    def test_c_failed_nm_refuses_nothing(self):
+        # nm en échec, expiré ou sans sortie lisible : pas de refus. Ce n'est qu'un diagnostic.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "nm.out")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write("0000000000401126 T free\n")
+            self.assertEqual(supervisor.c_binary_linked_symbols(0, False, path), ["free"])
+            self.assertEqual(supervisor.c_binary_linked_symbols(1, False, path), [])
+            self.assertEqual(supervisor.c_binary_linked_symbols(-9, False, path), [])
+            self.assertEqual(supervisor.c_binary_linked_symbols(0, True, path), [])
+            self.assertEqual(supervisor.c_binary_linked_symbols(
+                0, False, os.path.join(d, "absent")), [])
+            self.assertEqual(supervisor.c_binary_linked_symbols(0, False, d), [])
+
     def test_cpp_object_dispatch_locals_are_prefixed(self):
         _, branches = supervisor.cpp_object_dispatch([("Rect", [["int"]], [("int", "aire", [])])])
         self.assertIn("int moodit_h = moodit_lit_int(moodit_jeton());", branches)

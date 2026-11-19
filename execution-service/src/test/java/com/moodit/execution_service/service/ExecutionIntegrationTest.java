@@ -382,6 +382,22 @@ class ExecutionIntegrationTest {
         assertThat(passes("JavaScript", js.replace("return this.a;", "return 0;"), h)).isFalse();
     }
 
+    @Test
+    void unresolvable_symbol_reports_its_own_error_not_the_fallback_s() {
+        // `cache` est en colonne 0, donc mandaté, mais déclaré dans un bloc : le serveur ne peut
+        // pas le résoudre. Le repli sur `exports` ne doit pas changer l'erreur rendue : en module
+        // ES (`export` en JavaScript) `exports` n'existe pas, et son ReferenceError remplaçait
+        // celui du nom demandé ; en CommonJS (TypeScript) `exports.cache` est absent.
+        String h = "try { cache(1); return false; }"
+                + " catch (e) { return e.message === 'cache is not defined' && doubler(2) === 4; }";
+        for (String language : List.of("JavaScript", "TypeScript")) {
+            requireRuntime(language.toLowerCase());
+            String code = "export function doubler(n){ return n * 2; }\n{\nconst cache = (n) => n;\n}\n";
+            assertThat(passes(language, code, h)).as(language).isTrue();
+            assertThat(passes(language, code.replace("n * 2", "0"), h)).as(language).isFalse();
+        }
+    }
+
     // Objets (proxys de classe) : Python et JS, harnais objet inchangé.
     @Test
     void class_proxies_work() {

@@ -3218,18 +3218,50 @@ C_SERVER_SYMBOLS = ("printf", "fflush", "fgets", "strtol", "strtod", "realloc", 
                     "free", "stdin", "stdout")
 
 
-def c_symbols_defined_in_binary(nm_output):
+def c_symbols_defined_in_binary(nm_lines):
     """Symboles de C_SERVER_SYMBOLS que le BINAIRE du code soumis définit lui-même.
 
-    FONCTION PURE (testée). `nm_output` est la sortie de `nm --defined-only`. Le contrôle se fait
-    sur le BINAIRE, pas sur le texte : lire la source refusait à tort une méthode `Pile::free`,
-    un `using std::free;` ou une surcharge C++, et laissait passer un type de retour sur sa
-    propre ligne, un bloc `extern "C"` ou un paramètre écrit par un alias de type. Un symbole que
-    la libc fournit porte sa version (`stdout@GLIBC_2.2.5`, copie de relocalisation) ; une
-    surcharge C++ et un membre de classe sont décorés (`_Z4freeP1N`). Seul le nom NU est une
-    définition du code soumis, locale (`t`) ou globale (`T`)."""
-    names = {line.split()[-1] for line in (nm_output or "").splitlines() if line.split()}
+    FONCTION PURE (testée). `nm_lines` : la sortie de `nm --defined-only`, texte ou lignes. Le
+    contrôle se fait sur le BINAIRE, pas sur le texte : lire la source refusait à tort une
+    méthode `Pile::free`, un `using std::free;` ou une surcharge C++, et laissait passer un type
+    de retour sur sa propre ligne, un bloc `extern "C"` ou un paramètre écrit par un alias de
+    type. Une surcharge C++ et un membre de classe sont décorés (`_Z4freeP1N`) : ce n'est pas le
+    nom. Un nom suivi d'une VERSION n'est celui de la libc que pour une DONNÉE
+    (`B stdout@GLIBC_2.2.5`, copie de relocalisation) : un binaire lié dynamiquement ne définit
+    aucune fonction de la libc, donc une fonction versionnée (`T free@@GLIBC_2.2.5`, directive
+    `.symver`) vient du code soumis, comme un nom nu, local (`t`) ou global (`T`)."""
+    if isinstance(nm_lines, str):
+        nm_lines = nm_lines.splitlines()
+    names = set()
+    for line in nm_lines or ():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name, _, version = parts[-1].partition("@")
+        if name in C_SERVER_SYMBOLS and (not version or parts[-2] in ("T", "t", "W", "w")):
+            names.add(name)
     return [n for n in C_SERVER_SYMBOLS if n in names]
+
+
+def c_binary_linked_symbols(code, expired, nm_out):
+    """Symboles de la libc redéfinis, d'après un `nm` TERMINÉ. Testée.
+
+    La sortie est lue EN ENTIER, ligne à ligne : relue par read_capped (tête + queue au-delà de
+    64 Kio), une ligne coupée fabriquait un faux nom — `liste_free` devenait `free`, réponse
+    honnête refusée — et une vraie redéfinition tombait dans le trou. Le fichier est écrit par
+    le superviseur (pompe bornée), hors d'atteinte du code soumis. Si nm a échoué ou expiré, ou
+    si sa sortie est illisible : aucun refus. Ce contrôle n'est qu'un diagnostic nommé, à la
+    place d'un appel refusé ou d'un temps limite inexpliqué ; il ne protège pas le verdict."""
+    if expired or code != 0:
+        return []
+    try:
+        fd = os.open(nm_out, os.O_RDONLY | O_NO_LINK)
+        with os.fdopen(fd, "r", encoding="utf-8", errors="replace") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return []
+            return c_symbols_defined_in_binary(f)
+    except OSError:
+        return []
 
 
 def c_server_source(methods, student_source, cpp=False, obj_list=()):
@@ -5120,15 +5152,12 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
             return None, "Échec de compilation :\n" + detail
         if label == "code soumis":
             # Symboles de la libc redéfinis par le code soumis, lus sur le BINAIRE (cf.
-            # c_symbols_defined_in_binary). Sous l'UID étudiant, comme la compilation. Si nm
-            # échoue, pas de refus : ce n'est qu'un diagnostic nommé, à la place d'un appel
-            # refusé ou d'un temps limite inexpliqué.
+            # c_binary_linked_symbols). nm tourne sous l'UID étudiant, comme la compilation.
             nm_out = os.path.join(case_dir, "nm.out")
             code, expired = run_proc(["nm", "--defined-only", out_value], cwd_c, env_c,
                                      COMPILE_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
                                      preexec_c)
-            linked = [] if expired or code != 0 else c_symbols_defined_in_binary(
-                read_capped(nm_out))
+            linked = c_binary_linked_symbols(code, expired, nm_out)
             if linked:
                 return None, reserved_name_message(
                     linked, "la bibliothèque standard, dont le programme de correction se sert")

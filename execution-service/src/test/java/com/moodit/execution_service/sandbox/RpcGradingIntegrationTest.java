@@ -1430,6 +1430,14 @@ class RpcGradingIntegrationTest {
                 """);
         assertThat(bloc.passed()).isFalse();
         assertThat(bloc.detail()).contains("réservé").contains("malloc");
+        // Fonction versionnée par directive d'assembleur : `T free@@GLIBC_2.2.5` dans le binaire.
+        TestResult versionnee = note("C", "return doubler(5) == 10;", """
+                void mon_free(void *p) { }
+                __asm__(".symver mon_free,free@@GLIBC_2.2.5");
+                int doubler(int n) { return n * 2; }
+                """);
+        assertThat(versionnee.passed()).isFalse();
+        assertThat(versionnee.detail()).contains("réservé").contains("free");
         // Une VARIABLE n'est jamais décorée, en C comme en C++ :
         for (String language : List.of("C", "C++")) {
             TestResult variable = note(language, "return doubler(5) == 10;", """
