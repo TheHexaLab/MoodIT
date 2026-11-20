@@ -194,6 +194,17 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Le jeton interne est lu
 > dans le conteneur et jamais affiché.
 >
+> **Questions interprétées : noms réservés.** Le même script rejoue aussi les questions Python,
+> JavaScript, TypeScript et Bash, pour un seul contrôle. Depuis #116, une fonction ou une classe
+> que le harnais nomme et qui porte le nom d'une intégrée du langage (`sum`, `max`, `len` en
+> Python ; `Number`, `parseInt` en JavaScript ; `test`, `factor` en Bash) est refusée avec
+> « Nom réservé », alors qu'elle se notait avant : le mandataire généré à ce nom remplaçait
+> l'intégrée dans le harnais. Une question dont l'énoncé impose un tel nom note donc 0 à tout le
+> monde, avec la consigne de renommer. Elle sort **BLOQUANT** (et son quiz est fermé par
+> `--unpublish`) : renommer la fonction dans l'énoncé, le code de départ et les harnais. Une
+> question interprétée sans code de départ sort À VÉRIFIER, comme une compilée : la rejouer avec
+> une solution (« Tester »).
+>
 > ```bash
 > # Juste après ./deploy/update.sh : rejoue tout, et ferme (is_published = false) les quiz
 > # publiés qui portent un BLOQUANT, le temps de corriger leurs harnais dans l'éditeur.

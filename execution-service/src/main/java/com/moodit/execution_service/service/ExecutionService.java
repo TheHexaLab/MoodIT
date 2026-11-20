@@ -70,7 +70,7 @@ public class ExecutionService {
     /**
      * Plafond du budget configurable (24 h) : au-delà, la conversion en nanosecondes sature et
      * l'échéance déborde. Très au-dessus de tout réglage sensé — c'est un garde-fou, pas un
-     * réglage ; le délai de lecture de core (ExecutionClient.EXEC_BUDGET_MS) reste la vraie borne.
+     * réglage ; le délai de lecture de core (ExecutionClient.DEFAULT_EXEC_BUDGET_MS) reste la vraie borne.
      */
     private static final long MAX_BUDGET_MS = 24L * 60 * 60 * 1000;
 

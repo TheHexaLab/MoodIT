@@ -74,7 +74,7 @@ public class ExecutionLimiter {
     public ExecutionLimiter(
             @Value("${app.exec.max-concurrent:4}") int maxConcurrent,
             @Value("${app.exec.queue-wait-ms:5000}") long queueWaitMs,
-            @Value("${app.exec.internal-queue-wait-ms:15000}") long internalQueueWaitMs,
+            @Value("${app.exec.internal-queue-wait-ms:120000}") long internalQueueWaitMs,
             @Value("${app.exec.max-per-user:2}") int maxPerUser) {
         if (maxConcurrent < 1 || maxPerUser < 1 || queueWaitMs < 0 || internalQueueWaitMs < 0) {
             throw new IllegalArgumentException("Limites d'exécution invalides : max-concurrent et "

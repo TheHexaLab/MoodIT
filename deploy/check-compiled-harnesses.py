@@ -23,6 +23,13 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
   OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
+Les questions INTERPRÉTÉES à mandataires (Python, JavaScript, TypeScript, Bash) sont rejouées
+aussi, pour un seul contrôle : depuis #116, une fonction ou une classe que le harnais nomme et
+qui porte le nom d'une intégrée du langage (`sum`, `max`, `Number`, `test`…) est REFUSÉE
+(« Nom réservé »), alors qu'elle se notait avant. Une question dont l'énoncé impose un tel nom
+note 0 à tout le monde : BLOQUANT, à renommer dans l'énoncé, le code de départ et les harnais.
+Tout autre verdict y vaut OK — le format de ces harnais n'a pas changé.
+
 Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER, 1 sinon, 2 si l'inventaire est impossible.
 Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
 pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié sans cette option.
@@ -48,6 +55,11 @@ import sys
 import urllib.request
 
 COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
+# Langages interprétés dont le noteur génère un mandataire par symbole soumis, et refuse celui
+# qui masque une intégrée (CodeAssembler : assemblePython, assembleJsRpc, assembleBashRpc).
+PROXIED_LANGUAGES = ("Python", "JavaScript", "TypeScript", "Bash")
+# Début du refus écrit par CodeAssembler (SHADOW_PREFIX), suivi du nom.
+RESERVED_NAME = "Nom réservé : « "
 
 # Préfixes et marqueurs écrits par le superviseur (docker/runners/common/supervisor.py) : le texte
 # du compilateur ne vient qu'APRÈS eux, le code soumis ne peut pas les produire.
@@ -146,7 +158,7 @@ SELECT COALESCE(json_agg(row_to_json(t)), '[]') FROM (
     AND EXISTS (SELECT 1 FROM Test_Case tc WHERE tc.question_id = q.id)
   ORDER BY qz.is_published DESC, qz.id, q.id
 ) t;
-""" % ", ".join("'%s'" % name for name in COMPILED_LANGUAGES)
+""" % ", ".join("'%s'" % name for name in COMPILED_LANGUAGES + PROXIED_LANGUAGES)
 
 
 def classify(detail, passed, start_code=""):
@@ -178,6 +190,17 @@ def classify(detail, passed, start_code=""):
     # Échec de compilation du code de départ, falsification, erreur du noteur, refus du format
     # (package, nom réservé…), stderr du code de départ : rien ne prouve que le harnais tourne.
     return TO_CHECK
+
+
+def classify_proxied(detail, passed):
+    """Classe le verdict d'UN cas d'une question interprétée à mandataires. PURE (testée).
+
+    Un seul contrôle : le refus « Nom réservé », rendu avant toute exécution du harnais dès que
+    le code (ici le code de départ) déclare un symbole que le harnais nomme et qui masque une
+    intégrée. Il est déterministe, et vaudra pour toute réponse qui suit l'énoncé."""
+    if not passed and RESERVED_NAME in (detail or ""):
+        return BLOCKING
+    return OK
 
 
 def worst(statuses):
@@ -267,8 +290,11 @@ def check_question(base_url, token, question):
         return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
     lines, statuses = [], []
     for case, result in zip(question["cases"], results):
-        status = classify(result.get("detail"), bool(result.get("passed")),
-                          question.get("start_code") or "")
+        if question["language"] in PROXIED_LANGUAGES:
+            status = classify_proxied(result.get("detail"), bool(result.get("passed")))
+        else:
+            status = classify(result.get("detail"), bool(result.get("passed")),
+                              question.get("start_code") or "")
         statuses.append(status)
         if status != OK:
             first_line = (result.get("detail") or "").strip().splitlines()[:1]
@@ -295,7 +321,7 @@ def main():
         print("Inventaire impossible : %s" % e, file=sys.stderr)
         return 2
 
-    print("%d question(s) compilée(s) à rejouer." % len(questions))
+    print("%d question(s) à rejouer." % len(questions))
     counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0}
     blocked_published = set()
     for question in questions:

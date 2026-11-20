@@ -9,6 +9,7 @@ Lancer : python3 deploy/test_check_compiled_harnesses.py
 import importlib.util
 import os
 import unittest
+from unittest import mock
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-compiled-harnesses.py")
 _SPEC = importlib.util.spec_from_file_location("check_compiled_harnesses", _PATH)
@@ -172,6 +173,49 @@ class ClassifyTest(unittest.TestCase):
                        None):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
+
+    def test_nom_reserve_d_une_question_interpretee_bloquant(self):
+        # Refus rendu par CodeAssembler (Python, JavaScript/TypeScript, Bash) dès que le code de
+        # départ déclare un symbole que le harnais nomme et qui masque une intégrée : la
+        # question note 0 à toute réponse qui suit l'énoncé.
+        for detail in ("Nom réservé : « sum » est réservé : il masque une fonction intégrée "
+                       "de Python, que le harnais peut appeler. Renommer cette fonction ou "
+                       "cette classe, puis resoumettre.\n",
+                       "(node:12) Warning: x\nNom réservé : « Number » est réservé : il masque "
+                       "une fonction ou un objet global de JavaScript",
+                       "Nom réservé : « test » est réservé : il masque une commande de bash"):
+            with self.subTest(detail=detail):
+                self.assertEqual(chk.BLOCKING, chk.classify_proxied(detail, False))
+        # Tout autre verdict : le format de ces harnais n'a pas changé, rien à signaler.
+        for detail, passed in ((None, True), ("Le harnais a renvoyé faux", False),
+                               ("NameError: name 'f' is not defined", False), ("", False),
+                               (None, False)):
+            with self.subTest(detail=detail, passed=passed):
+                self.assertEqual(chk.OK, chk.classify_proxied(detail, passed))
+
+    def test_inventaire_couvre_compiles_et_interpretes_a_mandataires(self):
+        for name in chk.COMPILED_LANGUAGES + chk.PROXIED_LANGUAGES:
+            self.assertIn("'%s'" % name, chk.INVENTORY_SQL)
+        self.assertEqual(set(), set(chk.COMPILED_LANGUAGES) & set(chk.PROXIED_LANGUAGES))
+
+    def test_question_interpretee_classee_par_le_seul_nom_reserve(self):
+        question = {"language": "Python", "start_code": "def sum(xs):\n    pass\n",
+                    "cases": [{"id": 1, "name": "a", "harnessCode": "return sum([1]) == 1",
+                               "weight": 1}]}
+        reserved = [{"passed": False, "detail": "Nom réservé : « sum » est réservé"}]
+        with mock.patch.object(chk, "evaluate", return_value=reserved):
+            status, lines = chk.check_question("http://x", "t", question)
+        self.assertEqual(chk.BLOCKING, status)
+        self.assertIn("Nom réservé", lines[0])
+        # Le même détail sur une question COMPILÉE garde sa classe (refus du format).
+        with mock.patch.object(chk, "evaluate", return_value=reserved):
+            status, _ = chk.check_question("http://x", "t", dict(question, language="Java"))
+        self.assertEqual(chk.TO_CHECK, status)
+        # Un harnais interprété qui échoue contre le code de départ : normal.
+        failed = [{"passed": False, "detail": "Le harnais a renvoyé faux"}]
+        with mock.patch.object(chk, "evaluate", return_value=failed):
+            status, lines = chk.check_question("http://x", "t", question)
+        self.assertEqual((chk.OK, []), (status, lines))
 
     def test_worst(self):
         self.assertEqual(chk.OK, chk.worst([chk.OK, chk.OK]))
