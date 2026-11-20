@@ -68,6 +68,7 @@ STUDENT_GID = 1300
 READY_WAIT_S = 30
 COMPILE_TIMEOUT_S = 90
 LIST_TIMEOUT_S = 5              # inventaire `--list` : s'ajoute au pire cas, donc borné court
+JAVAP_CAP = 2 * 1024 * 1024     # sortie de javap relue en entier jusqu'à 2 Mio (cf. run_java_rpc)
 DEFAULT_RUN_TIMEOUT_S = 10
 MAX_RUN_TIMEOUT_S = 60
 OUTPUT_CAP = 64 * 1024          # tronque ce qu'on relit des sorties capturées
@@ -2866,6 +2867,8 @@ CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
 # Debut d'un `template <...>`, et fins d'instruction ou de bloc : cf. cpp_follows_template.
 CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<")
 CPP_STATEMENT_END = re.compile(r"[{};]")
+# Mot-cle d'un AUTRE en-tete entre un en-tete et son accolade : cf. cpp_class_body_start.
+CPP_CLASS_KEYWORD = re.compile(r"\b(?:class|struct)\b")
 
 
 def cpp_follows_template(src_text, position, heads, bounds):
@@ -2893,6 +2896,27 @@ def cpp_follows_template(src_text, position, heads, bounds):
 CPP_PURE_VIRTUAL = re.compile(r"\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?=\s*0\s*;")
 
 
+def cpp_class_body_start(src_text, head_end, bounds):
+    """Position de l'accolade ouvrante du corps d'une classe, ou -1 si l'en-tête n'en a pas.
+    FONCTION PURE (testée).
+
+    Le corps est celui de CET en-tête seulement si son `{` est le premier de `{`, `}`, `;` après
+    lui (`bounds`, positions triées de CPP_STATEMENT_END) et qu'aucun autre mot-clé `class` /
+    `struct` ne s'intercale. L'ancienne recherche — « la première accolade après l'en-tête » —
+    donnait la MÊME accolade à tous les en-têtes sans corps qui la précèdent : 6 000 lignes
+    `class A` suivies d'un seul corps de 50 Ko le faisaient redécouper 6 000 fois, caractère par
+    caractère (plus de 90 s par cas pour une source de 100 Ko, hors de tout délai par phase).
+    Elle attribuait aussi à une déclaration anticipée (`class B;`) le corps de la classe
+    suivante, d'où un bouchon `B` qui ne compilait pas."""
+    k = bisect.bisect_left(bounds, head_end)
+    if k == len(bounds) or src_text[bounds[k]] != "{":
+        return -1
+    begin = bounds[k]
+    if CPP_CLASS_KEYWORD.search(src_text, head_end, begin):
+        return -1
+    return begin
+
+
 def cpp_object_api(source):
     """API OBJET C++ → [(classe, [constructeurs], [(retour, méthode, [types])])]. PURE (testée).
 
@@ -2914,9 +2938,8 @@ def cpp_object_api(source):
         # sans argument de template ne compile pas. Non proxifiee, comme les generiques en C#.
         if cpp_follows_template(src_text, klass.start(), heads, bounds):
             continue
-        try:
-            begin = src_text.index("{", klass.start())
-        except ValueError:
+        begin = cpp_class_body_start(src_text, klass.end(), bounds)
+        if begin < 0:
             continue
         finish = block_end(src_text, begin)
         body = src_text[begin + 1:finish]
@@ -3464,8 +3487,11 @@ int main(void) {
 # une seule ligne est du Rust valide, et l'ancre de debut de ligne seule ne voyait ni cette
 # methode ni une seconde fonction sur la meme ligne — « aucune fonction exploitable » sur une
 # reponse juste. Le niveau d'accolades (code_depths) ecarte ensuite les fonctions imbriquees.
+# Restriction de visibilite BORNEE (`pub(crate)`, `pub(in chemin::du::module)`) et sans fin de
+# ligne : sans borne, `;pub(` repete repartait de chaque `;` jusqu'au bout du texte — 8 s par
+# cas pour 100 Ko.
 RUST_FN = re.compile(
-    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)]*\))?\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
+    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
     re.M)
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
@@ -4034,10 +4060,12 @@ fn main() {
 # admis devant : `fn f() -> i32 { 2 } fn main() {}` sur une ligne et `#[allow(dead_code)] fn
 # main() {}` gardaient leur `main`, avec le même doublon. Qualificatifs bornés à trois (il n'en
 # existe que trois) : leur `\s+` franchit les fins de ligne, et répétés sans borne ils rendaient
-# le motif quadratique sur une source faite de `const` un par ligne.
+# le motif quadratique sur une source faite de `const` un par ligne. Même raison pour les
+# attributs et la restriction de visibilité, bornés en longueur et en nombre : `;#[` répété
+# sur une seule ligne relisait la ligne entière depuis chaque `;` (12 s par cas pour 100 Ko).
 RUST_MAIN = re.compile(
-    r"((?:^|(?<=[{};]))[ \t]*(?:#\[[^\]\n]*\][ \t]*)*"
-    r"(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+){0,3})fn\s+main\s*\(\s*\)",
+    r"((?:^|(?<=[{};]))[ \t]*(?:#\[[^\]\n]{0,200}\][ \t]*){0,8}"
+    r"(?:pub(?:\s*\([^()\n]{0,80}\))?\s+)?(?:(?:const|async|unsafe)\s+){0,3})fn\s+main\s*\(\s*\)",
     re.M)
 
 
@@ -5030,7 +5058,16 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             case_dir, env, LIST_TIMEOUT_S,
                             os.path.join(case_dir, "javap.out"), os.path.join(case_dir, "javap.err"),
                             preexec_compile)
-    javap = read_capped(os.path.join(case_dir, "javap.out"))
+    # Inventaire NON abouti : ce n'est pas le code soumis qui est en cause (JVM froide sur un
+    # hôte chargé). Le dire, plutôt que « aucune méthode exploitable », qui accuse la réponse.
+    if expired:
+        return None, ("L'inventaire des méthodes de la classe " + klass + " n'a pas abouti en "
+                      + str(LIST_TIMEOUT_S) + " s (machine de correction chargée) : le code "
+                      "soumis n'est pas en cause.")
+    # Plafond LARGE : une signature par ligne, et la troncature « tête + queue » de read_capped
+    # retirait celles du milieu dès 64 Kio — méthodes absentes du bouchon, harnais qui ne
+    # compile plus. La taille reste bornée par les classes que javac vient d'accepter.
+    javap = read_capped(os.path.join(case_dir, "javap.out"), JAVAP_CAP)
     method_list = java_signatures(javap)
     # Une déclaration de classe par bloc : on les sépare pour lire l'API objet de chacune.
     obj_list = []
@@ -5047,7 +5084,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         else:
             obj_list.append((source_name, ctors, instance))
             class_statics[source_name] = java_signatures(block)
-    if expired or code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
+    if code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
         return None, ("Aucune méthode statique ni objet exploitable dans la classe "
                       + klass + " (types acceptés : int, long, double, boolean, String).")
 

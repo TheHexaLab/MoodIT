@@ -6,6 +6,7 @@ import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
+import com.moodit.core_service.exception.GradingInterruptedException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.InvalidQuizException;
 import com.moodit.core_service.exception.QuizNotFoundException;
@@ -485,6 +486,14 @@ public class QuizService {
                 // pousser, l'autre passe l'a fait.
                 return;
             }
+        } catch (GradingInterruptedException e) {
+            // Arrêt de core pendant l'attente d'execution-service : seule exception à la règle
+            // « jamais de pending coincé ». La tentative reste "pending" et sera reprise au
+            // démarrage suivant (resumePendingGradings) ; la supprimer obligeait l'étudiant à
+            // resoumettre alors qu'aucune correction n'avait commencé.
+            log.warn("Correction de la tentative {} interrompue par l'arrêt : reprise au démarrage",
+                    attemptId);
+            return;
         } catch (RuntimeException e) {
             failGrading(attemptId, e);
             return;

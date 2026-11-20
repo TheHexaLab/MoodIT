@@ -581,10 +581,37 @@ class ExecutionIntegrationTest {
     void boucle_d_allocation_tuee_par_la_limite_memoire() {
         // La limite mémoire du conteneur runner (app.sandbox.memory-mb) tue la boucle d'allocation :
         // le processus meurt par SIGNAL (OOM du cgroup → SIGKILL), jamais en « réussite ».
+        //
+        // L'ancienne version passait SANS limite mémoire : sa boucle infinie était aussi tuée par
+        // SIGKILL au temps limite, `bytearray(n)` ne touche pas ses pages (rien n'était réellement
+        // consommé), et tout code de sortie non nul la satisfaisait. Ici :
+        //   — l'allocation est BORNÉE (1 Gio, quatre fois la limite) et ÉCRITE, puis le programme
+        //     imprime un témoin et sort en 0 : sans limite, il réussit et le test échoue ;
+        //   — le temps limite est large (60 s) et la durée est vérifiée : ce n'est pas lui qui tue ;
+        //   — un TÉMOIN alloue sous la limite avec le même code et doit réussir.
         requireRuntime("python");
-        RunnerExec.Stage run = RUNNER.execute("python", List.of(new RunnerExec.File("main.py",
-                "a = []\nwhile True:\n    a.append(bytearray(10 * 1024 * 1024))\n"))).run();
-        assertThat("SIGKILL".equals(run.signal()) || (run.code() != null && run.code() != 0)).isTrue();
+        RunnerExec limited = new RunnerExec(new DockerSandbox("", 256, 512, 2.0), "moodit-runner-",
+                System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
+        String program = "a = []\nfor _ in range(%d):\n    a.append(b'x' * (16 * 1024 * 1024))\n"
+                + "print('survecu')\n";
+
+        RunnerExec.Stage under = limited.execute("python", List.of(new RunnerExec.File("main.py",
+                program.formatted(4))), null, 60_000).run();
+        assertThat(under.code())
+                .withFailMessage("le témoin (64 Mio sous une limite de 256 Mio) doit réussir, "
+                        + "sinon la sonde ne prouve rien : %s", under)
+                .isZero();
+        assertThat(under.stdout()).contains("survecu");
+
+        long begin = System.nanoTime();
+        RunnerExec.Stage over = limited.execute("python", List.of(new RunnerExec.File("main.py",
+                program.formatted(64))), null, 60_000).run();
+        long elapsedMs = (System.nanoTime() - begin) / 1_000_000;
+        assertThat(over.signal()).isEqualTo("SIGKILL");
+        assertThat(over.stdout()).doesNotContain("survecu");
+        assertThat(elapsedMs)
+                .as("tué par la limite mémoire, bien avant le temps limite de 60 s")
+                .isLessThan(45_000);
     }
 
     @Test

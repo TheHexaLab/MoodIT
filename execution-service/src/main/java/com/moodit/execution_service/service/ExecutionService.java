@@ -460,7 +460,10 @@ public class ExecutionService {
             return "Interrompu à la compilation (signal " + compile.signal()
                     + ") — dépassement de temps ou de mémoire probable";
         }
-        return firstNonBlank(compile.stderr(), compile.message(), "Échec de compilation");
+        // stdout EN DERNIER RECOURS : tsc écrit ses diagnostics sur la sortie standard, stderr
+        // vide, et le détail se réduisait à « Échec de compilation », sans dire où.
+        return firstNonBlank(compile.stderr(), compile.message(), compile.stdout(),
+                "Échec de compilation");
     }
 
     private static String runFailureDetail(RunnerExec.Stage run) {

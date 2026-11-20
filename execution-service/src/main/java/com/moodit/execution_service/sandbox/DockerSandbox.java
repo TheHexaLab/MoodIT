@@ -25,7 +25,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Lance le CONTENEUR RUNNER jetable d'une notation compilée (#116) et en rapporte la sortie JSON
@@ -67,6 +70,32 @@ public class DockerSandbox {
      */
     static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(60);
 
+    /**
+     * Réglages IPC du conteneur (espace de noms IPC privé, donc sans effet sur l'hôte).
+     *
+     * <p>Un segment de mémoire partagée System V ({@code shmget}) jamais détruit SURVIT à son
+     * créateur : compté dans le cgroup, il n'est ni borné par la taille de {@code /dev/shm}, ni
+     * vidé entre deux cas, ni rendu quand le superviseur tue le code soumis. L'OOM du cgroup
+     * finissait donc par tuer le superviseur lui-même (PID 1) : conteneur mort sans JSON, 502,
+     * tentative supprimée et rejouable à volonté sur une question à tentative unique.
+     * {@code shm_rmid_forced=1} fait détruire un segment dès que plus aucun processus n'y est
+     * attaché — tuer le code soumis rend alors sa mémoire, et le verdict reste imputable.
+     *
+     * <p>Les files de messages System V ont le même défaut (elles survivent, et leur contenu est
+     * compté dans le cgroup) sans réglage équivalent : {@code msgmni=0} interdit d'en créer.
+     * Aucune des chaînes de compilation ni aucun des interpréteurs des runners ne s'en sert.
+     */
+    static final Map<String, String> IPC_SYSCTLS = Map.of(
+            "kernel.shm_rmid_forced", "1",
+            "kernel.msgmni", "0");
+
+    /**
+     * Plafond de CHAQUE flux des journaux relus (stdout = JSON du superviseur, stderr). Le
+     * superviseur borne déjà ses sorties bien en dessous ; ce plafond empêche qu'une régression
+     * de son côté ne devienne un épuisement du tas du service, qui lit ces journaux en mémoire.
+     */
+    static final int LOG_CAP_BYTES = 16 * 1024 * 1024;
+
     private final String dockerHost;
     private final long memoryBytes;
     private final long pidsLimit;
@@ -77,6 +106,13 @@ public class DockerSandbox {
      * {@code ORPHAN_GRACE_MS}. Modifiable par les tests seulement.
      */
     Duration logReadTimeout = Duration.ofSeconds(30);
+    /** Plafond des journaux relus, par flux. Modifiable par les tests seulement. */
+    int logCapBytes = LOG_CAP_BYTES;
+    /**
+     * Conteneurs EN VOL de cette instance, pour {@link #removeInFlight()} : à l'arrêt du service,
+     * rien ne garantit que le {@code finally} de {@link #run} aille au bout avant la fin de la JVM.
+     */
+    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
     private volatile DockerClient client;
     private volatile DockerClient waitClient;
 
@@ -301,6 +337,9 @@ public class DockerSandbox {
                             // sans cette entrée, il échappait à l'inventaire des points
                             // d'écriture de l'UID étudiant. Borné et noexec comme /tmp.
                             "/dev/shm", "rw,nosuid,noexec,size=" + shmSizeMb() + "m"))
+                    // IPC System V : mémoire comptée dans le cgroup mais HORS des tmpfs bornés,
+                    // et qui survit au processus qui l'a créée (cf. IPC_SYSCTLS).
+                    .withSysctls(IPC_SYSCTLS)
                     // Capacités : on retire TOUT puis on rend le strict nécessaire au superviseur
                     // root — chown/droits sur les fichiers du job (CHOWN, FOWNER, DAC_OVERRIDE),
                     // bascule vers les UID du couple noteur/étudiant (SETUID, SETGID) et
@@ -332,6 +371,7 @@ public class DockerSandbox {
                     .withLabels(Map.of(RUNNER_LABEL, "1"))
                     .exec();
             containerId = created.getId();
+            inFlight.add(containerId);
 
             // Copier AVANT le démarrage, dans la ZONE DE TRANSIT de l'image (/opt/moodit/staging,
             // 0600 root) : `docker cp` ne sait pas écrire dans un tmpfs (l'extraction atterrit
@@ -357,15 +397,20 @@ public class DockerSandbox {
             // frames deviendrait sinon « � » dans le détail d'un verdict.
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            AtomicBoolean overflow = new AtomicBoolean();
             ResultCallback.Adapter<Frame> logCallback = new ResultCallback.Adapter<>() {
                 @Override
                 public void onNext(Frame frame) {
                     byte[] payload = frame.getPayload();
-                    if (frame.getStreamType() == StreamType.STDOUT) {
-                        stdout.write(payload, 0, payload.length);
-                    } else {
-                        stderr.write(payload, 0, payload.length);
+                    ByteArrayOutputStream target =
+                            frame.getStreamType() == StreamType.STDOUT ? stdout : stderr;
+                    // Au-delà du plafond, plus rien n'est gardé : le flux est lu jusqu'au bout
+                    // (le rappel doit se terminer), mais la mémoire reste bornée.
+                    if (target.size() + payload.length > logCapBytes) {
+                        overflow.set(true);
+                        return;
                     }
+                    target.write(payload, 0, payload.length);
                 }
             };
             try (logCallback) {
@@ -379,6 +424,11 @@ public class DockerSandbox {
                     throw new SandboxException("Journaux du conteneur de notation non lus en "
                             + logReadTimeout.toSeconds() + " s");
                 }
+            }
+            // Sortie TRONQUÉE : pas un verdict non plus (même règle que la lecture incomplète).
+            if (overflow.get()) {
+                throw new SandboxException("Journaux du conteneur de notation au-delà de "
+                        + logCapBytes + " octets");
             }
             return new ContainerRun(stdout.toString(StandardCharsets.UTF_8),
                     stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status);
@@ -413,12 +463,37 @@ public class DockerSandbox {
                 } catch (RuntimeException e) {
                     log.warn("Nettoyage du conteneur {} échoué : {}", containerId, e.getMessage());
                 } finally {
+                    inFlight.remove(containerId);
                     if (interrupted) {
                         Thread.currentThread().interrupt();
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Supprime les conteneurs encore en vol. Appelé à l'ARRÊT du service (méthode de destruction
+     * du bean, cf. {@code SandboxBeans}) : la suppression vivait seulement dans le {@code finally}
+     * d'un fil de requête, que la JVM n'attend pas. Un conteneur survivant tournait alors jusqu'au
+     * bout de son mur (15 min), hors du compte du limiteur de l'instance suivante, et le balayeur
+     * ne le ramassait qu'après {@link #ORPHAN_GRACE_MS}. Supprimer deux fois est sans effet :
+     * le {@code finally} de {@link #run} tolère un conteneur déjà parti.
+     */
+    public int removeInFlight() {
+        int removed = 0;
+        for (String id : List.copyOf(inFlight)) {
+            try {
+                client().removeContainerCmd(id).withForce(true).exec();
+                removed++;
+            } catch (RuntimeException e) {
+                log.warn("Conteneur en vol {} non supprimé à l'arrêt : {}", id, e.getMessage());
+            }
+        }
+        if (removed > 0) {
+            log.info("{} conteneur(s) runner en vol supprimé(s) à l'arrêt", removed);
+        }
+        return removed;
     }
 
     /**

@@ -1670,7 +1670,11 @@ class Review27Test(unittest.TestCase):
                    # de structure Go jamais ferme (GO_STRUCT_BODY).
                    "static\n" * (n // 7), "const\n" * (n // 6), "inline\n" * (n // 7),
                    "async\n" * (n // 6), "unsafe\n" * (n // 7),
-                   "const\nasync\nunsafe\n" * (n // 19), "type A struct{\n" * (n // 15)]
+                   "const\nasync\nunsafe\n" * (n // 19), "type A struct{\n" * (n // 15),
+                   # Revue #246 (4e passe) : restriction de visibilite et attribut Rust jamais
+                   # fermes, repetes sur UNE ligne apres un `;` (RUST_FN, RUST_MAIN).
+                   ";pub(" * (n // 5), ";#[" * (n // 3), ";pub (" * (n // 6),
+                   ";#[a]" * (n // 5)]
         patterns = [(ident, m) for ident, m in vars(supervisor).items() if isinstance(m, re.Pattern)]
         patterns.append(("CS_CTOR_TPL", re.compile(supervisor.CS_CTOR_TPL % "R", re.M)))
         slow = []
@@ -1810,6 +1814,53 @@ class Review28Test(unittest.TestCase):
         supervisor.cs_student_classes(cs)
         supervisor.cs_object_api(cs, "C0")
         self.assertLess(time.perf_counter() - begin, 10.0)
+
+    def test_cpp_headers_without_body_do_not_share_one_brace(self):
+        # Des milliers d'en-tetes sans corps devant UN gros corps : chacun prenait la meme
+        # accolade, et le corps etait redecoupe pour chacun (92 s par cas pour 100 Ko, 147 s
+        # avec des declarations anticipees). Seul le DERNIER en-tete possede ce corps.
+        NL = self.NL
+        body = "{" + NL + "public:" + NL + ("    int m(int a);" + NL) * 3000 + "};" + NL
+        for head in ("class A" + NL, "struct A;" + NL):
+            src = head * 6000 + "class Reel" + NL + body
+            self.assertLessEqual(len(src), 200_000)
+            begin = time.perf_counter()
+            api = supervisor.cpp_object_api(supervisor.blank_code(src))
+            self.assertLess(time.perf_counter() - begin, 5.0)
+            self.assertEqual([name for name, _, _ in api], ["Reel"])
+
+    def test_cpp_forward_declaration_does_not_take_the_next_body(self):
+        # `class B;` recevait le corps de la classe suivante : un bouchon B, qui ne compilait pas.
+        src = self.NL.join(["class B;", "class A {", "public:", "    A(int x) { }",
+                            "    int f() { return 1; }", "};", ""])
+        self.assertEqual(supervisor.cpp_object_api(supervisor.blank_code(src)),
+                         [("A", [["int"]], [("int", "f", [])])])
+        # Accolade sur la ligne suivante, heritage et `final` : toujours le corps de l'en-tete.
+        for head in ("class A" + self.NL + "{", "class A final : public Base {",
+                     "struct A : Base<int> {"):
+            # Constructeur DECLARE : une classe derivee n'a pas de constructeur implicite proxifie.
+            src = self.NL.join([head, "public:", "    A(int x) { }",
+                                "    int f() { return 1; }", "};"])
+            api = supervisor.cpp_object_api(supervisor.blank_code(src))
+            self.assertEqual([name for name, _, _ in api], ["A"], head)
+
+    def test_rust_extraction_chains_are_linear(self):
+        # Les CHAINES completes, pas seulement les motifs : `;pub(` et `;#[` repetes sur une
+        # ligne tenaient rust_signatures et rust_without_main 8 a 12 s par cas pour 100 Ko.
+        for src in (";pub(" * 20_000, ";#[" * 33_000):
+            begin = time.perf_counter()
+            supervisor.rust_signatures(supervisor.blank_code(src, rust=True))
+            supervisor.rust_without_main(src)
+            self.assertLess(time.perf_counter() - begin, 3.0)
+
+    def test_rust_visibility_and_attributes_still_recognised(self):
+        self.assertEqual(
+            supervisor.rust_signatures("pub(in crate::outils) fn f(a: i32) -> i32 { a }"),
+            [("i32", "f", ["i32"])])
+        renamed = supervisor.rust_without_main(
+            "#[allow(dead_code)] #[inline] pub(crate) fn main() {}")
+        self.assertIn("fn __moodit_student_main()", renamed)
+        self.assertNotIn("fn main()", renamed)
 
 
 class Review30Test(unittest.TestCase):

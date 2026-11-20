@@ -253,8 +253,20 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > Avec l'accord de l'enseignant, supprimer ces lignes (`DELETE FROM Attempt WHERE id IN (…)`,
 > les réponses suivent par cascade) rend leur tentative unique aux étudiants concernés.
 >
-> Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
-> survivent au retrait du compose et gardent le volume occupé :
+> **Retour arrière.** Tant que la purge ci-dessous n'est pas faite, revenir au commit précédent
+> (`git reset --hard <commit>` puis `./deploy/update.sh`, ou le rollback automatique du script)
+> retrouve Piston tel quel : son image et son volume (qui porte ses paquets) sont encore là. `V4` est
+> additive (colonne nullable), l'ancien core démarre donc avec elle. `V5`, elle, **n'est pas
+> réversible** : elle a réécrit les six gabarits de harnais compilés au format booléen, et
+> l'ancienne version les lirait tels quels — après un retour arrière, restaurer ces gabarits depuis
+> la sauvegarde que `update.sh` prend avant les migrations, ou les recréer dans l'éditeur.
+>
+> **La purge est le point de non-retour** : après elle, un retour arrière oblige à reconstruire
+> l'image Piston et à réinstaller ses onze paquets (`piston-init`, réseau requis, plusieurs minutes
+> sans exécution de code). Ne la faire qu'une fois la bascule validée —
+> `check-compiled-harnesses.py` en sortie 0, puis au moins un quiz de code corrigé de bout en bout
+> en prod. D'ici là, ses conteneurs (`restart: unless-stopped`) survivent au retrait du compose et
+> gardent le volume occupé, sans gêner la nouvelle version :
 >
 > ```bash
 > docker rm -f moodit_piston moodit_piston_init 2>/dev/null

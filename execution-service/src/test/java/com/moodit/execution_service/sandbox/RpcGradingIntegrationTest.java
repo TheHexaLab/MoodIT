@@ -52,6 +52,14 @@ class RpcGradingIntegrationTest {
                 List.of(new TestCaseInput("cas", harness, 1)), null).get(0);
     }
 
+    /**
+     * Détail d'un cas dont le HARNAIS a tourné et rendu faux. Les tests d'attaque l'affirment :
+     * un refus venu d'ailleurs (charge qui ne compile plus, nom réservé, erreur du noteur,
+     * processus soumis mort) laisserait {@code passed=false} sans que la défense visée ait été
+     * mise à l'épreuve. Exclure le seul « Échec de compilation » ne voyait qu'un de ces cas.
+     */
+    private static final String HARNESS_FALSE = "Le harnais a renvoyé faux";
+
     // ───────────────────────────── 1. Le harnais booléen note ─────────────────────────────
 
     @Test
@@ -1844,8 +1852,7 @@ class RpcGradingIntegrationTest {
         assertThat(r.passed()).isFalse();
         // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
         // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
-        assertThat(r.detail() == null ? "" : r.detail())
-                .doesNotContain("Échec de compilation");
+        assertThat(r.detail()).contains(HARNESS_FALSE);
     }
 
     @Test
@@ -1869,8 +1876,73 @@ class RpcGradingIntegrationTest {
         assertThat(r.passed()).isFalse();
         // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
         // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
-        assertThat(r.detail() == null ? "" : r.detail())
-                .doesNotContain("Échec de compilation");
+        assertThat(r.detail()).contains(HARNESS_FALSE);
+    }
+
+    // Réponse DEVANCÉE au format du protocole (« identifiant|ok|valeur »), écrite sur la sortie
+    // du serveur avant et pendant l'appel, SANS toucher au descripteur : la ligne atteint donc
+    // bien le noteur, qui ne doit retenir que celle qui porte l'identifiant de SON appel. Jumeaux
+    // de go_answering_early_fails pour C#, Rust et C++, où rien ne mesurait ce contrôle de bout en
+    // bout (csharp_dup2_and_reflection_fail coupe son propre canal : sa forge n'arrive jamais).
+
+    @Test
+    void csharp_answering_early_fails() {
+        TestResult r = note("C#", "return Solution.Doubler(5) == 10;", """
+                using System;
+
+                public class Solution {
+                    static Solution() {
+                        Console.Out.WriteLine("deadbeef|ok|10");
+                        Console.Out.Flush();
+                    }
+
+                    public static int Doubler(int n) {
+                        Console.Out.WriteLine("deadbeef|ok|10");
+                        Console.Out.WriteLine("|ok|10");
+                        Console.Out.Flush();
+                        return 0;
+                    }
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains(HARNESS_FALSE);
+    }
+
+    @Test
+    void rust_answering_early_fails() {
+        TestResult r = note("Rust", "doubler(5) == 10", """
+                use std::io::Write;
+
+                pub fn doubler(_n: i32) -> i32 {
+                    println!("deadbeef|ok|10");
+                    println!("|ok|10");
+                    std::io::stdout().flush().unwrap();
+                    0
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains(HARNESS_FALSE);
+    }
+
+    @Test
+    void cpp_answering_early_fails() {
+        TestResult r = note("C++", "return doubler(5) == 10;", """
+                #include <cstdio>
+
+                // Constructeur d'un objet global : il tourne AVANT le main du serveur.
+                struct Avance {
+                    Avance() { std::printf("deadbeef|ok|10\\n"); std::fflush(stdout); }
+                };
+                static Avance avance;
+
+                int doubler(int n) {
+                    std::printf("deadbeef|ok|10\\n|ok|10\\n");
+                    std::fflush(stdout);
+                    return 0;
+                }
+                """);
+        assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains(HARNESS_FALSE);
     }
 
     @Test
@@ -1906,36 +1978,98 @@ class RpcGradingIntegrationTest {
 
     // ────────────── 3. Le harnais du prof : ni lisible, ni modifiable ──────────────
 
-    @Test
-    void java_harness_unreachable_and_immutable() {
-        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+    /**
+     * Sonde Java du harnais : parcourt TOUT {@code /box} sans s'arrêter au premier refus, cherche
+     * {@code needle} dans chaque fichier lisible, et tente d'ouvrir en écriture chaque fichier qui
+     * n'appartient pas au code soumis. {@code verdict} est l'expression Java qui décide de la
+     * réponse, sur {@code vu} (texte trouvé), {@code ecrit} (écriture obtenue) et {@code refus}
+     * (accès refusés rencontrés).
+     *
+     * <p>L'ancienne sonde ({@code Files.walk}) levait au PREMIER dossier illisible, l'exception
+     * était avalée, et elle rendait 0 sans avoir lu ni écrit un seul fichier : le test passait
+     * quelle que soit la protection du harnais. Deux précautions de plus : le texte cherché est
+     * écrit À L'ENVERS dans le source (sinon la sonde se trouve elle-même dans son propre
+     * {@code .class}), et l'écriture est tentée en ajout de zéro octet (rien n'est abîmé).
+     */
+    private static String javaHarnessProbe(String needle, String verdict) {
+        String reversed = new StringBuilder(needle).reverse().toString();
+        return """
+                import java.io.IOException;
+                import java.nio.charset.StandardCharsets;
+                import java.nio.file.FileVisitResult;
                 import java.nio.file.Files;
                 import java.nio.file.Path;
                 import java.nio.file.Paths;
-                import java.util.stream.Stream;
+                import java.nio.file.SimpleFileVisitor;
+                import java.nio.file.StandardOpenOption;
+                import java.nio.file.attribute.BasicFileAttributes;
 
                 public class Solution {
+                    static final String MARQUEUR = "sonde-vivante-moodit";
+                    static boolean vu = false;
+                    static boolean ecrit = false;
+                    static int refus = 0;
+
                     public static int doubler(int n) {
-                        boolean vu = false;
-                        try (Stream<Path> f = Files.walk(Paths.get("/box"))) {
-                            for (Path p : f.filter(Files::isRegularFile).toList()) {
-                                try {
-                                    String t = new String(Files.readAllBytes(p),
-                                            java.nio.charset.StandardCharsets.ISO_8859_1);
-                                    if (t.contains("doubler(5) == 10")) {
-                                        vu = true;
-                                        Files.write(p, "return true;".getBytes());
-                                    }
-                                } catch (Exception ignore) { }
-                            }
+                        final String aiguille = new StringBuilder("%s").reverse().toString();
+                        Object proprietaire = null;
+                        try {
+                            proprietaire = Files.getOwner(Paths.get("/proc/self"));
                         } catch (Exception ignore) { }
-                        return vu ? 10 : 0;
+                        final Object moi = proprietaire;
+                        try {
+                            Files.walkFileTree(Paths.get("/box"), new SimpleFileVisitor<Path>() {
+                                @Override
+                                public FileVisitResult visitFile(Path p, BasicFileAttributes a) {
+                                    if (!a.isRegularFile()) { return FileVisitResult.CONTINUE; }
+                                    try {
+                                        String t = new String(Files.readAllBytes(p),
+                                                StandardCharsets.ISO_8859_1);
+                                        if (t.contains(aiguille)) { vu = true; }
+                                    } catch (Exception e) { refus++; }
+                                    try {
+                                        if (moi != null && !Files.getOwner(p).equals(moi)) {
+                                            Files.newOutputStream(p, StandardOpenOption.APPEND)
+                                                    .close();
+                                            ecrit = true;
+                                        }
+                                    } catch (Exception e) { refus++; }
+                                    return FileVisitResult.CONTINUE;
+                                }
+
+                                @Override
+                                public FileVisitResult visitFileFailed(Path p, IOException e) {
+                                    refus++;
+                                    return FileVisitResult.CONTINUE;
+                                }
+                            });
+                        } catch (Exception ignore) { }
+                        return (%s) ? 10 : MARQUEUR.length() * 0;
                     }
                 }
-                """);
+                """.formatted(reversed, verdict);
+    }
+
+    @Test
+    void java_harness_unreachable_and_immutable() {
+        String harness = "return Solution.doubler(5) == 10;";
+        // TÉMOIN : la même sonde doit retrouver un texte qu'elle PEUT lire (son propre marqueur,
+        // dans son .class) ET avoir essuyé des refus sans s'arrêter. Sans lui, une sonde qui ne
+        // parcourt rien — le défaut de l'ancienne — rendait le test vert à vide.
+        TestResult alive = note("Java", harness,
+                javaHarnessProbe("sonde-vivante-moodit", "vu && refus > 0"));
+        assertThat(alive.passed())
+                .withFailMessage("la sonde doit lire ses propres fichiers et franchir les refus, "
+                        + "sinon elle ne prouve rien : %s", alive)
+                .isTrue();
+
+        // La sonde, cette fois sur le texte du HARNAIS, et sur tout fichier qui n'est pas à elle.
+        TestResult r = note("Java", harness, javaHarnessProbe("doubler(5) == 10", "vu || ecrit"));
         assertThat(r.passed())
                 .as("le harnais ne doit être ni lisible ni modifiable depuis le code noté")
                 .isFalse();
+        // Le refus vient du HARNAIS, qui a tourné et reçu 0 : pas d'une sonde qui ne compile plus.
+        assertThat(r.detail()).contains(HARNESS_FALSE);
     }
 
     @Test
@@ -1963,6 +2097,31 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        assertThat(r.detail()).contains(HARNESS_FALSE);
+
+        // TÉMOIN : la même commande SANS `-user root` trouve le texte dans les fichiers de
+        // l'étudiant (son source le contient). Elle prouve que popen, find et grep tournent dans
+        // le conteneur — sans quoi la sonde ci-dessus rendrait 0 pour une tout autre raison.
+        TestResult alive = note("C", "return doubler(5) == 10;", """
+                #include <stdio.h>
+                #include <string.h>
+
+                int doubler(int n) {
+                    FILE *p = popen("find /box -type f -exec grep -l 'doubler(5)' {} + "
+                                    "2>/dev/null | head -1", "r");
+                    char ligne[512];
+                    int vu = 0;
+                    if (p) {
+                        if (fgets(ligne, sizeof ligne, p) && strlen(ligne) > 1) { vu = 1; }
+                        pclose(p);
+                    }
+                    return vu ? 10 : 0;
+                }
+                """);
+        assertThat(alive.passed())
+                .withFailMessage("le témoin doit trouver son propre source, sinon la sonde ne "
+                        + "prouve rien : %s", alive)
+                .isTrue();
     }
 
     // ───────────────────────── 4. Pas de fausse accusation ─────────────────────────

@@ -368,6 +368,24 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Correction interrompue par l'arrêt de core → tentative LAISSÉE pending (reprise au démarrage)")
+        void correctionInterrompue_laissePending() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any()))
+                    .thenThrow(new com.moodit.core_service.exception.GradingInterruptedException());
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            // Ni suppression, ni verdict, ni notification : resumePendingGradings la reprendra.
+            verify(attemptRepository, never()).delete(any());
+            verify(attemptRepository, never()).findByIdForUpdate(any());
+            verify(realtimePublisher, never()).quizAttemptFailed(anyLong(), anyLong(), anyLong(), any());
+            verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
+            verifyNoInteractions(submissionTestCaseRepository);
+            assertThat(attempt.getStatus()).isEqualTo("pending");
+        }
+
+        @Test
         @DisplayName("Sandbox indisponible (null) → pending SUPPRIMÉ et push quiz:attempt-failed")
         void sandboxIndisponible_supprimeEtNotifie() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));

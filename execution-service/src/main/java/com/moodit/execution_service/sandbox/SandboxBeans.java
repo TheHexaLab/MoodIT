@@ -14,7 +14,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling   // OrphanSweeper : balayage périodique des orphelins
 public class SandboxBeans {
 
-    @Bean
+    // À l'arrêt du service : suppression des conteneurs encore en vol (cf. removeInFlight).
+    @Bean(destroyMethod = "removeInFlight")
     public DockerSandbox dockerSandbox(
             @Value("${app.sandbox.docker-host:}") String dockerHost,
             @Value("${app.sandbox.memory-mb:1536}") long memoryMb,

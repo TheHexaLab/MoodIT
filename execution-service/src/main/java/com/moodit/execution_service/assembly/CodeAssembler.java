@@ -166,8 +166,12 @@ public class CodeAssembler {
      * l'étudiant (fonctions/classes) y sont des PROXYS qui délèguent, par RPC (JSON sur stdin/stdout),
      * à un SERVEUR (student_server.py) où vit le vrai code étudiant. Conséquences :
      * <ul>
-     *   <li>le nonce est émis par le NOTEUR (aucun code étudiant → infalsifiable) — le résiduel de
-     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce) ;</li>
+     *   <li>le nonce est émis par le NOTEUR, où aucun code étudiant ne tourne — le résiduel de
+     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce). RÉSERVE commune à
+     *       tout le mode « exec » (Python, JS/TS, PHP, Bash, JSX/TSX) : noteur et code soumis y
+     *       partagent l'UID, la garantie dépend donc de {@code kernel.yama.ptrace_scope ≥ 1} sur
+     *       l'hôte (cf. ISOLATION.md, « Résiduel connu », et {@link #assembleBashRpc}) ; seuls les
+     *       six langages compilés portent la propriété « verdict non falsifiable » ;</li>
      *   <li>les ATTENDUS du harnais restent dans le noteur, hors de portée de l'étudiant (mémoire
      *       distincte, {@code grader.py} auto-supprimé) → passer = produire les bonnes sorties ;</li>
      *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
@@ -361,7 +365,8 @@ public class CodeAssembler {
      * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
      * Le NOTEUR (grader.js) exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.js)
      * héberge le code étudiant. RPC SYNCHRONE (le harnais est synchrone) via {@code fs.readSync} sur le
-     * fd du sous-processus. Le nonce est émis par le noteur (aucun code étudiant → infalsifiable).
+     * fd du sous-processus. Le nonce est émis par le noteur, où aucun code étudiant ne tourne
+     * (même réserve que Python : UID partagé, cf. {@link #assemblePython}).
      */
     private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript) {
         // TS : fichiers .ts, transpilés côte à côte par le runner (tsc --noCheck) en .js
@@ -509,7 +514,8 @@ public class CodeAssembler {
      * PHP : exécution ISOLÉE en deux processus (cf. {@link #assemblePython}). Le NOTEUR (grader.php)
      * exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.php) héberge le code
      * étudiant. RPC SYNCHRONE naturel via {@code proc_open} + {@code fgets} bloquant. Le nonce est
-     * émis par le noteur (aucun code étudiant → infalsifiable).
+     * émis par le noteur, où aucun code étudiant ne tourne (même réserve que Python : UID
+     * partagé, cf. {@link #assemblePython}).
      */
     private Assembled assemblePhpRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
@@ -1097,7 +1103,8 @@ public class CodeAssembler {
         // (main.js) exécute le harnais INCHANGÉ avec des proxys DOM ; le SERVEUR (jsx-server.js)
         // transpile + rend/monte le composant étudiant et détient le DOM. `html`, `mount`, `click`,
         // `fireEvent` et les nœuds DOM (querySelector, textContent…) sont proxifiés par RPC synchrone.
-        // Le nonce est émis par le noteur (aucun code étudiant → infalsifiable) — plus de fichier nonce.
+        // Le nonce est émis par le noteur, où aucun code étudiant ne tourne — plus de fichier nonce
+        // (même réserve que Python : UID partagé, cf. assemblePython).
         String server = "const fs = require('fs');\n"
                 + "const rt = require('./react-runtime.js');\n"
                 + "const { React, ReactDOMServer, ReactDOMClient, act, HappyDOM, Babel } = rt;\n"

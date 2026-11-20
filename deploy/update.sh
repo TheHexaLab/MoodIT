@@ -290,6 +290,16 @@ if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; f
 if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
 ok "Images construites."
 
+# Mode exec (interprétés, SQL, vues) : noteur et code soumis y partagent l'UID, et seul
+# kernel.yama.ptrace_scope ≥ 1 empêche le code soumis de lire la mémoire du noteur (cf.
+# execution-service/ISOLATION.md, « Résiduel connu »). Les conteneurs héritent de la valeur de
+# l'hôte. Avertissement, pas un échec : les six langages compilés ne dépendent pas de ce réglage.
+PTRACE_SCOPE="$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo absent)"
+case "$PTRACE_SCOPE" in
+  1|2|3) : ;;
+  *) warn "kernel.yama.ptrace_scope = ${PTRACE_SCOPE} sur l'hôte : la note des langages INTERPRÉTÉS est falsifiable. Corriger : « sysctl -w kernel.yama.ptrace_scope=1 », et le rendre durable dans /etc/sysctl.d/." ;;
+esac
+
 step "5/5 · Redémarrage des services"
 # --remove-orphans : retire les conteneurs des services disparus du compose (ex. piston,
 # piston-init après #116) — sinon ils tournent pour toujours (restart: unless-stopped).

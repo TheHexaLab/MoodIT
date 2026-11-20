@@ -530,6 +530,89 @@ class DockerSandboxTest {
                 .containsEntry("/box", "rw,nosuid,exec,size=614m")
                 .containsEntry("/tmp", "rw,nosuid,noexec,size=61m")
                 .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m");
+
+        // IPC System V : mémoire du cgroup HORS des tmpfs, qui survit à son créateur. Segments
+        // détruits dès qu'ils ne sont plus attachés, aucune file de messages. Doublé par un cas
+        // d'intégration (RunnerSandboxIntegrationTest).
+        assertThat(hostConfig.getSysctls()).containsOnly(
+                Map.entry("kernel.shm_rmid_forced", "1"),
+                Map.entry("kernel.msgmni", "0"));
+    }
+
+    @Test
+    void logs_beyond_the_cap_are_a_failure_not_a_truncated_verdict() {
+        // Le superviseur borne ses sorties ; si cette borne régresse, le service ne doit ni
+        // accumuler la sortie en mémoire ni lire un JSON coupé comme un verdict.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, 0), 512, 64, 1.0);
+
+        // Le mock écrit 7 octets sur chaque flux : au plafond exact, la sortie passe intacte.
+        sandbox.logCapBytes = 7;
+        assertThat(sandbox.run("img", Map.of("job.json", "{}"), 5000).stdout()).isEqualTo("{\"v\":1}");
+
+        sandbox.logCapBytes = 6;
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                .isInstanceOf(SandboxException.class)
+                .hasMessageContaining("au-delà de 6 octets");
+        // Conteneur détruit dans les deux cas.
+        org.mockito.Mockito.verify(remove, org.mockito.Mockito.times(2)).exec();
+        assertThat(DockerSandbox.LOG_CAP_BYTES).isEqualTo(16 * 1024 * 1024);
+    }
+
+    @Test
+    void in_flight_containers_are_removed_at_shutdown() throws Exception {
+        // Arrêt du service PENDANT une notation : le `finally` de run() vit dans un fil de
+        // requête que la JVM n'attend pas. removeInFlight (méthode de destruction du bean)
+        // supprime le conteneur ; après un run terminé, il n'y a plus rien à supprimer.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var waitCb = docker.waitContainerCmd("cid").start();
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.when(waitCb.awaitStatusCode(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> {
+                    started.countDown();
+                    release.await();
+                    return 0;
+                });
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+        assertThat(sandbox.removeInFlight()).isZero();      // rien en vol : aucun appel au démon
+
+        var pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var pending = pool.submit(() -> sandbox.run("img", Map.of("job.json", "{}"), 5000));
+            assertThat(started.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+            assertThat(sandbox.removeInFlight()).isEqualTo(1);
+            org.mockito.Mockito.verify(remove).exec();
+
+            // Démon en erreur : journalisé, l'arrêt continue (0 supprimé).
+            org.mockito.Mockito.doThrow(
+                            new com.github.dockerjava.api.exception.DockerClientException("démon muet"))
+                    .when(remove).exec();
+            assertThat(sandbox.removeInFlight()).isZero();
+            org.mockito.Mockito.doNothing().when(remove).exec();
+
+            release.countDown();
+            pending.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        // Run terminé : le conteneur n'est plus en vol.
+        assertThat(sandbox.removeInFlight()).isZero();
+    }
+
+    @Test
+    void sandbox_bean_removes_in_flight_containers_on_destroy() throws Exception {
+        var bean = SandboxBeans.class.getMethod("dockerSandbox",
+                        String.class, long.class, long.class, double.class)
+                .getAnnotation(org.springframework.context.annotation.Bean.class);
+        assertThat(bean.destroyMethod()).isEqualTo("removeInFlight");
     }
 
     @Test

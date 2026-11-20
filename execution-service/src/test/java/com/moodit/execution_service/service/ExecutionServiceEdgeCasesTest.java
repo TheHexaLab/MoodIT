@@ -299,9 +299,16 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void evaluate_echec_de_compilation_sans_stderr() {
         // TypeScript : seul langage encore assemblé avec une étape de compilation (#116).
-        // Chemin RÉEL du runner : le diagnostic arrive par stderr (le superviseur n'alimente
-        // jamais `message` — cf. RunnerExec.Stage).
-        piston(f -> new RunnerExec.Result(stage("", "erreur tsc", 1, null, null), null, null));
+        // Chemin RÉEL du runner : tsc écrit ses diagnostics sur STDOUT, stderr vide (rejoué dans
+        // moodit-runner-node), et le superviseur n'alimente jamais `message` — cf.
+        // RunnerExec.Stage. Seul stderr était lu : le détail se réduisait à « Échec de
+        // compilation », sans dire où.
+        piston(f -> new RunnerExec.Result(
+                stage("main.ts(1,12): error TS1138", "", 2, null, null), null, null));
+        assertThat(single("TypeScript", "", "return true;").detail())
+                .isEqualTo("main.ts(1,12): error TS1138");
+        // stderr garde la priorité quand il est renseigné.
+        piston(f -> new RunnerExec.Result(stage("bruit", "erreur tsc", 1, null, null), null, null));
         assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("erreur tsc");
 
         piston(f -> new RunnerExec.Result(stage("", "", 1, null, null), null, null));

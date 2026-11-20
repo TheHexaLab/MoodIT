@@ -103,6 +103,76 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
+    void sysv_ipc_cannot_outlive_the_student_process() {
+        require("C");
+        // Mémoire partagée System V : comptée dans le cgroup, mais hors des tmpfs bornés, et elle
+        // SURVIT au processus qui l'a créée. Sans `kernel.shm_rmid_forced=1`, des segments jamais
+        // détruits s'accumulaient jusqu'à l'OOM du cgroup, qui tuait le superviseur : conteneur
+        // mort sans JSON, donc une SandboxException ici (502, tentative rejouable à volonté).
+        // Conteneur à 512 Mo pour que la sonde reste courte ; elle demande 800 Mo.
+        DockerEvaluator small = new DockerEvaluator(
+                new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
+                System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
+        String probe = """
+                #include <string.h>
+                #include <sys/ipc.h>
+                #include <sys/msg.h>
+                #include <sys/shm.h>
+
+                #define MORCEAU (4 << 20)
+
+                /* Segments DÉTACHÉS, jamais détruits : avec le réglage, chacun disparaît à son
+                   détachement et la boucle va au bout ; sans lui, 800 Mo s'accumulent. */
+                int doubler(int n) {
+                    for (int i = 0; i < 200; i++) {
+                        int id = shmget(IPC_PRIVATE, MORCEAU, IPC_CREAT | 0600);
+                        if (id < 0) { return 0; }
+                        void *p = shmat(id, 0, 0);
+                        if (p == (void *) -1) { return 0; }
+                        memset(p, 1, MORCEAU);
+                        shmdt(p);
+                    }
+                    return n * 2;
+                }
+
+                /* Segments GARDÉS attachés : la mémoire appartient au processus, que la limite
+                   tue ; ils disparaissent avec lui, et le cas suivant tourne encore. */
+                int garder(int n) {
+                    for (int i = 0; i < 200; i++) {
+                        int id = shmget(IPC_PRIVATE, MORCEAU, IPC_CREAT | 0600);
+                        if (id < 0) { return 0; }
+                        void *p = shmat(id, 0, 0);
+                        if (p == (void *) -1) { return 0; }
+                        memset(p, 1, MORCEAU);
+                    }
+                    return n * 2; /* 800 Mo tenus sous une limite de 512 Mo : elle est rompue */
+                }
+
+                /* Files de messages : même défaut, aucune ne doit pouvoir être créée. */
+                int file(int n) {
+                    return msgget(IPC_PRIVATE, IPC_CREAT | 0600) >= 0 ? n * 2 : 0;
+                }
+
+                int temoin(int n) { return n * 2; }
+                """;
+        List<TestResult> r = small.evaluate("C", probe, List.of(
+                new TestCaseInput("segments détachés", "return doubler(5) == 10;", 1),
+                new TestCaseInput("segments gardés", "return garder(5) == 10;", 1),
+                new TestCaseInput("file de messages", "return file(5) == 10;", 1),
+                new TestCaseInput("témoin", "return temoin(5) == 10;", 1)), null);
+        assertThat(r.get(0).passed())
+                .withFailMessage("les segments détachés doivent être rendus au fur et à mesure "
+                        + "(kernel.shm_rmid_forced) : %s", r.get(0))
+                .isTrue();
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(2).passed()).isFalse();
+        assertThat(r.get(3).passed())
+                .withFailMessage("le témoin, noté APRÈS les sondes, doit réussir : le conteneur a "
+                        + "survécu et le programme compile : %s", r.get(3))
+                .isTrue();
+    }
+
+    @Test
     void execution_from_tmp_refused_for_student_code() {
         require("Go");
         // /tmp est monté noexec : un binaire déposé par l'UID étudiant ne peut pas être exécuté

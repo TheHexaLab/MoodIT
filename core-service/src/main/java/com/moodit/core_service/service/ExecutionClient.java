@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import com.moodit.core_service.exception.GradingInterruptedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -339,8 +340,11 @@ public class ExecutionClient {
                 try {
                     sleeper.sleep(Math.min(delay, remainingMs));
                 } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();   // arrêt de core : on n'attend plus
-                    return null;
+                    // Arrêt de core : on n'attend plus. PAS `null` : l'appelant y lirait un sandbox
+                    // indisponible et SUPPRIMERAIT la tentative, alors qu'aucune correction n'a
+                    // commencé — elle doit rester « pending » pour la reprise au démarrage.
+                    Thread.currentThread().interrupt();
+                    throw new GradingInterruptedException();
                 }
                 delay = Math.min(delay * 2, RETRY_MAX_DELAY_MS);
             }

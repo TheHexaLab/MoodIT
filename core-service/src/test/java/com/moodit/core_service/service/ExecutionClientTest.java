@@ -285,15 +285,20 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Interruption pendant l'attente (arrêt de core) → null, drapeau rétabli")
-    void evaluate_interrompuPendantLAttente_null() throws Exception {
+    @DisplayName("Interruption pendant l'attente (arrêt de core) → exception dédiée, drapeau rétabli")
+    void evaluate_interrompuPendantLAttente_exceptionDediee() throws Exception {
         ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
                 2_000, 5_000, 5_000, 0, 60_000, 30_000);
         client.sleeper = millis -> {
             throw new InterruptedException();
         };
         try {
-            assertThat(client.evaluate("Python", "x", TWO_HARNESSES)).isNull();
+            // Pas `null` (sandbox indisponible → tentative supprimée) : la tentative doit rester
+            // « pending » pour la reprise au démarrage.
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> client.evaluate("Python", "x", TWO_HARNESSES))
+                    .isInstanceOf(
+                            com.moodit.core_service.exception.GradingInterruptedException.class);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();

@@ -126,6 +126,14 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
   minimum du superviseur (chown/droits, setuid étudiant, kill), `no-new-privileges`,
   UID étudiant dédié ; détails dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
+  L'IPC System V, comptée dans la mémoire mais hors de ces tmpfs, est fermée par deux réglages du
+  conteneur (`DockerSandbox.IPC_SYSCTLS`) : `kernel.shm_rmid_forced=1` (un segment de mémoire
+  partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis) et
+  `kernel.msgmni=0` (aucune file de messages).
+- **Journaux relus par le service** : au plus 16 Mo par flux (`DockerSandbox.LOG_CAP_BYTES`) ;
+  au-delà, la sortie n'est pas un verdict (502).
+- **Arrêt du service** : les conteneurs en vol sont supprimés à la destruction du bean
+  (`DockerSandbox.removeInFlight`) ; `OrphanSweeper` reste le filet d'une JVM tuée.
 
 ## Résiduel connu
 
@@ -142,6 +150,12 @@ voisins, selon la politique `ptrace` de l'hôte. La propriété « **verdict non
 donc que pour les six langages compilés avec un harnais booléen, qui séparent les UID (cf.
 `CodeAssembler.assembleBashRpc` et `docker/runners/README.md`).
 
+Concrètement, la protection du mode « exec » tient à `kernel.yama.ptrace_scope ≥ 1` **sur l'hôte**
+(les conteneurs en héritent) : à 0, le code soumis lit la mémoire du noteur, nonce et attendus
+compris. Ubuntu le règle à 1 par défaut, Debian à 0. `deploy/update.sh` lit la valeur à chaque
+déploiement et avertit si elle n'est pas au moins 1 ; vérifier à la main :
+`cat /proc/sys/kernel/yama/ptrace_scope`.
+
 ## Tester
 
 - Unitaires (structure des programmes assemblés) : `./gradlew test` (sans Docker).
@@ -149,7 +163,7 @@ donc que pour les six langages compilés avec un harnais booléen, qui séparent
   par le job CI `integration` (construit les 10 images). Couvre Python/JS/TS/PHP/Bash/C/SQL **et** JSX/TSX (rendu
   statique + interactif). Les cas JSX/TSX exigent le bundle `react-runtime.js` via `APP_VENDOR_DIR`
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
-  Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une boucle d'allocation
-  tuée par la limite mémoire.
+  Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une allocation bornée
+  au-dessus de la limite mémoire, tuée par elle (avec un témoin sous la limite, qui réussit).
 - **Runner des compilés** : `RpcGradingIntegrationTest` et `RunnerSandboxIntegrationTest` (même job CI ; construit d'abord les
   images `docker/runners/build.sh`). En local : démon Docker + images, sinon les tests s'ignorent.
