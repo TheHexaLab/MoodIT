@@ -3914,12 +3914,20 @@ fn main() {
 ''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
 
 
-RUST_MAIN = re.compile(r"^[ \t]*fn\s+main\s*\(\s*\)", re.M)
+# `main` nu (toute indentation, comme avant), ou précédé de modificateurs EN DÉBUT DE LIGNE :
+# `pub fn main()` n'était pas renommé, le `fn main()` du serveur le doublait (E0428), et une
+# réponse juste était notée 0 avec une erreur qui désigne du code généré. La forme à
+# modificateurs n'est prise qu'en colonne 0 : un `pub fn main` indenté est celui d'un
+# sous-module, que le code soumis peut appeler (`outils::main()`) — le renommer le casserait.
+RUST_MAIN = re.compile(
+    r"^([ \t]*|(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
+    re.M)
 
 
 def rust_without_main(source):
-    """Code étudiant dont le `main` est renommé : le serveur fournit le point d'entrée. PURE."""
-    return RUST_MAIN.sub("fn __moodit_student_main()", source or "")
+    """Code étudiant dont le `main` est renommé : le serveur fournit le point d'entrée. PURE
+    (testée). Les modificateurs sont conservés."""
+    return RUST_MAIN.sub(r"\1fn __moodit_student_main()", source or "")
 
 
 # ─────────────────── C# : bouchon et aiguillage TYPÉS, protocole texte ───────────────────

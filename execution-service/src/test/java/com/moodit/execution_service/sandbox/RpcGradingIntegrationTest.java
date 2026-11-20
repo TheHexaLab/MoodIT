@@ -100,6 +100,28 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void rust_submitted_pub_main_is_graded() {
+        // Revue #246 : un `pub fn main()` soumis n'était pas renommé et doublait le `main` du
+        // serveur généré (E0428) — 0 sur une réponse juste. Le `main` d'un sous-module, que le
+        // code soumis appelle, reste intact.
+        String h = "doubler(5) == 10";
+        String code = """
+                mod outils {
+                    pub fn main() -> i32 { 2 }
+                }
+
+                pub fn doubler(n: i32) -> i32 { n * outils::main() }
+
+                pub fn main() {
+                    println!("{}", doubler(2));
+                }
+                """;
+        TestResult right = note("Rust", h, code);
+        assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
+        assertThat(note("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
+    }
+
+    @Test
     void csharp_right_then_wrong_answer() {
         String h = "return Solution.Doubler(5) == 10;";
         assertThat(note("C#", h, """

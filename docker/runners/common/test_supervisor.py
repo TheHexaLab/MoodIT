@@ -2054,6 +2054,23 @@ class Review246bTest(unittest.TestCase):
         self.assertEqual(supervisor.java_qualify_lang("java.lang.String a; x.Long; @Override Longue"),
                          "java.lang.String a; x.Long; @Override Longue")
 
+    def test_rust_main_with_modifiers_is_renamed(self):
+        # `pub fn main()` restait en place : deux `main` avec celui du serveur (E0428), et 0
+        # sur une réponse juste.
+        renamed = "fn __moodit_student_main()"
+        for head in ("fn main()", "pub fn main()", "pub(crate) fn main()", "pub  fn main ( )",
+                     "unsafe fn main()", "pub const fn main()", "    fn main()"):
+            out = supervisor.rust_without_main("fn f() {}\n" + head + " { }\n")
+            self.assertIn(renamed, out, head)
+            self.assertNotRegex(out, r"fn\s+main\b", head)
+        # Les modificateurs restent, le type de retour aussi.
+        self.assertEqual(supervisor.rust_without_main("pub fn main() -> Result<(), String> {"),
+                         "pub fn __moodit_student_main() -> Result<(), String> {")
+        # Pas un `main` de premier niveau : un sous-module, un autre nom, un appel.
+        for kept in ("mod outils {\n    pub fn main() {}\n}\n", "pub fn main_loop() {}\n",
+                     "pub fn main(n: i32) {}\n", "fn f() { main(); }\n"):
+            self.assertEqual(supervisor.rust_without_main(kept), kept)
+
     def test_python_grader_runs_isolated_from_its_directory(self):
         # Sans -I, sys.path[0] = /box/src, inscriptible par le code soumis : un module déposé
         # là était importé PAR LE NOTEUR (via l'`import numpy` du harnais) et y lisait le nonce.
