@@ -788,7 +788,6 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         # Un récepteur pointeur n'écarte plus la capture de champs : la modification de l'objet
         # est reportée par relecture des champs (test_go_pointer_receiver_keeps_field_capture).
         self.assertEqual(supervisor.go_capture_fields(source), {"Compteur": [("valeur", "int")]})
-        self.assertEqual(supervisor.go_pointer_receivers(source), {"Compteur"})
         self.assertEqual(supervisor.go_pointer_methods(source), {("Compteur", "Plus")})
         # Et l'objet est stocké par POINTEUR : une méthode à récepteur pointeur ne peut pas être
         # appelée sur le résultat d'une assertion de type, qui n'est pas adressable.
@@ -802,7 +801,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         source = ("package main\n\n"
                   "type Rectangle struct {\n\tlargeur int\n\thauteur int\n}\n\n"
                   "func (r Rectangle) aire() int { return r.largeur * r.hauteur }\n")
-        self.assertEqual(supervisor.go_pointer_receivers(source), set())
+        self.assertEqual(supervisor.go_pointer_methods(source), set())
         self.assertIn("Rectangle", supervisor.go_capture_fields(source))
 
     def test_double_keeps_its_precision(self):
@@ -1466,6 +1465,29 @@ class Review25Test(unittest.TestCase):
         self.assertEqual(klass, "R")
         self.assertEqual(ctors, [["int", "int"]])
 
+    def test_cpp_default_argument_keeps_the_signature(self):
+        # `int b = 0` etait lu comme quatre morceaux : la fonction n'etait pas bouchonnee, et un
+        # constructeur a valeurs par defaut faisait disparaitre la classe entiere (le
+        # constructeur implicite n'est plus fourni des qu'un constructeur est declare). Une
+        # reponse juste etait notee 0, sans que le « Tester » du prof le revele.
+        self.assertEqual(
+            supervisor.c_signatures("int somme(int a, int b = 0) { return a + b; }\n", cpp=True),
+            [("int", "somme", ["int", "int"])])
+        self.assertEqual(
+            supervisor.c_signatures("double mi(const double x=1.5) { return x / 2; }\n", cpp=True),
+            [("double", "mi", ["double"])])
+        src = self.NL.join(["class Rect {", "public:",
+                            "    Rect(int w = 1, int h = 1) { }",
+                            "    int aire(int facteur = 1) { return 0; }",
+                            "};", ""])
+        (klass, ctors, method_list), = supervisor.cpp_object_api(src)
+        self.assertEqual(klass, "Rect")
+        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual(method_list, [("int", "aire", ["int"])])
+        # Un type non transportable reste ecarte, valeur par defaut ou non.
+        self.assertEqual(
+            supervisor.c_signatures("int f(long double x = 0) { return 0; }\n", cpp=True), [])
+
     def test_cs_long_names_mapped_to_keyword(self):
         src = self.NL.join(["class Solution {",
                             "    public static String Inverse(String s) { return s; }",
@@ -1535,6 +1557,27 @@ class Review26Test(unittest.TestCase):
         self.assertFalse(supervisor.grader_killed(0, False))
         self.assertFalse(supervisor.grader_killed(1, False))
         self.assertFalse(supervisor.grader_killed(None, False))
+
+    def test_grader_exit_zero_without_token_is_lost_output(self):
+        # Les noteurs ne rendent 0 qu'apres avoir ecrit le jeton : 0 sans jeton = ecriture
+        # perdue chez le noteur (stderr sur un /box plein), pas un harnais qui renvoie faux.
+        self.assertTrue(supervisor.grader_output_lost(0, False))
+        self.assertFalse(supervisor.grader_output_lost(0, True))      # jeton recu
+        self.assertFalse(supervisor.grader_output_lost(1, False))     # harnais faux
+        self.assertFalse(supervisor.grader_output_lost(-9, False))    # tue : grader_killed
+        self.assertFalse(supervisor.grader_output_lost(None, False))  # lancement impossible
+        saved_state, saved_events = supervisor.EXIT_STATE, list(supervisor.EVENTS)
+        try:
+            supervisor.EXIT_STATE = supervisor.ExitState(3)
+            supervisor.note_grader_output_lost(1, False)
+            self.assertFalse(supervisor.EXIT_STATE.lost)
+            supervisor.note_grader_output_lost(0, False)
+            self.assertTrue(supervisor.EXIT_STATE.lost)
+            self.assertEqual(supervisor.EVENTS[-1]["type"], "espace_sature")
+            self.assertEqual(supervisor.EVENTS[-1]["case"], 3)
+        finally:
+            supervisor.EXIT_STATE = saved_state
+            supervisor.EVENTS[:] = saved_events
 
 
 class Review27Test(unittest.TestCase):
@@ -1621,7 +1664,13 @@ class Review27Test(unittest.TestCase):
                    # Revue #246 : ouvertures jamais fermees (template C++, groupe Go, espace
                    # de noms, constructeur C#).
                    "template<" * (n // 9), "\nvar (" * (n // 6), "namespace a " * (n // 12),
-                   "\na(" * (n // 3)]
+                   "\na(" * (n // 3),
+                   # Qualificatif repete UN PAR LIGNE : son `\s+` franchit la fin de ligne, et
+                   # un groupe non borne repartait de chaque ligne (C_FUNC, RUST_MAIN) ; corps
+                   # de structure Go jamais ferme (GO_STRUCT_BODY).
+                   "static\n" * (n // 7), "const\n" * (n // 6), "inline\n" * (n // 7),
+                   "async\n" * (n // 6), "unsafe\n" * (n // 7),
+                   "const\nasync\nunsafe\n" * (n // 19), "type A struct{\n" * (n // 15)]
         patterns = [(ident, m) for ident, m in vars(supervisor).items() if isinstance(m, re.Pattern)]
         patterns.append(("CS_CTOR_TPL", re.compile(supervisor.CS_CTOR_TPL % "R", re.M)))
         slow = []

@@ -282,6 +282,13 @@ class HarnessProjectsTest {
         assertThat(HarnessProjects.javaTypeName("public class " + atLimit + "B { }"))
                 .isEqualTo(atLimit + "B");
         assertThat(HarnessProjects.javaTypeName("int x;")).isNull();
+        // Caractère ignorable d'identifiant (U+0000, format invisible) : jamais un nom de fichier.
+        char nul = (char) 0;
+        assertThat(HarnessProjects.javaFileName("public class A" + nul + "B { }", "Main"))
+                .isEqualTo("Main.java");
+        assertThat(HarnessProjects.javaTypeNameUnsafe("A" + nul + "B")).isTrue();
+        assertThat(HarnessProjects.javaTypeNameUnsafe("A" + (char) 0x200B + "B")).isTrue();
+        assertThat(HarnessProjects.javaTypeNameUnsafe("Réponse_1$")).isFalse();
     }
 
     @Test

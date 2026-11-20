@@ -226,6 +226,120 @@ class ExecutionClientTest {
                 .isEqualTo(10_000 + 5 * 60_000 + 145_000);
     }
 
+    /** Port local où RIEN n'écoute : connexion refusée, comme execution-service en redémarrage. */
+    private static int closedPort() throws IOException {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
+    }
+
+    @Test
+    @DisplayName("Service injoignable puis revenu : la connexion est retentée, les verdicts arrivent")
+    void evaluate_injoignablePuisRevenu_verdicts() throws Exception {
+        // Redémarrage d'execution-service pendant une file de corrections : chaque refus de
+        // connexion supprimait une tentative, et la file se vidait en quelques secondes.
+        int port = closedPort();
+        ExecutionClient client = new ExecutionClient("http://localhost:" + port, TOKEN, 2_000,
+                5_000, 5_000, 0, 60_000, 30_000);
+        List<Long> pauses = new java.util.ArrayList<>();
+        client.sleeper = millis -> {
+            pauses.add(millis);
+            if (pauses.size() == 2) {      // le service « revient » pendant la deuxième pause
+                try {
+                    server = HttpServer.create(new InetSocketAddress("localhost", port), 0);
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                server.createContext("/internal/exec", exchange -> {
+                    byte[] bytes = "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true}]"
+                            .getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                    exchange.close();
+                });
+                server.start();
+            }
+        };
+
+        assertThat(client.evaluate("Python", "x", TWO_HARNESSES.subList(0, 1))).containsExactly(true);
+        // Pauses croissantes : 1 s puis 2 s.
+        assertThat(pauses).containsExactly(ExecutionClient.RETRY_FIRST_DELAY_MS,
+                2 * ExecutionClient.RETRY_FIRST_DELAY_MS);
+    }
+
+    @Test
+    @DisplayName("Service injoignable au-delà du budget de reprise → null, pauses bornées")
+    void evaluate_injoignableAuDelaDuBudget_null() throws Exception {
+        ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
+                2_000, 5_000, 5_000, 0, 60_000, 300);
+        List<Long> pauses = new java.util.ArrayList<>();
+        client.sleeper = millis -> {
+            pauses.add(millis);
+            Thread.sleep(millis);
+        };
+
+        assertThat(client.evaluate("Python", "x", TWO_HARNESSES)).isNull();
+        assertThat(pauses).isNotEmpty().allMatch(p -> p > 0 && p <= 300);
+        assertThat(pauses.stream().mapToLong(Long::longValue).sum()).isLessThanOrEqualTo(300);
+    }
+
+    @Test
+    @DisplayName("Interruption pendant l'attente (arrêt de core) → null, drapeau rétabli")
+    void evaluate_interrompuPendantLAttente_null() throws Exception {
+        ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
+                2_000, 5_000, 5_000, 0, 60_000, 30_000);
+        client.sleeper = millis -> {
+            throw new InterruptedException();
+        };
+        try {
+            assertThat(client.evaluate("Python", "x", TWO_HARNESSES)).isNull();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    @DisplayName("Erreur HTTP ou délai de lecture : jamais retenté (la correction a pu tourner)")
+    void evaluate_erreurApresConnexion_pasDeNouvelEssai() throws Exception {
+        List<Long> pauses = new java.util.ArrayList<>();
+        // 502 d'execution-service : une seule requête.
+        ExecutionClient failing = new ExecutionClient(startStub(502, "{}", 0), TOKEN, 2_000,
+                5_000, 5_000, 0, 60_000, 30_000);
+        failing.sleeper = pauses::add;
+        assertThat(failing.evaluate("Python", "x", TWO_HARNESSES)).isNull();
+        server.stop(0);
+        // Délai de lecture dépassé : la requête est partie, on ne la renvoie pas.
+        ExecutionClient slow = new ExecutionClient(startStub(200, "[]", 1_500), TOKEN, 2_000,
+                0, 100, 0, 200, 30_000) {
+            @Override
+            long readTimeoutMs(String language, int units, Integer timeoutMs) {
+                return 300;
+            }
+        };
+        slow.sleeper = pauses::add;
+        assertThat(slow.evaluate("Python", "x", TWO_HARNESSES)).isNull();
+        assertThat(pauses).isEmpty();
+
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.ConnectException("Connection refused")))).isTrue();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.UnknownHostException("execution-service")))).isTrue();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.NoRouteToHostException("No route to host")))).isTrue();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.SocketTimeoutException("Connect timed out")))).isTrue();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.SocketTimeoutException("Read timed out")))).isFalse();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new java.net.SocketTimeoutException()))).isFalse();
+        assertThat(ExecutionClient.unreachable(new org.springframework.web.client.ResourceAccessException(
+                "x", new IOException("rompu")))).isFalse();
+        assertThat(ExecutionClient.unreachable(
+                new org.springframework.web.client.RestClientException("x"))).isFalse();
+    }
+
     @Test
     @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
     void compiled_reconnaitLesLangagesCompiles() {

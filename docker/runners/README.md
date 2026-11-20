@@ -80,8 +80,12 @@ est pédagogique (varier les cas).
 - Les harnais canaris contiennent `__MOODIT_A__`/`__MOODIT_B__`, substitués par le superviseur
   avec des valeurs aléatoires AU RUNTIME (introuvables dans l'archive).
 - Réponse (stdout) : `{"v":1, "results":[{index, name, passed, detail, ms}], "events":[…],
-  "canaries":"ok|incoherents|indetermines|aucun"}`. Le côté Java (`DockerEvaluator`) est
-  fail-closed : cas absent, JSON illisible ou erreur = jamais « réussi ».
+  "canaries":"ok|incoherents|indetermines|aucun", "incomplet":true|false}`. Le côté Java
+  (`DockerEvaluator`) est fail-closed : cas absent, JSON illisible ou erreur = jamais « réussi ».
+  `incomplet` vaut vrai quand un cas réel a subi une erreur interne du superviseur (jamais
+  imputable au code soumis) : sur le chemin interne, `DockerEvaluator` en fait un 502 et la
+  tentative est à reprendre. Des canaris incohérents l'emportent : la notation n'est alors
+  jamais « incomplète ».
 
 ## Dispositions par langage
 

@@ -248,6 +248,36 @@ class DockerSandboxTest {
     }
 
     @Test
+    void container_removed_with_interrupt_flag_cleared_then_restored() {
+        // Sur un fil interrompu, l'appel réel au démon échoue aussitôt (canal du socket fermé) :
+        // le conteneur survivait à l'arrêt du service. Vérifier que `exec()` est appelé ne
+        // suffisait pas — il faut qu'il le soit SANS le drapeau, puis que le drapeau revienne.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var flagDuringRemove = new java.util.concurrent.atomic.AtomicReference<Boolean>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            flagDuringRemove.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(remove).exec();
+        var waitCb = docker.waitContainerCmd("cid").start();
+        org.mockito.Mockito.doThrow(new com.github.dockerjava.api.exception.DockerClientException(
+                        "Awaiting status code interrupted: ", new InterruptedException()))
+                .when(waitCb).awaitStatusCode(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> new DockerSandbox(docker, 512, 64, 1.0)
+                                    .run("img", Map.of("job.json", "{}"), 5000))
+                    .isInstanceOf(SandboxException.class);
+            assertThat(flagDuringRemove.get()).as("drapeau pendant la suppression").isFalse();
+            assertThat(Thread.currentThread().isInterrupted()).as("drapeau rétabli").isTrue();
+        } finally {
+            Thread.interrupted();   // ne pas laisser le drapeau aux tests suivants
+        }
+    }
+
+    @Test
     void incomplete_log_read_fails_instead_of_returning_truncated_output() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);

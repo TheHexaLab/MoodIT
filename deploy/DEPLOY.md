@@ -124,6 +124,15 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 | Redémarrer | `docker compose -f docker-compose-hetzner.yml restart <service>` |
 | Tout arrêter | `docker compose -f docker-compose-hetzner.yml down` |
 
+**Redémarrer `execution-service` pendant des corrections.** Une correction en cours au moment de
+l'arrêt est perdue : sa tentative est supprimée et l'étudiant resoumet. Les corrections en file
+dans core, elles, attendent : core retente la connexion pendant
+`EXEC_UNREACHABLE_RETRY_MS` (2 min par défaut) avant d'abandonner, ce qui couvre un `restart`,
+un `./deploy/update.sh` ou un redémarrage de l'hôte où core est prêt le premier. Au-delà de ce
+délai, chaque correction en file est abandonnée à son tour (tentative supprimée) : pour un arrêt
+plus long, attendre que la file soit vide (`SELECT count(*) FROM Attempt WHERE status =
+'pending';` rend 0) ou prévenir les enseignants.
+
 ### Mettre à jour la prod
 
 Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
@@ -205,18 +214,44 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > question interprétée sans code de départ sort À VÉRIFIER, comme une compilée : la rejouer avec
 > une solution (« Tester »).
 >
-> ```bash
-> # Juste après ./deploy/update.sh : rejoue tout, et ferme (is_published = false) les quiz
-> # publiés qui portent un BLOQUANT, le temps de corriger leurs harnais dans l'éditeur.
-> python3 deploy/check-compiled-harnesses.py --unpublish
-> ```
+> Le contrôle se fait en **deux temps**, parce que le script interroge le nouveau noteur : lancé
+> seulement après la bascule, il laisse une fenêtre (plusieurs minutes par question compilée)
+> pendant laquelle un quiz au harnais cassé est déjà ouvert et note 0 sur une tentative unique.
 >
-> Pour vérifier AVANT la mise en prod : une pile locale de cette version
+> **1. AVANT la mise en prod (obligatoire).** Une pile locale de cette version
 > (`docker-compose-dev.yml` + images runner construites + execution-service lancé), chargée d'un
 > dump de la base de prod, puis `EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… python3
 > deploy/check-compiled-harnesses.py` (sous Docker Desktop, l'IP d'un conteneur n'est pas
 > joignable depuis l'hôte : `EXEC_URL` est obligatoire). Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
+> Corriger dans l'éditeur de la prod encore en place les harnais sortis BLOQUANT, ou fermer leurs
+> quiz, **avant** de lancer `./deploy/update.sh` ; noter les À VÉRIFIER à rejouer après. Si ce
+> contrôle préalable est impossible, fermer avant la bascule tous les quiz publiés qui portent
+> une question de code compilée ou interprétée, et ne les rouvrir qu'après une sortie en 0.
+>
+> **2. Juste APRÈS `./deploy/update.sh`.** Rejouer contre la prod, qui est la seule référence :
+>
+> ```bash
+> # Heure de la bascule, à noter AVANT update.sh (horloge de la base) : elle borne la fenêtre
+> # ci-dessous.
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT NOW()::timestamp;"
+> # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT, le
+> # temps de corriger leurs harnais dans l'éditeur.
+> python3 deploy/check-compiled-harnesses.py --unpublish
+> ```
+>
+> Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et
+> la fermeture, et recevoir 0 sans faute de leur part. Lister ces tentatives (`<ids>` : les quiz
+> que le script vient de fermer ; `<bascule>` : l'heure notée) :
+>
+> ```bash
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+>   "SELECT id, quiz_id, user_id, submitted_at FROM Attempt
+>     WHERE quiz_id IN (<ids>) AND submitted_at >= '<bascule>' ORDER BY quiz_id, submitted_at;"
+> ```
+>
+> Avec l'accord de l'enseignant, supprimer ces lignes (`DELETE FROM Attempt WHERE id IN (…)`,
+> les réponses suivent par cascade) rend leur tentative unique aux étudiants concernés.
 >
 > Au même déploiement, purger les restes de Piston — ses conteneurs (`restart: unless-stopped`)
 > survivent au retrait du compose et gardent le volume occupé :

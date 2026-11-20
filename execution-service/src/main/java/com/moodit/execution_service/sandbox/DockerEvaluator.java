@@ -184,7 +184,12 @@ public class DockerEvaluator {
             return null;
         }
         String detail;
-        if (HarnessProjects.javaTypeNameTooLong(className)) {
+        if (HarnessProjects.javaTypeNameUnsafe(className)) {
+            // Testé AVANT la longueur : le nom n'est pas cité (il porte un caractère de contrôle).
+            detail = "Le nom de classe contient un caractère de contrôle ou invisible : il sert "
+                    + "de nom de fichier. Retaper le nom — par exemple « Solution » — et "
+                    + "resoumettre.";
+        } else if (HarnessProjects.javaTypeNameTooLong(className)) {
             // Le nom devient un nom de fichier : au-delà de la limite du système de fichiers, le
             // dépôt dans le conteneur échouait (502, tentative supprimée) au lieu d'une note.
             detail = "Le nom de classe « " + className.substring(0, className.offsetByCodePoints(0, 40)) + "… » est trop long "

@@ -4,7 +4,7 @@
 Tourne en root dans un conteneur jetable (réseau coupé, /box et /tmp en tmpfs bornés — seuls
 points d'écriture de l'UID étudiant, les images verrouillant leurs répertoires monde-inscriptibles).
 Le code étudiant, lui, ne tourne JAMAIS en root : chaque cas est exécuté sous l'UID `student`,
-sans toolchain (binaires de test autonomes), sources verrouillées en 700 root.
+le harnais du prof tournant dans un AUTRE processus (le noteur), sources verrouillées en 700 root.
 
 Modèle de confiance :
   - INTÉGRITÉ  : un cas est RÉUSSI si, et seulement si, le NONCE du cas paraît sur le stderr du
@@ -39,7 +39,6 @@ Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les de
 import bisect
 import collections
 import functools
-import glob
 import json
 import os
 import random
@@ -58,7 +57,6 @@ import subprocess
 import sys
 import threading
 import time
-import xml.etree.ElementTree as ET
 
 BOX = "/box"
 STUDENT_NAME = "student"
@@ -738,8 +736,7 @@ def drain_pipe(src, dst, cap=OUTPUT_FILE_CAP, tail_bytes=PUMP_TAIL_BYTES,
         pass          # tube rompu : le processus est mort, rien de plus à lire
 
 
-def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None,
-             stdin_data=None):
+def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
     """Exécute cmd, sorties vers fichiers, kill du groupe au timeout. → (exit, timed_out).
 
     Les sorties passent par des TUBES que le superviseur (root) recopie dans les fichiers : le
@@ -751,22 +748,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
     relecture par chemin reste refusée) ni connaître le jeton. Les droits 0600 root ne
     protégeaient rien : ils ne sont vérifiés qu'au open(2). Les octets déjà consommés par root
     sont, eux, hors d'atteinte par construction."""
-    # stdin_data : charge utile remise au processus par un TUBE (jamais un fichier). Sert à
-    # livrer le JETON de fin à l'enveloppe de Java/C# sans qu'il figure dans un artefact
-    # lisible par l'étudiant. Un tube n'est pas repositionnable : une fois l'enveloppe l'ayant
-    # lu (première instruction de son main, avant tout chargement de classe étudiante), le code
-    # noté qui relit stdin ne voit que l'EOF — il ne peut pas revenir en arrière comme il
-    # l'aurait fait sur un fichier régulier (lseek).
     stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
-    # Descripteur du tube SUIVI À PART : `subprocess.DEVNULL` est un int (-3), donc un
-    # isinstance(stdin, int) le prendrait pour un descripteur à fermer (os.close(-3) → OSError
-    # avalée par le try de run_proc, qui renvoyait alors « code None » pour TOUT appel).
-    token_fd = None
-    if stdin_data is not None:
-        token_fd, write_fd = os.pipe()
-        os.write(write_fd, stdin_data.encode("ascii"))   # quelques octets : jamais bloquant
-        os.close(write_fd)                               # EOF immédiat après la charge utile
-        stdin = token_fd
     # PAS de `with` sur ces deux fichiers : c'est ROOT qui les écrit depuis le passage aux
     # tubes, donc leur tampon peut contenir des octets non écrits. Sur un /box saturé, le
     # close() implicite du `with` RELÈVE l'OSError que le flush vient de laisser (CPython garde
@@ -779,10 +761,7 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
         out, err = open_output(out_path), open_output(err_path)
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, stdin=stdin, preexec_fn=preexec)
-        if token_fd is not None:
-            os.close(token_fd)           # tube du jeton : le parent lâche son extrémité
-            token_fd = None              # ne pas refermer dans le finally
-        elif stdin is not subprocess.DEVNULL:
+        if stdin is not subprocess.DEVNULL:
             stdin.close()
         pumps = [threading.Thread(target=drain_pipe,
                                   args=(proc.stdout, out, OUTPUT_FILE_CAP,
@@ -857,13 +836,6 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
               detail="ouverture des sorties impossible : %r" % e)
         return None, False
     finally:
-        # Tube du jeton : si open_output ou Popen a levé (saturation, fork ENOMEM), le
-        # descripteur n'a jamais été remis à None plus haut — il fuirait, un par cas en échec.
-        if token_fd is not None:
-            try:
-                os.close(token_fd)
-            except OSError:
-                pass
         saturated = False
         for stream in (out, err):
             if stream is None:
@@ -988,6 +960,26 @@ def grader_killed(code, passed):
     canari en echec, et faisait accuser de falsification une soumission dont un vrai cas avait
     reussi."""
     return code is not None and code < 0 and not passed
+
+
+def grader_output_lost(code, passed):
+    """Le NOTEUR est-il sorti en 0 SANS que son jeton nous parvienne ? PURE (testee).
+
+    Les six noteurs ne rendent 0 qu'apres avoir ecrit le jeton sur leur stderr : un code 0 sans
+    jeton veut dire que l'ecriture a echoue CHEZ LUI — son stderr est un fichier de /box, et le
+    tmpfs etait plein. Aucune erreur ne remonte au superviseur dans ce cas (la fermeture du
+    fichier reussit), et le cas sortait en « Le harnais a renvoye faux », sans evenement
+    `espace_sature` : l'etudiant et le prof cherchaient un bogue de logique inexistant. Le cas
+    reste en echec (fail-closed) ; seul le diagnostic change."""
+    return code == 0 and not passed
+
+
+def note_grader_output_lost(code, passed):
+    """Pose l'etat « sortie perdue » du cas si le noteur est sorti en 0 sans jeton."""
+    if grader_output_lost(code, passed):
+        EXIT_STATE.lost = True
+        event("espace_sature", case=EXIT_STATE.case,
+              detail="noteur sorti en 0 sans jeton : sortie perdue")
 
 
 def grading_incomplete(real_cases):
@@ -1126,14 +1118,6 @@ def run_csharp(case_dir, env, timeout_s, case_index):
 def run_go(case_dir, env, timeout_s, case_index):
     """Notation d'un cas Go : harnais booleen, deux programmes, deux UID."""
     return run_go_rpc(case_dir, env, timeout_s, case_index)
-
-
-RUST_TEST_START = re.compile(r"test \S+ \.\.\. ")
-# « FAILED » de libtest, quelle que soit sa position : collé au marqueur de début, ou seul sur
-# sa ligne quand la sortie du test s'est terminée par un saut de ligne.
-RUST_FAILED = re.compile(r"(?m)(?:^|\.\.\. )FAILED\s*$")
-RUST_SUMMARY = re.compile(
-    r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored", re.M)
 
 
 def run_rust(case_dir, env, timeout_s, case_index):
@@ -2136,7 +2120,10 @@ GO_CONV = {"int": "int(mooditEntier(%s))", "int64": "mooditEntier(%s)",
            "float64": "mooditNombre(%s)", "bool": "%s.(bool)", "string": "%s.(string)"}
 
 
-GO_STRUCT_BODY = re.compile(r"^type\s+(\w+)\s+struct\s*\{([^}]*)\}", re.M | re.S)
+# Corps en `[^{}]*` et non `[^}]*` : sans accolade fermante, le motif courait de CHAQUE
+# `type X struct{` jusqu'au bout de la source (temps quadratique). Le resultat est le meme : un
+# corps qui contient `{` (champ `struct{...}` anonyme) etait deja ecarte par go_struct_fields.
+GO_STRUCT_BODY = re.compile(r"^type\s+(\w+)\s+struct\s*\{([^{}]*)\}", re.M | re.S)
 
 
 def go_struct_fields(source):
@@ -2171,11 +2158,6 @@ def go_struct_fields(source):
         if entries is not None:
             field_list[typ] = entries
     return field_list
-
-
-def go_pointer_receivers(source):
-    """Types dont au moins une méthode a un RÉCEPTEUR POINTEUR. FONCTION PURE (testée)."""
-    return {receiver for star, receiver, _, _, _ in GO_METHOD.findall(source or "") if star}
 
 
 def go_pointer_methods(source):
@@ -2648,7 +2630,10 @@ def go_student_without_main(source):
 # Qualificatifs NON significatifs avant le type de retour (`static int f`, `inline`,
 # `extern`, `const`) : sans eux, l ancre de debut de ligne ratait la signature, aucun
 # bouchon n etait genere, et une reponse juste etait notee 0.
-C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+)*"
+# Qualificatifs bornes a huit, comme CS_MODS : leur `\s+` franchit les fins de ligne, et une
+# source faite de `const` un par ligne faisait repartir le motif de chaque ligne jusqu'au bout
+# (temps quadratique : 8 s par cas pour 100 000 caracteres).
+C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+){0,8}"
                     r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)\s*\{", re.M)
 # `%.17g` et non `%g` : ce format est celui des ARGUMENTS comme des RETOURS, relus par atof.
 # `%g` s'arrête à 6 chiffres significatifs — 3.14159265 arrivait tronqué chez l'étudiant et
@@ -3018,12 +3003,15 @@ def _c_param_types(params):
     SEUL lecteur de parametres C/C++, pour les fonctions libres comme pour le chemin objet : deux
     copies divergeaient (les pointeurs etaient ecartes dans l'une, pris pour un scalaire dans
     l'autre). Pointeur, tableau ou reference -> None (pas de bouchon : `int *tab` n'est pas
-    `int`). `const` est ignore : `const int n` est un `int` pour l'appelant."""
+    `int`). `const` est ignore : `const int n` est un `int` pour l'appelant. La valeur par defaut
+    (`int b = 0`, C++) ne change pas le type vu par l'appelant : coupee, comme en C#
+    (_cs_param_types). Lue comme un morceau de plus, elle ecartait la fonction — et, pour un
+    constructeur, la classe entiere : une reponse juste etait notee 0."""
     types = []
     for param_group in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
         if any(c in param_group for c in "*[&"):
             return None
-        pieces = [m for m in param_group.split() if m != "const"]
+        pieces = [m for m in param_group.split("=")[0].split() if m != "const"]
         # EXACTEMENT un type et un nom : `long double x` passait pour un `long` (premier mot
         # seul lu), le bouchon tronquait 2.5 a 2 et une reponse juste etait notee fausse.
         if len(pieces) != 2 or pieces[0] not in C_TYPES:
@@ -3652,7 +3640,7 @@ def rust_struct_fields(source):
 def rust_mut_receivers(source):
     """Types dont au moins une méthode prend `&mut self`. FONCTION PURE (testée).
 
-    Pendant exact de `go_pointer_receivers` : une telle méthode peut modifier l'objet, et la
+    Pendant de `go_pointer_methods` : une telle méthode peut modifier l'objet, et la
     capture de champs le reconstruit à chaque appel — la modification serait perdue EN SILENCE,
     donc un verdict faux sans diagnostic. Ces types passent par la poignée d'un constructeur."""
     mutants = set()
@@ -4044,10 +4032,12 @@ fn main() {
 # du serveur le doublait (E0428), et une réponse juste était notée 0 avec une erreur qui désigne
 # du code généré. Même ancre que RUST_FN — début de ligne OU après `{`, `}`, `;` — et attributs
 # admis devant : `fn f() -> i32 { 2 } fn main() {}` sur une ligne et `#[allow(dead_code)] fn
-# main() {}` gardaient leur `main`, avec le même doublon.
+# main() {}` gardaient leur `main`, avec le même doublon. Qualificatifs bornés à trois (il n'en
+# existe que trois) : leur `\s+` franchit les fins de ligne, et répétés sans borne ils rendaient
+# le motif quadratique sur une source faite de `const` un par ligne.
 RUST_MAIN = re.compile(
     r"((?:^|(?<=[{};]))[ \t]*(?:#\[[^\]\n]*\][ \t]*)*"
-    r"(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
+    r"(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+){0,3})fn\s+main\s*\(\s*\)",
     re.M)
 
 
@@ -4280,7 +4270,11 @@ public static class MooditRpc {
         try {
             ok = harnais();
         } catch (Exception e) {
-            Console.Error.WriteLine("[MOODIT] harnais: " + e.Message);
+            // Texte relaye SANS saut de ligne, comme les autres noteurs : il peut porter
+            // des octets choisis par l etudiant, et une ligne fabriquee est la matiere
+            // premiere d une forge.
+            Console.Error.WriteLine("[MOODIT] harnais: "
+                + e.Message.Replace((char) 10, ' ').Replace((char) 13, ' '));
             ok = false;
         }
         if (ok) {
@@ -5145,6 +5139,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # accuser de falsification une soumission dont un vrai cas avait reussi (regle 3 de
     # canary_verdict : il n'accuse plus tant que l'autre canari est confirme).
     grader_dead = grader_killed(code, passed)
+    note_grader_output_lost(code, passed)
     return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
 
@@ -5324,6 +5319,7 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin
     # « pass » tue par manque de memoire passait pour un canari en echec, et faisait
     # accuser de falsification une soumission dont un vrai cas avait reussi.
     grader_dead = grader_killed(code, passed)
+    note_grader_output_lost(code, passed)
     return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
 
@@ -5574,7 +5570,7 @@ def execute_case(language, case, timeout_s):
         # un stdout intact — la ligne du jeton ET le code de sortie étaient alors bien là. Un
         # cas vert n'a rien à protéger, et il recevait un détail qui le contredisait.
         outcome.skipped = True
-        # Et DIRE la cause : le détail serait resté « Échec du harnais JUnit » (ou l'équivalent
+        # Et DIRE la cause : le détail serait resté « Le harnais a renvoyé faux » (ou l'équivalent
         # du langage), envoyant l'étudiant chercher un bug de logique inexistant. Les deux
         # autres chemins de la même condition sont explicites, celui-ci doit l'être aussi.
         outcome.detail = ("Espace de travail saturé : le code écrit trop de fichiers ou trop "
@@ -5830,7 +5826,7 @@ def main():
     timeout_s = max(1, min(MAX_RUN_TIMEOUT_S,
                            int(job.get("timeout_ms") or DEFAULT_RUN_TIMEOUT_S * 1000) // 1000))
     if language in ("java", "csharp"):
-        # Plancher VM, symétrique du mode exec : JVM + ConsoleLauncher (ou mono + NUnitLite)
+        # Plancher VM, symétrique du mode exec : la JVM (ou mono)
         # mettent couramment 2 à 5 s à démarrer — un temps limite court mais légitime du prof
         # (1-5 s) tuait sinon TOUS les cas, canaris compris → « falsification probable » à tort.
         timeout_s = max(timeout_s, 10)

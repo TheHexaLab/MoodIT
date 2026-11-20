@@ -503,6 +503,28 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void java_class_name_with_control_character_rejected_with_diagnostic() {
+        // Java admet U+0000 (et les autres caractères « ignorables ») dans un identifiant, mais
+        // le nom devient un nom de fichier : l'archive du dépôt était refusée par le démon (502,
+        // tentative supprimée) ou le nom tronqué au NUL — jamais une note expliquée.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        char nul = (char) 0;
+        char zeroWidthSpace = (char) 0x200B;
+        for (String className : List.of("A" + nul + "B", "S" + "a".repeat(90) + nul + "b",
+                "A" + zeroWidthSpace + "B")) {
+            List<TestResult> results = routed.evaluate(oneTest("Java",
+                    "public class " + className + " { static int f() { return 1; } }",
+                    "return true;"));
+            assertThat(results).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            assertThat(results.get(0).detail()).contains("caractère de contrôle ou invisible")
+                    .doesNotContain(String.valueOf(nul));
+        }
+        verifyNoInteractions(docker);
+    }
+
+    @Test
     void framework_format_harness_rejected_with_diagnostic() {
         // Cette forme compilait le harnais AVEC le code de l'étudiant : le processus qui détenait
         // le secret était celui qu'il contrôle, et cinq canaux de forge y ont été démontrés. Elle

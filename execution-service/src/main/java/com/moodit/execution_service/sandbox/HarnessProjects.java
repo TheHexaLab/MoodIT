@@ -271,7 +271,8 @@ public final class HarnessProjects {
         // Nom trop long pour un nom de fichier : le dépôt dans le conteneur échouait (502, tentative
         // supprimée). Fichier de repli : javac rend une erreur de compilation lisible, la
         // notation la refuse en amont avec un message clair (DockerEvaluator.reservedNameRejection).
-        return (name != null && !javaTypeNameTooLong(name) ? name : fallback) + ".java";
+        return (name != null && !javaTypeNameTooLong(name) && !javaTypeNameUnsafe(name)
+                ? name : fallback) + ".java";
     }
 
     /**
@@ -284,6 +285,17 @@ public final class HarnessProjects {
     /** Le nom de type dépasse-t-il {@link #MAX_JAVA_TYPE_NAME_BYTES} ? */
     public static boolean javaTypeNameTooLong(String name) {
         return name.getBytes(StandardCharsets.UTF_8).length > MAX_JAVA_TYPE_NAME_BYTES;
+    }
+
+    /**
+     * Le nom de type contient-il un caractère « ignorable » d'identifiant (U+0000, autres
+     * caractères de contrôle, caractères de format invisibles) ? Java les admet dans un
+     * identifiant, mais le nom devient un nom de fichier : avec U+0000, l'archive du dépôt était
+     * refusée par le démon (502, tentative supprimée) ou le nom tronqué au NUL (fichier sans
+     * extension, « Aucun fichier de code soumis »).
+     */
+    public static boolean javaTypeNameUnsafe(String name) {
+        return name.chars().anyMatch(Character::isIdentifierIgnorable);
     }
 
     /**

@@ -160,6 +160,111 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
+    void interrupted_run_leaves_no_container() throws Exception {
+        require("Go");
+        // Arrêt du service pendant une notation : le fil est interrompu, et le conteneur doit
+        // être SUPPRIMÉ. Rétabli avant le `finally`, le drapeau d'interruption faisait échouer
+        // l'appel de suppression au démon : le conteneur restait vivant jusqu'à son mur, puis
+        // en « Exited » jusqu'au balayage. Un mock ne le voit pas (son `exec()` réussit
+        // toujours) : seul un vrai démon le montre.
+        java.util.Set<String> before = runnerContainers();
+        String infiniteLoop = "package main\n\nfunc doubler(n int) int { for {} }\n\nfunc main() {}\n";
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread worker = new Thread(() -> {
+            try {
+                evaluator.evaluate("Go", infiniteLoop,
+                        List.of(new TestCaseInput("t", GO_HARNESS, 1)), 60_000);
+            } catch (Throwable e) {
+                thrown.set(e);
+            }
+        });
+        worker.start();
+        try {
+            java.util.Set<String> created = java.util.Set.of();
+            long deadline = System.nanoTime() + java.time.Duration.ofSeconds(60).toNanos();
+            while (created.isEmpty() && System.nanoTime() < deadline) {
+                Thread.sleep(250);
+                created = newSince(before);
+            }
+            assertThat(created).as("le conteneur de notation doit avoir démarré").isNotEmpty();
+            Thread.sleep(2000);   // en pleine attente du conteneur, pas pendant sa création
+            worker.interrupt();
+            worker.join(java.time.Duration.ofSeconds(60).toMillis());
+            assertThat(worker.isAlive()).as("la notation interrompue doit rendre la main").isFalse();
+            assertThat(thrown.get()).isInstanceOf(SandboxException.class);
+            assertThat(newSince(before))
+                    .as("aucun conteneur de cette notation ne doit rester, même arrêté")
+                    .isEmpty();
+        } finally {
+            worker.interrupt();
+            for (String id : newSince(before)) {   // ne rien laisser derrière un test en échec
+                new ProcessBuilder("docker", "rm", "-f", id).inheritIO().start().waitFor();
+            }
+        }
+    }
+
+    /** Conteneurs runner (étiquette de {@link DockerSandbox}), arrêtés compris. */
+    private static java.util.Set<String> runnerContainers() throws Exception {
+        Process ps = new ProcessBuilder("docker", "ps", "-a", "-q", "--no-trunc",
+                "--filter", "label=" + DockerSandbox.RUNNER_LABEL + "=1")
+                .redirectErrorStream(true).start();
+        String out = new String(ps.getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(ps.waitFor()).as("docker ps : %s", out).isZero();
+        return out.lines().map(String::trim).filter(l -> !l.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static java.util.Set<String> newSince(java.util.Set<String> before) throws Exception {
+        java.util.Set<String> now = new java.util.HashSet<>(runnerContainers());
+        now.removeAll(before);
+        return now;
+    }
+
+    @Test
+    void full_workspace_is_named_as_the_cause() {
+        require("C");
+        // Le code remplit /box (son TMPDIR) puis rend la BONNE valeur : le noteur ne peut plus
+        // écrire son jeton, et sort en 0 sans lui. Le cas reste en échec, mais le détail doit
+        // nommer la saturation — il disait « Le harnais a renvoyé faux », et envoyait chercher
+        // un bogue de logique inexistant.
+        String filler = """
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <string.h>
+
+                // Fichiers de 30 Mo : sous la borne de taille d'un fichier du processus soumis.
+                static void remplir(const char *dossier) {
+                    static char bloc[1 << 20];
+                    char chemin[4096];
+                    if (!dossier) return;
+                    memset(bloc, 'x', sizeof bloc);
+                    for (int i = 0; i < 100000; i++) {
+                        snprintf(chemin, sizeof chemin, "%s/plein%d", dossier, i);
+                        FILE *f = fopen(chemin, "w");
+                        if (!f) break;
+                        int ok = 1;
+                        for (int k = 0; k < 30 && ok; k++) {
+                            ok = fwrite(bloc, 1, sizeof bloc, f) == sizeof bloc;
+                        }
+                        if (fclose(f) != 0 || !ok) break;
+                    }
+                }
+
+                int doubler(int n) {
+                    remplir(getenv("TMPDIR"));
+                    remplir("/tmp");
+                    remplir("/dev/shm");
+                    return n * 2;
+                }
+                """;
+        List<TestResult> r = evaluator.evaluate("C", filler,
+                List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)), null);
+        assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(0).detail()).contains("Espace de travail saturé");
+    }
+
+    @Test
     void compilation_error_is_explained() {
         require("Go");
         String broken = "package main\n\nfunc doubler(n int) int { return n *\n";

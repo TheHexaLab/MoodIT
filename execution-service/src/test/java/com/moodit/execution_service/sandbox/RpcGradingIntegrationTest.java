@@ -93,6 +93,27 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void cpp_default_arguments_are_graded() {
+        // Une valeur par défaut (`int b = 0`) écartait la fonction, et un constructeur à valeurs
+        // par défaut la classe entière : réponse juste notée 0, alors que la solution du prof,
+        // écrite sans valeur par défaut, passait au « Tester ».
+        String h = "return somme(2, 3) == 5;";
+        assertThat(note("C++", h, "int somme(int a, int b = 0) { return a + b; }\n").passed()).isTrue();
+        assertThat(note("C++", h, "int somme(int a, int b = 0) { return a - b; }\n").passed()).isFalse();
+        String hRect = "Rect r(3, 4); return r.aire() == 12;";
+        String code = """
+                class Rect {
+                    int l, h;
+                public:
+                    Rect(int w = 1, int hauteur = 1) { l = w; h = hauteur; }
+                    int aire() { return l * h; }
+                };
+                """;
+        assertThat(note("C++", hRect, code).passed()).isTrue();
+        assertThat(note("C++", hRect, code.replace("l * h", "l + h")).passed()).isFalse();
+    }
+
+    @Test
     void rust_right_then_wrong_answer() {
         String h = "doubler(5) == 10";
         assertThat(note("Rust", h, "fn doubler(n: i32) -> i32 { n * 2 }\n").passed()).isTrue();

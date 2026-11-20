@@ -401,10 +401,21 @@ public class DockerSandbox {
             throw new SandboxException("Échec du conteneur de notation : " + e.getMessage(), e);
         } finally {
             if (containerId != null) {
+                // Drapeau d'interruption LEVÉ le temps de la suppression : les deux catch
+                // ci-dessus viennent de le rétablir, et un appel au démon sur un fil interrompu
+                // échoue aussitôt (le canal du socket se ferme à l'interruption). Le conteneur
+                // restait alors vivant, sans propriétaire, jusqu'à son mur de 15 min — hors du
+                // compte du limiteur de l'instance suivante. Le drapeau est rétabli ensuite :
+                // l'appelant doit toujours voir l'interruption.
+                boolean interrupted = Thread.interrupted();
                 try {
                     docker.removeContainerCmd(containerId).withForce(true).exec();
                 } catch (RuntimeException e) {
                     log.warn("Nettoyage du conteneur {} échoué : {}", containerId, e.getMessage());
+                } finally {
+                    if (interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
             }
         }

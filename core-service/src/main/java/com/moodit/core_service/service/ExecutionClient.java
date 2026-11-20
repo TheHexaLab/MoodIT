@@ -6,9 +6,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -19,8 +24,12 @@ import java.util.Map;
 /**
  * Appelle le service d'EXÉCUTION (conteneurs runner Docker, #116) pour corriger une question Code. Endpoint
  * INTERNE (non exposé par le gateway), authentifié par un jeton partagé {@code X-Internal-Token}.
- * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} si le
- * service est injoignable (le job laisse alors la question « en cours »).
+ * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} en cas
+ * d'échec d'appel (la tentative est alors supprimée par {@code QuizService}).
+ *
+ * <p>Un service INJOIGNABLE (connexion refusée, nom introuvable : il redémarre ou n'a pas fini de
+ * démarrer) est retenté pendant {@code app.execution-service.unreachable-retry-ms} avant de
+ * rendre {@code null} : la requête n'est jamais partie, donc rien n'a pu être corrigé deux fois.
  */
 @Component
 public class ExecutionClient {
@@ -34,12 +43,33 @@ public class ExecutionClient {
     private final long perTestReadTimeoutMs;
     private final long internalQueueWaitMs;
     private final long interpretedBudgetMs;
+    private final long unreachableRetryMs;
+
+    /** Pause entre deux essais de connexion ; remplaçable dans les tests. */
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
+
+    Sleeper sleeper = Thread::sleep;
+
+    /** Première pause entre deux essais de connexion, doublée jusqu'à {@link #RETRY_MAX_DELAY_MS}. */
+    static final long RETRY_FIRST_DELAY_MS = 1_000;
+    static final long RETRY_MAX_DELAY_MS = 10_000;
 
     /** Budget serveur par défaut (tests et appelants hérités) : 15 min, comme execution-service. */
     public ExecutionClient(String baseUrl, String internalToken, long connectTimeoutMs,
             long baseReadTimeoutMs, long perTestReadTimeoutMs, long internalQueueWaitMs) {
         this(baseUrl, internalToken, connectTimeoutMs, baseReadTimeoutMs, perTestReadTimeoutMs,
                 internalQueueWaitMs, DEFAULT_EXEC_BUDGET_MS);
+    }
+
+    /** Sans nouvel essai de connexion (tests et appelants hérités). */
+    public ExecutionClient(String baseUrl, String internalToken, long connectTimeoutMs,
+            long baseReadTimeoutMs, long perTestReadTimeoutMs, long internalQueueWaitMs,
+            long interpretedBudgetMs) {
+        this(baseUrl, internalToken, connectTimeoutMs, baseReadTimeoutMs, perTestReadTimeoutMs,
+                internalQueueWaitMs, interpretedBudgetMs, 0);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -56,7 +86,12 @@ public class ExecutionClient {
             // supprime la divergence par OUBLI, pas toute divergence possible : la poser dans
             // le bloc `environment:` d'un seul service, ou surcharger la propriété Spring d'un
             // seul côté, la rétablit. D'où l'avertissement dans .env.example et le compose.
-            @Value("${app.execution-service.interpreted-budget-ms:${EXEC_INTERPRETED_BUDGET_MS:900000}}") long interpretedBudgetMs) {
+            @Value("${app.execution-service.interpreted-budget-ms:${EXEC_INTERPRETED_BUDGET_MS:900000}}") long interpretedBudgetMs,
+            // Durée pendant laquelle un execution-service INJOIGNABLE est retenté avant d'abandonner
+            // la correction. Sans elle, son redémarrage (docker compose restart, update.sh, hôte
+            // qui redémarre avec core prêt le premier) vidait la file de corrections en quelques
+            // secondes : chaque refus de connexion supprimait une tentative. 0 = aucun nouvel essai.
+            @Value("${app.execution-service.unreachable-retry-ms:120000}") long unreachableRetryMs) {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
@@ -64,6 +99,7 @@ public class ExecutionClient {
         this.perTestReadTimeoutMs = perTestReadTimeoutMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
         this.interpretedBudgetMs = interpretedBudgetMs;
+        this.unreachableRetryMs = Math.max(0, unreachableRetryMs);
     }
 
     /**
@@ -279,20 +315,63 @@ public class ExecutionClient {
                 .toList());
         if (timeout != null) body.put("timeoutMs", timeout);
         long readTimeout = readTimeoutMs(language, workUnits(language, harnesses.size()), timeout);
-        try {
-            Verdict[] verdicts = restClient(readTimeout).post()
-                    .uri(baseUrl + "/internal/exec/evaluate")
-                    .header("X-Internal-Token", internalToken)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(Verdict[].class);
-            if (verdicts == null) return null;
-            return Arrays.stream(verdicts).map(Verdict::passed).toList();
-        } catch (RestClientException e) {
-            log.warn("Exécution du code (langage {}) échouée : {}", language, e.getMessage());
-            return null;
+        long retryDeadline = System.nanoTime() + Duration.ofMillis(unreachableRetryMs).toNanos();
+        long delay = RETRY_FIRST_DELAY_MS;
+        while (true) {
+            try {
+                Verdict[] verdicts = restClient(readTimeout).post()
+                        .uri(baseUrl + "/internal/exec/evaluate")
+                        .header("X-Internal-Token", internalToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body)
+                        .retrieve()
+                        .body(Verdict[].class);
+                if (verdicts == null) return null;
+                return Arrays.stream(verdicts).map(Verdict::passed).toList();
+            } catch (RestClientException e) {
+                long remainingMs = Duration.ofNanos(retryDeadline - System.nanoTime()).toMillis();
+                if (!unreachable(e) || remainingMs <= 0) {
+                    log.warn("Exécution du code (langage {}) échouée : {}", language, e.getMessage());
+                    return null;
+                }
+                log.warn("execution-service injoignable ({}) : nouvel essai dans {} ms",
+                        e.getMessage(), Math.min(delay, remainingMs));
+                try {
+                    sleeper.sleep(Math.min(delay, remainingMs));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();   // arrêt de core : on n'attend plus
+                    return null;
+                }
+                delay = Math.min(delay * 2, RETRY_MAX_DELAY_MS);
+            }
         }
+    }
+
+    /**
+     * L'appel a-t-il échoué AVANT d'atteindre execution-service (connexion refusée, hôte ou nom
+     * introuvable, connexion non établie dans le délai) ? Seul cas retenté : la requête n'est pas
+     * partie, donc aucune correction n'a pu commencer. Un délai de LECTURE dépassé ou une réponse
+     * d'erreur n'en font pas partie — la correction a pu tourner, et la relancer occuperait une
+     * place du sandbox une seconde fois.
+     */
+    static boolean unreachable(RestClientException e) {
+        if (!(e instanceof ResourceAccessException)) {
+            return false;
+        }
+        for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConnectException || cause instanceof UnknownHostException
+                    || cause instanceof NoRouteToHostException) {
+                return true;
+            }
+            // Le JDK lève le même type pour les deux délais ; seul le message les distingue
+            // (« Connect timed out » / « Read timed out »). Un message inattendu n'est PAS
+            // retenté : l'erreur va dans le sens sûr.
+            if (cause instanceof SocketTimeoutException && cause.getMessage() != null
+                    && cause.getMessage().toLowerCase(Locale.ROOT).contains("connect")) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }
