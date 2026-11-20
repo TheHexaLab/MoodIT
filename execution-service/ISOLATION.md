@@ -126,14 +126,17 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
   minimum du superviseur (chown/droits, setuid étudiant, kill), `no-new-privileges`,
   UID étudiant dédié ; détails dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
-  L'IPC System V, comptée dans la mémoire mais hors de ces tmpfs, est fermée par deux réglages du
+  L'IPC System V, comptée dans la mémoire mais hors de ces tmpfs, est fermée par trois réglages du
   conteneur (`DockerSandbox.IPC_SYSCTLS`) : `kernel.shm_rmid_forced=1` (un segment de mémoire
-  partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis) et
-  `kernel.msgmni=0` (aucune file de messages).
+  partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis),
+  `kernel.msgmni=0` (aucune file de messages) et `kernel.sem` avec semmni à 0 (aucun jeu de
+  sémaphores).
 - **Journaux relus par le service** : au plus 16 Mo par flux (`DockerSandbox.LOG_CAP_BYTES`) ;
   au-delà, la sortie n'est pas un verdict (502).
-- **Arrêt du service** : les conteneurs en vol sont supprimés à la destruction du bean
-  (`DockerSandbox.removeInFlight`) ; `OrphanSweeper` reste le filet d'une JVM tuée.
+- **Arrêt du service** : les conteneurs en vol sont supprimés dès la fermeture du contexte
+  (`ContextClosedEvent`, avant l'arrêt progressif du serveur web — `DockerSandbox.removeInFlight`),
+  et plus aucun n'est lancé ensuite ; la notation en cours finit en 502. `OrphanSweeper` reste le
+  filet d'une JVM tuée.
 
 ## Résiduel connu
 

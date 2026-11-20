@@ -1,7 +1,9 @@
 package com.moodit.execution_service.sandbox;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -14,7 +16,20 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling   // OrphanSweeper : balayage périodique des orphelins
 public class SandboxBeans {
 
-    // À l'arrêt du service : suppression des conteneurs encore en vol (cf. removeInFlight).
+    /**
+     * Arrêt du service : suppression des conteneurs en vol DÈS la fermeture du contexte.
+     * {@code ContextClosedEvent} est publié avant l'arrêt progressif du serveur web
+     * ({@code server.shutdown=graceful}, défaut de Spring Boot) : celui-ci attend les requêtes
+     * actives jusqu'à 30 s, alors que Docker tue le service 10 s après SIGTERM — attendre la
+     * destruction des beans, c'était ne jamais s'exécuter dès qu'une notation avait plus de 10 s
+     * devant elle. La requête en cours finit en 502 (panne, jamais une note).
+     */
+    @Bean
+    public ApplicationListener<ContextClosedEvent> inFlightContainerCleanup(DockerSandbox sandbox) {
+        return event -> sandbox.removeInFlight();
+    }
+
+    // Filet : même suppression à la destruction du bean (contexte fermé sans l'événement).
     @Bean(destroyMethod = "removeInFlight")
     public DockerSandbox dockerSandbox(
             @Value("${app.sandbox.docker-host:}") String dockerHost,

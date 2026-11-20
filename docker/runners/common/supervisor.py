@@ -2867,8 +2867,6 @@ CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
 # Debut d'un `template <...>`, et fins d'instruction ou de bloc : cf. cpp_follows_template.
 CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<")
 CPP_STATEMENT_END = re.compile(r"[{};]")
-# Mot-cle d'un AUTRE en-tete entre un en-tete et son accolade : cf. cpp_class_body_start.
-CPP_CLASS_KEYWORD = re.compile(r"\b(?:class|struct)\b")
 
 
 def cpp_follows_template(src_text, position, heads, bounds):
@@ -2901,8 +2899,8 @@ def cpp_class_body_start(src_text, head_end, bounds):
     FONCTION PURE (testée).
 
     Le corps est celui de CET en-tête seulement si son `{` est le premier de `{`, `}`, `;` après
-    lui (`bounds`, positions triées de CPP_STATEMENT_END) et qu'aucun autre mot-clé `class` /
-    `struct` ne s'intercale. L'ancienne recherche — « la première accolade après l'en-tête » —
+    lui (`bounds`, positions triées de CPP_STATEMENT_END) et qu'aucun autre EN-TÊTE `class` /
+    `struct` (en début de ligne) ne s'intercale. L'ancienne recherche — « la première accolade après l'en-tête » —
     donnait la MÊME accolade à tous les en-têtes sans corps qui la précèdent : 6 000 lignes
     `class A` suivies d'un seul corps de 50 Ko le faisaient redécouper 6 000 fois, caractère par
     caractère (plus de 90 s par cas pour une source de 100 Ko, hors de tout délai par phase).
@@ -2912,7 +2910,10 @@ def cpp_class_body_start(src_text, head_end, bounds):
     if k == len(bounds) or src_text[bounds[k]] != "{":
         return -1
     begin = bounds[k]
-    if CPP_CLASS_KEYWORD.search(src_text, head_end, begin):
+    # Autre EN-TETE (meme motif que CPP_CLASS : mot-cle en debut de ligne), pas un simple
+    # mot-cle : `class A : public Base<struct Tag> {` porte `struct` dans sa clause de base, et
+    # la classe n'etait plus proxifiee — reponse juste notee 0.
+    if CPP_CLASS.search(src_text, head_end, begin):
         return -1
     return begin
 

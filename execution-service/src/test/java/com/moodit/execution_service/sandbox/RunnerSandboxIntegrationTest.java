@@ -117,6 +117,7 @@ class RunnerSandboxIntegrationTest {
                 #include <string.h>
                 #include <sys/ipc.h>
                 #include <sys/msg.h>
+                #include <sys/sem.h>
                 #include <sys/shm.h>
 
                 #define MORCEAU (4 << 20)
@@ -153,12 +154,23 @@ class RunnerSandboxIntegrationTest {
                     return msgget(IPC_PRIVATE, IPC_CREAT | 0600) >= 0 ? n * 2 : 0;
                 }
 
+                /* Jeux de sémaphores : environ 2 Mio chacun, hors tmpfs, et ils survivent aussi.
+                   400 jeux pèseraient 800 Mo ; aucun ne doit pouvoir être créé. */
+                int semaphores(int n) {
+                    int crees = 0;
+                    for (int i = 0; i < 400; i++) {
+                        if (semget(IPC_PRIVATE, 32000, IPC_CREAT | 0600) >= 0) { crees++; }
+                    }
+                    return crees > 0 ? n * 2 : 0;
+                }
+
                 int temoin(int n) { return n * 2; }
                 """;
         List<TestResult> r = small.evaluate("C", probe, List.of(
                 new TestCaseInput("segments détachés", "return doubler(5) == 10;", 1),
                 new TestCaseInput("segments gardés", "return garder(5) == 10;", 1),
                 new TestCaseInput("file de messages", "return file(5) == 10;", 1),
+                new TestCaseInput("sémaphores", "return semaphores(5) == 10;", 1),
                 new TestCaseInput("témoin", "return temoin(5) == 10;", 1)), null);
         assertThat(r.get(0).passed())
                 .withFailMessage("les segments détachés doivent être rendus au fur et à mesure "
@@ -166,9 +178,10 @@ class RunnerSandboxIntegrationTest {
                 .isTrue();
         assertThat(r.get(1).passed()).isFalse();
         assertThat(r.get(2).passed()).isFalse();
-        assertThat(r.get(3).passed())
+        assertThat(r.get(3).passed()).isFalse();
+        assertThat(r.get(4).passed())
                 .withFailMessage("le témoin, noté APRÈS les sondes, doit réussir : le conteneur a "
-                        + "survécu et le programme compile : %s", r.get(3))
+                        + "survécu et le programme compile : %s", r.get(4))
                 .isTrue();
     }
 

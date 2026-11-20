@@ -532,11 +532,13 @@ class DockerSandboxTest {
                 .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m");
 
         // IPC System V : mémoire du cgroup HORS des tmpfs, qui survit à son créateur. Segments
-        // détruits dès qu'ils ne sont plus attachés, aucune file de messages. Doublé par un cas
-        // d'intégration (RunnerSandboxIntegrationTest).
+        // détruits dès qu'ils ne sont plus attachés, aucune file de messages, aucun jeu de
+        // sémaphores (semmni, dernier champ de kernel.sem). Doublé par un cas d'intégration
+        // (RunnerSandboxIntegrationTest).
         assertThat(hostConfig.getSysctls()).containsOnly(
                 Map.entry("kernel.shm_rmid_forced", "1"),
-                Map.entry("kernel.msgmni", "0"));
+                Map.entry("kernel.msgmni", "0"),
+                Map.entry("kernel.sem", "1 1 1 0"));
     }
 
     @Test
@@ -580,7 +582,6 @@ class DockerSandboxTest {
                     return 0;
                 });
         DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
-        assertThat(sandbox.removeInFlight()).isZero();      // rien en vol : aucun appel au démon
 
         var pool = java.util.concurrent.Executors.newSingleThreadExecutor();
         try {
@@ -608,7 +609,39 @@ class DockerSandboxTest {
     }
 
     @Test
-    void sandbox_bean_removes_in_flight_containers_on_destroy() throws Exception {
+    void no_container_survives_a_shutdown_that_races_its_creation() {
+        // Arrêt engagé AVANT ou PENDANT la création : removeInFlight a pu copier l'ensemble des
+        // conteneurs en vol avant que celui-ci n'y entre. run() le supprime lui-même et échoue
+        // (502), sans le démarrer.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+
+        assertThat(sandbox.removeInFlight()).isZero();      // rien en vol : aucun appel au démon
+        org.mockito.Mockito.verify(remove, org.mockito.Mockito.never()).exec();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                .isInstanceOf(SandboxException.class)
+                .hasMessageContaining("en cours d'arrêt");
+        org.mockito.Mockito.verify(remove).exec();
+        org.mockito.Mockito.verify(docker, org.mockito.Mockito.never()).startContainerCmd("cid");
+        assertThat(sandbox.removeInFlight()).isZero();
+    }
+
+    @Test
+    void sandbox_beans_remove_in_flight_containers_when_the_context_closes() throws Exception {
+        // Dès la FERMETURE du contexte (ContextClosedEvent, publié avant l'arrêt progressif du
+        // serveur web), pas seulement à la destruction du bean : celle-ci vient après l'attente
+        // des requêtes actives, que le SIGKILL de Docker (10 s) ne laisse pas finir.
+        DockerSandbox sandbox = org.mockito.Mockito.mock(DockerSandbox.class);
+        new SandboxBeans().inFlightContainerCleanup(sandbox).onApplicationEvent(
+                new org.springframework.context.event.ContextClosedEvent(
+                        new org.springframework.context.support.GenericApplicationContext()));
+        org.mockito.Mockito.verify(sandbox).removeInFlight();
+
+        // Filet : même suppression à la destruction du bean.
         var bean = SandboxBeans.class.getMethod("dockerSandbox",
                         String.class, long.class, long.class, double.class)
                 .getAnnotation(org.springframework.context.annotation.Bean.class);

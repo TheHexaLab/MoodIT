@@ -84,10 +84,17 @@ public class DockerSandbox {
      * <p>Les files de messages System V ont le même défaut (elles survivent, et leur contenu est
      * compté dans le cgroup) sans réglage équivalent : {@code msgmni=0} interdit d'en créer.
      * Aucune des chaînes de compilation ni aucun des interpréteurs des runners ne s'en sert.
+     *
+     * <p>Les SÉMAPHORES System V aussi : un jeu de 32 000 sémaphores coûte environ 2 Mio comptés
+     * dans le cgroup, survit à son créateur et n'est borné par aucun rlimit — 250 jeux suffisaient
+     * à refaire tuer le superviseur (mesuré : sortie 137 en 1,6 s sous 512 Mo). Le dernier champ de
+     * {@code kernel.sem} (semmni, nombre de jeux) à 0 interdit d'en créer ; les trois premiers
+     * (semmsl, semmns, semopm) sont au minimum.
      */
     static final Map<String, String> IPC_SYSCTLS = Map.of(
             "kernel.shm_rmid_forced", "1",
-            "kernel.msgmni", "0");
+            "kernel.msgmni", "0",
+            "kernel.sem", "1 1 1 0");
 
     /**
      * Plafond de CHAQUE flux des journaux relus (stdout = JSON du superviseur, stderr). Le
@@ -113,6 +120,8 @@ public class DockerSandbox {
      * rien ne garantit que le {@code finally} de {@link #run} aille au bout avant la fin de la JVM.
      */
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+    /** Arrêt du service engagé : plus aucun conteneur n'est lancé (cf. removeInFlight). */
+    private volatile boolean closed;
     private volatile DockerClient client;
     private volatile DockerClient waitClient;
 
@@ -372,6 +381,12 @@ public class DockerSandbox {
                     .exec();
             containerId = created.getId();
             inFlight.add(containerId);
+            // Arrêt engagé PENDANT la création : removeInFlight a pu copier l'ensemble avant cet
+            // ajout, et ce conteneur lui échapperait. Testé APRÈS l'ajout — l'un des deux le voit
+            // forcément ; le `finally` ci-dessous le supprime.
+            if (closed) {
+                throw new SandboxException("Service en cours d'arrêt : notation non lancée");
+            }
 
             // Copier AVANT le démarrage, dans la ZONE DE TRANSIT de l'image (/opt/moodit/staging,
             // 0600 root) : `docker cp` ne sait pas écrire dans un tmpfs (l'extraction atterrit
@@ -481,6 +496,7 @@ public class DockerSandbox {
      * le {@code finally} de {@link #run} tolère un conteneur déjà parti.
      */
     public int removeInFlight() {
+        closed = true;
         int removed = 0;
         for (String id : List.copyOf(inFlight)) {
             try {

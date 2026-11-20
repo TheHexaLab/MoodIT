@@ -1836,8 +1836,10 @@ class Review28Test(unittest.TestCase):
         self.assertEqual(supervisor.cpp_object_api(supervisor.blank_code(src)),
                          [("A", [["int"]], [("int", "f", [])])])
         # Accolade sur la ligne suivante, heritage et `final` : toujours le corps de l'en-tete.
+        # Un `struct` / `class` dans la CLAUSE DE BASE n'est pas un autre en-tete.
         for head in ("class A" + self.NL + "{", "class A final : public Base {",
-                     "struct A : Base<int> {"):
+                     "struct A : Base<int> {", "class A : public Base<struct Tag> {",
+                     "class A : public Base<class T>, public Autre {"):
             # Constructeur DECLARE : une classe derivee n'a pas de constructeur implicite proxifie.
             src = self.NL.join([head, "public:", "    A(int x) { }",
                                 "    int f() { return 1; }", "};"])
