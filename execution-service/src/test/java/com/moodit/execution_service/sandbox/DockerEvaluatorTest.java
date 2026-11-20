@@ -111,7 +111,14 @@ class DockerEvaluatorTest {
                 "return Solution.F(\"[Test]\") == 1;")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",
                 "// func TestX(t *testing.T)\nreturn f() == 1")).isFalse();
+        // Un indexeur C# n'est pas un attribut, même quand l'indice porte le nom d'un marqueur.
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "return Solution.Notes(tab)[Test] == tab[TestCase] && d?[Theory] == 1;")).isFalse();
         // Le même marqueur dans le CODE reste refusé.
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "int[] tab = { 1 };\n[Test] public void T() { }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[Category(\"a\")][Test] public void T() { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("java",
                 "// commentaire\n@Test\nvoid t() { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",

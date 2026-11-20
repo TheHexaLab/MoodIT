@@ -2092,6 +2092,55 @@ class Review246bTest(unittest.TestCase):
         self.assertIn("    fn main() -> i32 { 2 }", out)
         self.assertIn("  pub fn __moodit_student_main() { }", out)
 
+    def test_rust_main_after_code_or_attribute_on_its_line_is_renamed(self):
+        # L'ancre de début de ligne seule laissait ces `main` en place : doublon avec celui du
+        # serveur (E0428), 0 sur une réponse juste.
+        renamed = "fn __moodit_student_main()"
+        for source in ("fn doubler(n: i32) -> i32 { n * 2 } fn main() {}\n",
+                       "struct S; pub fn main() {}\n",
+                       "#[allow(dead_code)] fn main() {}\n",
+                       "#[allow(dead_code)]\n#[inline] pub fn main() {}\n"):
+            out = supervisor.rust_without_main(source)
+            self.assertIn(renamed, out, source)
+            self.assertNotRegex(out, r"fn\s+main\b", source)
+        # Le reste de la ligne est intact, attributs compris.
+        self.assertEqual(
+            supervisor.rust_without_main("fn f() -> i32 { 2 } #[inline] fn main() {}"),
+            "fn f() -> i32 { 2 } #[inline] fn __moodit_student_main() {}")
+        # Sur une même ligne aussi, seul le premier niveau est renommé.
+        for kept in ("mod m { fn main() {} }\n", "impl A { #[inline] fn main() {} }\n"):
+            self.assertEqual(supervisor.rust_without_main(kept), kept)
+
+    def test_digit_separator_follows_the_numeric_token_only(self):
+        # Le jeton est suivi pendant le balayage au lieu d'être retrouvé en remontant : mêmes
+        # décisions qu'avant sur les formes réelles.
+        blank = supervisor.blank_code
+        for kept in ("long a = 1'000'000;", "int b = 0xFF'FF;", "int c = 0b1010'1010;"):
+            self.assertEqual(blank(kept), kept)
+        # Un littéral de caractère, préfixé ou non, est blanchi : aucun jeton numérique devant.
+        self.assertEqual(blank("char c = 'a'; int f();"), "char c =    ; int f();")
+        self.assertEqual(blank("wchar_t c = L'a'; int f();"), "wchar_t c = L   ; int f();")
+        self.assertEqual(blank("x = y1'a'; int f();"), "x = y1   ; int f();")
+        # Un commentaire ou une chaîne coupe le jeton : l'apostrophe qui suit ouvre un littéral.
+        self.assertEqual(blank("1/**/'0'; int f();"), "1       ; int f();")
+        # Multi-lignes : le modificateur et le type sur deux lignes restent lus en C#.
+        self.assertEqual(supervisor.cs_signatures("class S {\n    public\n    static int F(int a) { return a; }\n}"),
+                         [("int", "F", ["int"])])
+
+    def test_rust_impl_blocks_keep_only_their_direct_functions(self):
+        # Lecture en une passe : chaque bloc garde ses fonctions directes, pas celles d'un
+        # voisin, d'une fonction imbriquée ni d'un bloc qui le suit à la même profondeur.
+        source = ("struct A; struct B;\n"
+                  "impl A {\n    fn un(&self) -> i32 {\n        fn dedans() -> i32 { 1 }\n"
+                  "        dedans()\n    }\n}\n"
+                  "fn libre() -> i32 { 0 }\n"
+                  "impl B { fn deux(&mut self) -> i32 { 2 } fn trois() -> B { B } }\n")
+        self.assertEqual(supervisor.rust_impl_blocks(source),
+                         [("A", [("un", "&self", "i32")]),
+                          ("B", [("deux", "&mut self", "i32"), ("trois", "", "B")])])
+        self.assertEqual(supervisor.rust_mut_receivers(source), {"B"})
+        self.assertEqual(supervisor.rust_impl_blocks(None), [])
+
     def test_apostrophe_in_a_directive_does_not_blank_the_rest(self):
         # L'apostrophe d'une directive ouvrait un littéral de caractère jamais fermé : tout le
         # reste du fichier était blanchi, « aucune méthode exploitable » sur une réponse juste.
@@ -2887,6 +2936,24 @@ class Review246ExtractionTest(unittest.TestCase):
              lambda s: (supervisor.cs_has_object_api(s), supervisor.cs_object_api(s, "X")),
              "class X {" * 10000),
             ("en-tetes C# sans corps", supervisor.cs_has_object_api, "class a " * 12000),
+            # L'ancre de debut de ligne et une repetition de modificateurs sans borne : chaque
+            # ligne relisait toutes les suivantes.
+            ("lignes C# d'un seul modificateur",
+             lambda s: (supervisor.cs_signatures(s), supervisor.cs_object_api(s, "X")),
+             ("static" + NL) * 14000),
+            ("lignes C# `new`", lambda s: supervisor.cs_object_api("class X {" + NL + s, "X"),
+             ("new" + NL) * 14000),
+            # Chaque apostrophe remontait jusqu'au debut de son jeton : quatre minutes a 100 Ko.
+            ("separateurs de chiffres en chaine", supervisor.blank_code,
+             "int x = 1" + "'a" * 50000 + ";"),
+            # Chaque `impl` ouvert couvre tout le reste du fichier : redecoupe et relu a chaque
+            # bloc, 20 Ko prenaient plus d'une minute. 100 Ko, le plafond d'une soumission.
+            ("impl Rust jamais fermes",
+             lambda s: (supervisor.rust_object_api(s), supervisor.rust_capture_fields(s)),
+             "struct A;" + NL + ("impl A {" + NL) * 11000),
+            ("impl Rust imbriques avec methodes",
+             lambda s: (supervisor.rust_object_api(s), supervisor.rust_capture_fields(s)),
+             "struct A;" + NL + ("impl A {" + NL + "fn f(&mut self) -> i32 {" + NL) * 3000),
         ]
         slow = []
         for label, analysis, src_text in cases:

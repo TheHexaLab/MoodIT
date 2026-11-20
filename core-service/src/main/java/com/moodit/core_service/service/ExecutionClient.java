@@ -71,9 +71,10 @@ public class ExecutionClient {
      * <ul>
      *   <li><b>Interprétés/SQL/vues</b> — une place et un conteneur PAR unité : chaque unité
      *       paie l'attente de file ({@code app.exec.internal-queue-wait-ms}, 120 s par défaut —
-     *       seule variable encore PARTAGÉE avec execution-service via le {@code .env} commun,
-     *       {@code EXEC_INTERNAL_QUEUE_WAIT_MS} : la surcharger d'un côté impose la même valeur
-     *       de l'autre), plus {@code max(per-test-timeout-ms, temps limite + marge)}, plus le
+     *       variable PARTAGÉE avec execution-service via le {@code .env} commun,
+     *       {@code EXEC_INTERNAL_QUEUE_WAIT_MS}, comme {@code EXEC_INTERPRETED_BUDGET_MS} pour
+     *       le budget serveur : surcharger l'une ou l'autre d'un côté impose la même valeur de
+     *       l'autre), plus {@code max(per-test-timeout-ms, temps limite + marge)}, plus le
      *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris) ;</li>
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
      *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + 90 s de

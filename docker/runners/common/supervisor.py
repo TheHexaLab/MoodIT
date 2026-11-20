@@ -3512,14 +3512,38 @@ RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
 RUST_IMPL = re.compile(r"^[ \t]*impl\s+(\w+)\s*\{", re.M)
 
 
-def rust_impl_functions(body):
-    """Fonctions DIRECTES d'un bloc `impl` (accolade ouvrante comprise) → [(nom, params, retour)].
+def rust_impl_blocks(source):
+    """Blocs `impl` et leurs fonctions DIRECTES → [(type, [(nom, params, retour)])], dans l'ordre
+    du texte. FONCTION PURE (testee).
 
-    FONCTION PURE (testee). Une fonction imbriquee dans une methode n'est pas une methode du
-    type : elle est ecartee par son niveau d'accolades, comme pour les fonctions libres."""
-    depths = code_depths(body)
-    return [(hit.group(1), hit.group(2), hit.group(3)) for hit in RUST_FN.finditer(body)
-            if depths[hit.start(1)] == 1]
+    Une fonction imbriquee dans une methode n'est pas une methode du type : elle est ecartee par
+    son niveau d'accolades, comme pour les fonctions libres.
+
+    Les profondeurs et les `fn` sont lues UNE fois sur le texte entier, puis chaque bloc prend
+    les siennes par dichotomie. Chaque bloc etait auparavant redecoupe et ses profondeurs
+    recalculees : des `impl` ouverts sans etre fermes couvrent chacun tout le reste du fichier,
+    donc le cout etait quadratique — 20 Ko de `impl A {` prenaient plus d'une minute par cas,
+    avant toute compilation et hors de tout delai."""
+    src_text = source or ""
+    depths, _ = _closings(src_text)
+    by_depth = {}        # profondeur -> (positions des noms, correspondances), ordre du texte
+    for hit in RUST_FN.finditer(src_text):
+        starts, hits = by_depth.setdefault(depths[hit.start(1)], ([], []))
+        starts.append(hit.start(1))
+        hits.append(hit)
+    blocks = []
+    for impl in RUST_IMPL.finditer(src_text):
+        begin = impl.end() - 1             # l'accolade ouvrante, derniere du motif
+        finish = block_end(src_text, begin)
+        # A la profondeur du corps, entre l'accolade et sa fermeture : exactement les fonctions
+        # directes de CE bloc (en sortir puis y revenir demanderait de le fermer).
+        starts, hits = by_depth.get(depths[begin] + 1, ((), ()))
+        low = bisect.bisect_right(starts, begin)
+        high = bisect.bisect_left(starts, finish)
+        blocks.append((impl.group(1),
+                       [(h.group(1), h.group(2), h.group(3)) for h in hits[low:high]
+                        if h.end() <= finish]))
+    return blocks
 
 
 
@@ -3550,17 +3574,13 @@ def rust_object_api(source):
     structs = set(RUST_STRUCT.findall(src_text))
     by_type = {}                           # type -> (ctors, methodes), ordre d'apparition
     captured = rust_capture_fields(src_text)   # UNE fois : relu dans la boucle, c'etait quadratique
-    for impl in RUST_IMPL.finditer(src_text):
-        typ = impl.group(1)
+    for typ, functions in rust_impl_blocks(src_text):
         if typ not in structs:
             continue
-        begin = src_text.index("{", impl.start())
-        finish = block_end(src_text, begin)
-        body = src_text[begin:finish]
         # Plusieurs blocs `impl` pour le meme type se CUMULENT : le constructeur d'un premier
         # bloc etait perdu quand les methodes venaient d'un second.
         ctors, method_list = by_type.setdefault(typ, ([], []))
-        for ident, params, ret in rust_impl_functions(body):
+        for ident, params, ret in functions:
             pieces = [p.strip() for p in params.split(",") if p.strip()]
             takes_self = bool(pieces) and pieces[0].endswith("self")
             # Seul un EMPRUNT (`&self`, `&mut self`, `&'a self`) se proxifie : le serveur
@@ -3635,16 +3655,9 @@ def rust_mut_receivers(source):
     Pendant exact de `go_pointer_receivers` : une telle méthode peut modifier l'objet, et la
     capture de champs le reconstruit à chaque appel — la modification serait perdue EN SILENCE,
     donc un verdict faux sans diagnostic. Ces types passent par la poignée d'un constructeur."""
-    src_text = source or ""
     mutants = set()
-    for impl in RUST_IMPL.finditer(src_text):
-        typ = impl.group(1)
-        try:
-            begin = src_text.index("{", impl.start())
-        except ValueError:
-            continue
-        finish = block_end(src_text, begin)
-        for _, params, _ in rust_impl_functions(src_text[begin:finish]):
+    for typ, functions in rust_impl_blocks(source):
+        for _, params, _ in functions:
             first_item = (params.split(",")[0] if params else "").strip()
             if first_item.replace(" ", "").startswith("&mutself"):
                 mutants.add(typ)
@@ -4027,11 +4040,14 @@ fn main() {
 ''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
 
 
-# `main` en début de ligne, nu ou précédé de modificateurs : `pub fn main()` n'était pas
-# renommé, le `fn main()` du serveur le doublait (E0428), et une réponse juste était notée 0
-# avec une erreur qui désigne du code généré.
+# `main` nu ou précédé de modificateurs : `pub fn main()` n'était pas renommé, le `fn main()`
+# du serveur le doublait (E0428), et une réponse juste était notée 0 avec une erreur qui désigne
+# du code généré. Même ancre que RUST_FN — début de ligne OU après `{`, `}`, `;` — et attributs
+# admis devant : `fn f() -> i32 { 2 } fn main() {}` sur une ligne et `#[allow(dead_code)] fn
+# main() {}` gardaient leur `main`, avec le même doublon.
 RUST_MAIN = re.compile(
-    r"^([ \t]*(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
+    r"((?:^|(?<=[{};]))[ \t]*(?:#\[[^\]\n]*\][ \t]*)*"
+    r"(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
     re.M)
 
 
@@ -4062,10 +4078,13 @@ def rust_without_main(source):
 # donc exiger `public` refusait l ecriture la plus naturelle d un exercice.
 # Memes modificateurs qu en Java, cote C#, y compris les deux formes EN DEUX MOTS
 # (`protected internal`, `private protected`) : elles sont couvertes par la repetition.
+# Repetition BORNEE a huit modificateurs dans les trois motifs qui s'en servent : `\s+` franchit
+# les fins de ligne et l'ancre vaut a chaque debut de ligne, donc sans borne 14 000 lignes
+# `static` etaient relues depuis chacune d'elles — une trentaine de secondes par cas.
 CS_MODS = (r"(?:public|internal|protected|private|static|new|virtual|override|sealed"
            r"|abstract|extern|unsafe|partial)")
 CS_METHOD = re.compile(
-    r"(?:^|[{};])[ \t]*(?=(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
+    r"(?:^|[{};])[ \t]*(?=(?:" + CS_MODS + r"\s+){0,8}static\s)(?:" + CS_MODS + r"\s+){0,8}"
     r"(int|long|double|bool|string)\s+(\w+)\s*\(([^()]*)\)", re.M)
 CS_TYPES = {"int": "int", "long": "long", "double": "double", "bool": "bool", "string": "string"}
 
@@ -4490,10 +4509,10 @@ public static class MooditServer {
 # Meme relaxation qu en Java, et pour la meme raison : en C# un membre est prive PAR DEFAUT.
 # ANCREES EN DEBUT DE LIGNE : sans cela, `public` devenu facultatif, un `new Rectangle(3, 4)`
 # au milieu d une expression serait pris pour une declaration de constructeur.
-CS_CTOR_TPL = (r"(?:^|[{};])[ \t]*(?:(?:public|internal|protected|private|static|extern)\s+)*"
+CS_CTOR_TPL = (r"(?:^|[{};])[ \t]*(?:(?:public|internal|protected|private|static|extern)\s+){0,8}"
                r"%s\s*\(([^()]*)\)")
 CS_INSTANCE = re.compile(
-    r"(?:^|[{};])[ \t]*(?!(?:" + CS_MODS + r"\s+)*static\s)(?:" + CS_MODS + r"\s+)*"
+    r"(?:^|[{};])[ \t]*(?!(?:" + CS_MODS + r"\s+){0,8}static\s)(?:" + CS_MODS + r"\s+){0,8}"
     r"(int|long|double|bool|string)\s+(\w+)\s*\(([^()]*)\)", re.M)
 
 
@@ -4578,18 +4597,19 @@ def _cs_instance_members(src_text):
     return members
 
 
-def _digit_separator(src_text, i):
+def _digit_separator(src_text, i, token_start):
     """L'apostrophe en `i` est-elle un séparateur de chiffres (`1'000`, `0xFF'FF`) ? PURE.
 
     Oui si elle suit un jeton NUMÉRIQUE (qui commence par un chiffre) et précède un chiffre
     hexadécimal. Les préfixes de caractère (`L'a'`, `u'a'`, `u8'a'`) commencent par une lettre,
-    et `x = 'a'` n'a pas de jeton collé devant : ils restent des littéraux."""
+    et `x = 'a'` n'a pas de jeton collé devant : ils restent des littéraux.
+
+    `token_start` est le début du jeton collé devant l'apostrophe (None s'il n'y en a pas),
+    tenu à jour par le balayage de blank_code. Le retrouver en remontant le texte à chaque
+    apostrophe était quadratique : 100 Ko de `1'a'a'a…` prenaient quatre minutes par cas."""
     if i + 1 >= len(src_text) or src_text[i + 1] not in "0123456789abcdefABCDEF":
         return False
-    j = i
-    while j > 0 and (src_text[j - 1].isalnum() or src_text[j - 1] in "_'"):
-        j -= 1
-    return j < i and src_text[j].isdigit()
+    return token_start is not None and src_text[token_start].isdigit()
 
 
 def blank_code(src_text, backticks=False, rust=False):
@@ -4606,9 +4626,13 @@ def blank_code(src_text, backticks=False, rust=False):
     res = []
     i = 0
     n = len(src_text)
+    token_start = None       # début du jeton (lettres, chiffres, `_`, séparateurs) en cours
     while i < n:
         c = src_text[i]
         two_chars = src_text[i:i + 2]
+        # Le jeton ne survit qu'aux deux branches qui le prolongent (séparateur, caractère de
+        # mot) : toute autre le coupe.
+        token, token_start = token_start, None
         if two_chars == "//":
             while i < n and src_text[i] != chr(10):
                 res.append(" ")
@@ -4654,10 +4678,11 @@ def blank_code(src_text, backticks=False, rust=False):
             if i < n:
                 res.append(" ")
                 i += 1
-        elif not rust and c == chr(39) and _digit_separator(src_text, i):
+        elif not rust and c == chr(39) and _digit_separator(src_text, i, token):
             # Séparateur de chiffres C++14 (`1'000`) : pas un littéral. Le prendre pour une
             # ouverture blanchissait la suite jusqu'à la prochaine apostrophe, et les fonctions
             # suivantes disparaissaient de l'extraction (« aucune fonction exploitable »).
+            token_start = token
             res.append(c)
             i += 1
         elif c == '"' or (not rust and c == chr(39)):
@@ -4679,6 +4704,8 @@ def blank_code(src_text, backticks=False, rust=False):
                 res.append(" ")
                 i += 1
         else:
+            if c.isalnum() or c == "_":
+                token_start = i if token is None else token
             res.append(c)
             i += 1
     return "".join(res)

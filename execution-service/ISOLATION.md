@@ -24,7 +24,9 @@ Le **harnais du prof reste identique**. À l'assemblage, `CodeAssembler` produit
 
 Le noteur appelle les proxys → RPC synchrone → le serveur exécute → renvoie la valeur → le noteur
 tranche le harnais et **émet le nonce s'il réussit**. Comme le code étudiant ne tourne **jamais** dans
-le noteur, il ne peut ni lire le nonce ni forger le verdict : **passer = produire les bonnes sorties**.
+le noteur, il ne peut ni lire le nonce ni forger le verdict par sa sortie : **passer = produire les
+bonnes sorties**. Cette garantie s'arrête à la séparation des **processus** : noteur et serveur
+tournent sous le **même UID** (cf. « Résiduel connu »), contrairement aux compilés.
 
 Détails : identifiants internes préfixés `__moodit_` (pas de collision) ; en Python le proxy de classe
 référence le RPC via `globals()["__moodit_rpc"]` (le *name mangling* renommerait `__moodit_rpc`).
@@ -34,7 +36,8 @@ référence le RPC via `globals()["__moodit_rpc"]` (le *name mangling* renommera
 Ces points reposent sur des comportements précis de l'environnement. **Un test d'intégration réel les
 couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à jour.
 
-- **Sous-processus autorisés** dans le sandbox isolate (le noteur lance le serveur). *Spike validé.*
+- **Sous-processus autorisés** dans le conteneur runner (le noteur lance le serveur), dans la limite
+  de `--pids-limit`.
 - **`child.stdout._handle.fd`** (interne Node non documenté) pour le `fs.readSync` **synchrone** en JS/TS/JSX.
 - **`process.mainModule`** : vecteur d'évasion en JSX **corrigé** par l'isolation (le composant ne peut
   plus atteindre le nonce). À re-tester si le runtime React/Node change.
@@ -130,7 +133,14 @@ L'isolation ramène la triche à « **produire les bonnes sorties = résoudre** 
 étudiant peut polluer son canal** : un étudiant qui **connaît déjà l'attendu** (en lisant des cas de
 test visibles) pourrait forger une réponse. Ce n'est **pas** un laissez-passer (il faut connaître ou
 calculer la bonne sortie) — c'est le problème classique des **cas de test connus**, atténué par des cas
-**cachés**. Le noteur (nonce + attendus) reste, lui, hors de portée du code étudiant.
+**cachés**.
+
+**UID partagé hors compilés.** Pour les interprétés, JSX/TSX, SQL et les vues, le mode « exec » du
+runner exécute noteur et code soumis **sous le même UID**. Le code étudiant ne tourne pas dans le
+noteur et ne reçoit pas le nonce, mais un étudiant déterminé peut encore inspecter les processus
+voisins, selon la politique `ptrace` de l'hôte. La propriété « **verdict non falsifiable** » ne vaut
+donc que pour les six langages compilés avec un harnais booléen, qui séparent les UID (cf.
+`CodeAssembler.assembleBashRpc` et `docker/runners/README.md`).
 
 ## Tester
 

@@ -250,8 +250,11 @@ public class DockerEvaluator {
             // Qualification bornee a huit segments : le moteur Java repete un groupe par recursion.
             case "java" -> java.util.regex.Pattern.compile(
                     "@\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
+            // Un ATTRIBUT, pas un indexeur : `tab[Test]`, `F()[Test]` ou `d?[Test]` dans un corps
+            // booléen légitime faisait refuser toute la question. Le crochet d'un attribut ne
+            // suit jamais un identifiant, une parenthèse fermante ni un `?`.
             case "csharp" -> java.util.regex.Pattern.compile(
-                    "\\[\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+                    "(?<![\\w)?])\\[\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
             case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
             case "rust" -> java.util.regex.Pattern.compile(
                     "#\\s*\\[\\s*(?:\\w+\\s*::\\s*){0,8}test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");

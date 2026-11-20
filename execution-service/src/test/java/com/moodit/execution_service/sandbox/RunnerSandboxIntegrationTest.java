@@ -131,9 +131,20 @@ class RunnerSandboxIntegrationTest {
                     return 0
                 }
 
+                // TÉMOIN, comme pour la sonde réseau : un programme qui ne compile plus rend
+                // lui aussi un cas faux.
+                func temoin(n int) int { return n * 2 }
+
                 func main() {}
                 """;
-        assertThat(evaluate("Go", probe, GO_HARNESS).get(0).passed()).isFalse();
+        List<TestResult> r = evaluator.evaluate("Go", probe, List.of(
+                new TestCaseInput("exécution depuis /tmp", GO_HARNESS, 1),
+                new TestCaseInput("témoin", "return temoin(5) == 10", 1)), null);
+        assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(1).passed())
+                .withFailMessage("le témoin doit réussir, sinon la sonde noexec ne prouve rien "
+                        + "(le programme n'a pas compilé ou n'a pas tourné) : %s", r.get(1))
+                .isTrue();
     }
 
     // ─────────────────────────── Budgets et robustesse ───────────────────────────

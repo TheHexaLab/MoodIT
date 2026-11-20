@@ -1713,14 +1713,23 @@ class RpcGradingIntegrationTest {
         // c'etait le harnais ET le nonce dans le binaire note. La compilation etudiante tourne
         // sous SON UID dans un chantier qui ne contient que son code : l'inclusion echoue, le
         // cas est refuse, rien ne fuit.
-        assertThat(note("Rust", "copie(1) == 1", """
-                const G: &str = include_str!("noteur.rs");
+        // Le chemin vise le noteur LA OU IL EST (`../`, a cote du chantier etu_build) : avec le
+        // nom nu, le fichier n'existait pour personne et le test passait meme compile par root.
+        // Chaque sonde a son TEMOIN, identique sans l'inclusion, qui doit reussir.
+        String rust = """
+                const G: &str = include_str!("../noteur.rs");
                 fn copie(n: i32) -> i32 { if G.is_empty() { n } else { n } }
-                """).passed()).isFalse();
-        assertThat(note("C", "return doubler(2) == 4;", """
-                __asm__(".section .rodata\\n g: .incbin \\\"noteur.c\\\"\\n .previous");
+                """;
+        assertThat(note("Rust", "copie(1) == 1", rust).passed()).isFalse();
+        assertThat(note("Rust", "copie(1) == 1",
+                rust.replace("include_str!(\"../noteur.rs\")", "\"\"")).passed()).isTrue();
+        String c = """
+                __asm__(".section .rodata\\n g: .incbin \\\"../noteur.c\\\"\\n .previous");
                 int doubler(int n) { return n * 2; }
-                """).passed()).isFalse();
+                """;
+        assertThat(note("C", "return doubler(2) == 4;", c).passed()).isFalse();
+        assertThat(note("C", "return doubler(2) == 4;",
+                c.replace(" g: .incbin \\\"../noteur.c\\\"\\n", "")).passed()).isTrue();
     }
 
     @Test
@@ -1728,11 +1737,18 @@ class RpcGradingIntegrationTest {
         // CGO_ENABLED=0 du Dockerfile ne survivait PAS au env= de Popen : cgo redevenait actif
         // et son preambule C savait inclure ../noteur/noteur.go. La variable est posee dans
         // l'environnement de build lui-meme ; un import "C" doit donc echouer a compiler.
-        assertThat(note("Go", "return doubler(2) == 4", """
+        // Avec sa clause `package` : sans elle le fichier ne compilait dans aucun cas, cgo actif
+        // ou non, et le test ne prouvait rien. TEMOIN : le meme code sans l'import reussit.
+        String go = """
+                package main
+
                 import "C"
 
                 func doubler(n int) int { return n * 2 }
-                """).passed()).isFalse();
+                """;
+        assertThat(note("Go", "return doubler(2) == 4", go).passed()).isFalse();
+        assertThat(note("Go", "return doubler(2) == 4",
+                go.replace("import \"C\"\n", "")).passed()).isTrue();
     }
 
     // ──────────────────── 2. Forger le résultat : plus aucun canal ────────────────────
