@@ -2071,6 +2071,47 @@ class Review246bTest(unittest.TestCase):
                      "pub fn main(n: i32) {}\n", "fn f() { main(); }\n"):
             self.assertEqual(supervisor.rust_without_main(kept), kept)
 
+    def test_rust_only_the_top_level_main_is_renamed(self):
+        # Un `fn main()` nu de sous-module, d'impl ou de trait était renommé sans que ses appels
+        # le soient : le code soumis ne compilait plus, 0 sur une réponse juste.
+        for kept in ("mod outils {\n    fn main() -> i32 { 2 }\n    pub fn deux() -> i32 { main() }\n}\n",
+                     "impl App for A {\n    fn main() -> i32 { 2 }\n}\n",
+                     "trait App {\n    fn main() -> i32;\n}\n",
+                     "mod a {\n    mod b {\n        pub fn main() {}\n    }\n}\n"):
+            self.assertEqual(supervisor.rust_without_main(kept), kept)
+        # Le `main` de premier niveau qui suit un sous-module est renommé, lui, même indenté et
+        # même après une accolade en littéral ou en commentaire.
+        source = ("mod outils {\n    fn main() -> i32 { 2 }\n}\n"
+                  "const C: char = '{'; // {\n"
+                  "  pub fn main() { }\n")
+        out = supervisor.rust_without_main(source)
+        self.assertIn("    fn main() -> i32 { 2 }", out)
+        self.assertIn("  pub fn __moodit_student_main() { }", out)
+
+    def test_apostrophe_in_a_directive_does_not_blank_the_rest(self):
+        # L'apostrophe d'une directive ouvrait un littéral de caractère jamais fermé : tout le
+        # reste du fichier était blanchi, « aucune méthode exploitable » sur une réponse juste.
+        cs = ("public class Solution {\n"
+              "    #region Méthodes d'aide\n"
+              "    public static int Doubler(int n) { return n * 2; }\n"
+              "    #endregion\n"
+              "}\n")
+        cleaned = supervisor.cs_strip_comments(cs)
+        self.assertNotIn("aide", cleaned)
+        self.assertEqual(cleaned.count("\n"), cs.count("\n"))
+        self.assertEqual([n for _, n, _ in supervisor.cs_signatures(cleaned)], ["Doubler"])
+        # Un `#` qui n'ouvre pas la ligne n'est pas une directive.
+        self.assertIn("int b = 2;", supervisor.cs_strip_comments('var s = "#"; int b = 2;\n'))
+        # C et C++ : même défaut, le littéral de caractère s'arrête à la fin de sa ligne.
+        c = ("#pragma message(\"l'entrée\")\n"
+             "#error l'entrée manque\n"
+             "int doubler(int n) { return n * 2; }\n")
+        bare = supervisor.blank_code(c)
+        self.assertEqual(bare.count("\n"), c.count("\n"))
+        self.assertEqual([n for _, n, _ in supervisor.c_signatures(bare)], ["doubler"])
+        # Un vrai littéral de caractère reste blanchi.
+        self.assertNotIn("{", supervisor.blank_code("char c = '{'; char d = '\\'';"))
+
     def test_python_grader_runs_isolated_from_its_directory(self):
         # Sans -I, sys.path[0] = /box/src, inscriptible par le code soumis : un module déposé
         # là était importé PAR LE NOTEUR (via l'`import numpy` du harnais) et y lisait le nonce.

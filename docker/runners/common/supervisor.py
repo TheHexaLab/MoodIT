@@ -3914,20 +3914,31 @@ fn main() {
 ''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
 
 
-# `main` nu (toute indentation, comme avant), ou précédé de modificateurs EN DÉBUT DE LIGNE :
-# `pub fn main()` n'était pas renommé, le `fn main()` du serveur le doublait (E0428), et une
-# réponse juste était notée 0 avec une erreur qui désigne du code généré. La forme à
-# modificateurs n'est prise qu'en colonne 0 : un `pub fn main` indenté est celui d'un
-# sous-module, que le code soumis peut appeler (`outils::main()`) — le renommer le casserait.
+# `main` en début de ligne, nu ou précédé de modificateurs : `pub fn main()` n'était pas
+# renommé, le `fn main()` du serveur le doublait (E0428), et une réponse juste était notée 0
+# avec une erreur qui désigne du code généré.
 RUST_MAIN = re.compile(
-    r"^([ \t]*|(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
+    r"^([ \t]*(?:pub(?:\s*\([^()]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*)fn\s+main\s*\(\s*\)",
     re.M)
 
 
 def rust_without_main(source):
-    """Code étudiant dont le `main` est renommé : le serveur fournit le point d'entrée. PURE
-    (testée). Les modificateurs sont conservés."""
-    return RUST_MAIN.sub(r"\1fn __moodit_student_main()", source or "")
+    """Code étudiant dont le `main` de PREMIER NIVEAU est renommé : le serveur fournit le point
+    d'entrée. PURE (testée). Les modificateurs sont conservés.
+
+    Seul le `main` de profondeur 0 double celui du serveur. Celui d'un sous-module, d'un `impl`
+    ou d'un trait est un nom que le code soumis appelle (`outils::main()`, `A::main()`, `main()`
+    depuis le module) : le renommer sans réécrire ses appels cassait la compilation d'une
+    réponse juste. La profondeur vient de code_depths, comme pour rust_signatures."""
+    text = source or ""
+    depths = code_depths(text)
+
+    def rename(hit):
+        if depths[hit.end(1)] != 0:
+            return hit.group(0)
+        return hit.group(1) + "fn __moodit_student_main()"
+
+    return RUST_MAIN.sub(rename, text)
 
 
 # ─────────────────── C# : bouchon et aiguillage TYPÉS, protocole texte ───────────────────
@@ -4516,14 +4527,18 @@ def blank_code(src_text, backticks=False, rust=False):
             quote = c
             res.append(" ")
             i += 1
-            while i < n and src_text[i] != quote:
-                if src_text[i] == chr(92) and i + 1 < n:
+            # Un littéral de caractère ne passe pas la fin de ligne : l'apostrophe d'une
+            # directive (`#error l'entrée…`, `#pragma message`) blanchissait sinon tout le
+            # fichier jusqu'à l'apostrophe suivante, et les fonctions disparaissaient de
+            # l'extraction (« aucune fonction exploitable » sur une réponse juste).
+            while i < n and src_text[i] != quote and not (quote == chr(39) and src_text[i] == chr(10)):
+                if src_text[i] == chr(92) and i + 1 < n and src_text[i + 1] != chr(10):
                     res.append("  ")
                     i += 2
                 else:
                     res.append(src_text[i] if src_text[i] == chr(10) else " ")
                     i += 1
-            if i < n:
+            if i < n and src_text[i] == quote:
                 res.append(" ")
                 i += 1
         else:
@@ -4546,7 +4561,12 @@ def cs_strip_comments(src_text):
     src_text = src_text or ""
     while i < n:
         two_chars = src_text[i:i + 2]
-        if two_chars == "//":
+        # Une directive (`#region Méthodes d'aide`, `#if`, `#pragma`) va jusqu'à la fin de sa
+        # ligne et ne porte aucun littéral : son apostrophe ouvrait un littéral de caractère
+        # jamais fermé, tout le reste du fichier était blanchi, et une réponse juste rendait
+        # « Aucune méthode exploitable ».
+        directive = src_text[i] == "#" and not src_text[src_text.rfind(chr(10), 0, i) + 1:i].strip()
+        if two_chars == "//" or directive:
             while i < n and src_text[i] != chr(10):
                 res.append(" ")
                 i += 1

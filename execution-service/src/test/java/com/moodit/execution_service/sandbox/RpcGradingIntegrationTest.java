@@ -122,6 +122,56 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void rust_private_main_of_a_submodule_is_graded() {
+        // Revue #246 : un `fn main()` nu de sous-module était renommé sans que son appel le
+        // soit — échec de compilation et 0 sur une réponse juste.
+        String h = "doubler(5) == 10";
+        String code = """
+                mod outils {
+                    fn main() -> i32 { 2 }
+                    pub fn deux() -> i32 { main() }
+                }
+
+                pub fn doubler(n: i32) -> i32 { n * outils::deux() }
+                """;
+        TestResult right = note("Rust", h, code);
+        assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
+        assertThat(note("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
+    }
+
+    @Test
+    void csharp_region_with_an_apostrophe_is_graded() {
+        // Revue #246 : l'apostrophe d'un `#region` blanchissait le reste du fichier pour
+        // l'extraction — « Aucune méthode exploitable » et 0 sur une réponse juste.
+        String h = "return Solution.Doubler(5) == 10;";
+        String code = """
+                public class Solution {
+                    #region Méthodes d'aide
+                    public static int Doubler(int n) { return n * 2; }
+                    #endregion
+                }
+                """;
+        TestResult right = note("C#", h, code);
+        assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
+        assertThat(note("C#", h, code.replace("n * 2", "0")).passed()).isFalse();
+    }
+
+    @Test
+    void c_error_directive_with_an_apostrophe_is_graded() {
+        // Même défaut en C : l'apostrophe d'une directive ouvrait un littéral jamais fermé.
+        String h = "return doubler(5) == 10;";
+        String code = """
+                #ifdef JAMAIS_DEFINI
+                #error l'entrée manque
+                #endif
+                int doubler(int n) { return n * 2; }
+                """;
+        TestResult right = note("C", h, code);
+        assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
+        assertThat(note("C", h, code.replace("n * 2", "0")).passed()).isFalse();
+    }
+
+    @Test
     void csharp_right_then_wrong_answer() {
         String h = "return Solution.Doubler(5) == 10;";
         assertThat(note("C#", h, """
