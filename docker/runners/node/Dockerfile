@@ -2,7 +2,7 @@
 # langages « données/vues » (JSON, HTML, JSX, TSX — leurs bundles vendor arrivent avec le job).
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d
 
-# typescript : tarball vérifié par EMPREINTE (#24, comme le jar JUnit et les NuGet) — une
+# typescript : tarball vérifié par EMPREINTE (#24) — une
 # version npm peut être republiée, le hash non. Mise à jour : `npm pack typescript@<v>` puis
 # `sha256sum` du .tgz.
 # Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :

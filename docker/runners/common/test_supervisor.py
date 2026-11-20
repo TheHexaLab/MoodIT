@@ -1617,7 +1617,11 @@ class Review27Test(unittest.TestCase):
                    "\n  static int a(" * (n // 16), "struct a {" * (n // 10),
                    "class a " * (n // 8), "package a" * (n // 9), "impl a " * (n // 7),
                    # Une ancre ^ par LIGNE : sur une seule ligne, aucun motif ancre ne repart.
-                   "\nint a(" * (n // 7), "\nfn a(" * (n // 6), "\nstruct a {" * (n // 11)]
+                   "\nint a(" * (n // 7), "\nfn a(" * (n // 6), "\nstruct a {" * (n // 11),
+                   # Revue #246 : ouvertures jamais fermees (template C++, groupe Go, espace
+                   # de noms, constructeur C#).
+                   "template<" * (n // 9), "\nvar (" * (n // 6), "namespace a " * (n // 12),
+                   "\na(" * (n // 3)]
         patterns = [(ident, m) for ident, m in vars(supervisor).items() if isinstance(m, re.Pattern)]
         patterns.append(("CS_CTOR_TPL", re.compile(supervisor.CS_CTOR_TPL % "R", re.M)))
         slow = []
@@ -2850,6 +2854,151 @@ class SqliteExecTest(unittest.TestCase):
         self.assertEqual(run_cmd, ["sqlite3", "-safe", "-bail", "-batch", ":memory:"])
         # Le fichier n'est plus ouvert par le processus lui-meme (redirection d'un sh).
         self.assertNotIn("main.sql", " ".join(run_cmd))
+
+
+class Review246ExtractionTest(unittest.TestCase):
+    """Revue #246 : extraction bornee en temps (C++, Go, C#), espace de noms C++ nomme, et
+    processus soumis designe a l'OOM avant le superviseur."""
+
+    NL = chr(10)
+
+    def test_extraction_stays_linear_on_hostile_sources(self):
+        # Chaque entree tenait le superviseur de 12 s a plus de 5 min PAR CAS, avant toute
+        # compilation et hors de tout delai (conteneur tue au mur, 502, tentative supprimee).
+        # Lineaire, chacune repond en une fraction de seconde ; le seuil laisse une marge large.
+        NL = self.NL
+        cases = [
+            ("template C++", lambda s: supervisor.cpp_object_api(s),
+             "template<" * 3000 + NL + ("class K : B" + NL) * 6000),
+            ("template C++ ferme", lambda s: supervisor.cpp_object_api(s),
+             "template<T>" * 4000 + NL + ("class K : B" + NL) * 4000),
+            ("classes C++ vides", lambda s: (supervisor.cpp_object_api(s),
+                                             supervisor.c_signatures(s, cpp=True)),
+             "".join("class K%d {};%sint f%d(int a) { return a; }%s" % (i, NL, i, NL)
+                     for i in range(4000))),
+            ("espaces de noms C++", lambda s: supervisor.c_signatures(s, cpp=True),
+             ("namespace a {" + NL) * 8000),
+            ("groupes Go jamais fermes", supervisor.go_package_names, ("var (" + NL) * 16000),
+            ("groupes Go fermes", supervisor.go_package_names,
+             ("var (" + NL + "a = 1" + NL + ")" + NL) * 8000),
+            ("classes C# vides", supervisor.cs_has_object_api,
+             "".join("class C%d { }%s" % (i, NL) for i in range(8000))),
+            ("classes C# homonymes imbriquees",
+             lambda s: (supervisor.cs_has_object_api(s), supervisor.cs_object_api(s, "X")),
+             "class X {" * 10000),
+            ("en-tetes C# sans corps", supervisor.cs_has_object_api, "class a " * 12000),
+        ]
+        slow = []
+        for label, analysis, src_text in cases:
+            begin = time.perf_counter()
+            analysis(src_text)
+            if time.perf_counter() - begin > 5.0:
+                slow.append(label)
+        self.assertEqual(slow, [])
+
+    def test_cpp_template_head_only_right_before_the_class(self):
+        NL = self.NL
+        plain = NL.join(["class R {", "public:", "    R(int a) { }",
+                         "    int f() { return 1; }", "};", ""])
+        self.assertEqual([c[0] for c in supervisor.cpp_object_api(plain)], ["R"])
+        # Sur la ligne precedente, sur plusieurs lignes, ou apres une directive sans `;`.
+        for head in ("template <typename T>" + NL,
+                     "template <typename T," + NL + "          typename U>" + NL + NL,
+                     "#include <vector>" + NL + "template<class T> "+ NL):
+            self.assertEqual(supervisor.cpp_object_api(head + plain), [], head)
+        # Un template TERMINE avant la classe (fonction, alias) ne la concerne pas, ni un `>`
+        # sans `template` depuis la derniere instruction.
+        for before in ("template <typename T> T ident(T x) { return x; }" + NL,
+                       "template <typename T> using V = T;" + NL,
+                       "#include <vector>" + NL):
+            self.assertEqual([c[0] for c in supervisor.cpp_object_api(before + plain)],
+                             ["R"], before)
+
+    def test_cpp_named_namespace_members_are_not_proxied(self):
+        NL = self.NL
+        src = NL.join(["namespace util {", "int carre(int x) { return x * x; }",
+                       "class Aide {", "public:", "    Aide() { }",
+                       "    int f() { return 1; }", "};", "}",
+                       "namespace a::b {", "int profond(int x) { return x; }", "}",
+                       "namespace {", "int cache(int x) { return x; }", "}",
+                       "using namespace std;",
+                       "int somme_carres(int a, int b) { return util::carre(a) + util::carre(b); }",
+                       "class Rect {", "public:", "    Rect(int c) { }",
+                       "    int aire() { return 1; }", "};", ""])
+        # `::carre` et `::Aide` n'existent pas : le serveur genere ne compilait plus, sur une
+        # reponse juste. L'espace ANONYME, lui, reste atteint par `::cache`.
+        self.assertEqual([m[1] for m in supervisor.c_signatures(src, cpp=True)],
+                         ["cache", "somme_carres"])
+        self.assertEqual([c[0] for c in supervisor.cpp_object_api(src)], ["Rect"])
+        server = supervisor.c_server_source(supervisor.c_signatures(src, cpp=True), "", cpp=True)
+        self.assertNotIn("carre(moodit_a0)", server.replace("somme_carres(", ""))
+        # En C, `namespace` n'est pas un mot du langage : rien n'est ecarte.
+        self.assertEqual([m[1] for m in supervisor.c_signatures(src, cpp=False)],
+                         ["carre", "f", "profond", "cache", "somme_carres", "aire"])
+
+    def test_covered_is_strict_and_handles_nesting(self):
+        cover = supervisor.span_cover([(10, 50), (20, 30), (60, 70)])
+        self.assertEqual([p for p in (5, 10, 11, 25, 40, 50, 55, 60, 65, 70, 80)
+                          if supervisor.covered(cover, p)], [11, 25, 40, 65])
+        self.assertFalse(supervisor.covered(supervisor.span_cover([]), 3))
+
+    def test_go_group_bodies(self):
+        NL = self.NL
+        src = NL.join(["var (", "    a = 1", "    b, c int", ")", "const (", "", "    Pi = 3", ")",
+                       "type (", "    T int", ")", "func f() {", "    var (", "        x = 1",
+                       "    )", "}", ""])
+        self.assertEqual(supervisor.go_package_names(src),
+                         ["f", "a", "b", "c", "Pi", "T"])
+        # Groupe jamais ferme : rien n'en sort, et rien ne leve.
+        self.assertEqual(supervisor.go_group_bodies("var (" + NL + "a = 1" + NL), [])
+        self.assertEqual(supervisor.go_group_bodies(None), [])
+
+    def test_cs_object_classes(self):
+        NL = self.NL
+        nested = NL.join(["namespace Quiz {", "    class Aide { }", "    class Rect;",
+                          "    class Carre {",
+                          "        class Interne { public int G() { return 1; } }",
+                          "        public Carre(int c) { }", "    }",
+                          "    class Rect {", "        int l;",
+                          "        public Rect(int l) { this.l = l; }",
+                          "        public double Aire() { return l; }",
+                          "        public int Cote() { return l; }", "    }", "}",
+                          "class Pile<T> { public int Taille() { return 0; } }", ""])
+        expected = [
+            ("class Solution { static void Main() { } }", []),
+            ("class Rect { public int Aire() { return 1; } }", ["Rect"]),
+            ("class Rect { public Rect(int c) { } public int Aire() { return 1; } }", ["Rect"]),
+            # Constructeur aux types non transportables : pas d'API objet.
+            ("class Rect { public Rect(int[] c) { } public int Aire() { return 1; } }", []),
+            # Seulement une statique, ou seulement Main.
+            ("class S { public static int F(int n) { return n; } }", []),
+            ("class S { public int Main() { return 0; } }", []),
+            # Aide et Carre n'ont aucune methode a elles (G est a Interne, imbriquee) ; la
+            # declaration anticipee `class Rect;` ne prend pas le corps de Carre.
+            (nested, ["Rect"]),
+        ]
+        for src, classes in expected:
+            self.assertEqual(supervisor.cs_object_classes(src), classes, src)
+            self.assertEqual(supervisor.cs_has_object_api(src), bool(classes), src)
+            # Meme reponse que cs_object_api, classe par classe.
+            for ident in supervisor.cs_top_level_classes(src):
+                ctors, instance = supervisor.cs_object_api(src, ident)
+                self.assertEqual(bool(ctors and instance), ident in classes, (src, ident))
+        # Membres DIRECTS seulement, dans l'ordre du texte ; le resultat memoise n'est pas
+        # expose (une liste de types modifiee par l'appelant ne change pas l'appel suivant).
+        self.assertEqual(supervisor.cs_object_api(nested, "Rect"),
+                         ([["int"]], [("double", "Aire", []), ("int", "Cote", [])]))
+        self.assertEqual(supervisor.cs_object_api(nested, "Carre"), ([["int"]], []))
+        self.assertEqual(supervisor.cs_object_api(nested, "Interne")[1], [("int", "G", [])])
+        supervisor.cs_object_api(nested, "Rect")[1][0][2].append("int")
+        self.assertEqual(supervisor.cs_object_api(nested, "Rect")[1][0], ("double", "Aire", []))
+        self.assertEqual(supervisor.cs_object_classes(None), [])
+
+    @unittest.skipUnless(os.path.exists("/proc/self/oom_score_adj"), "Linux ; couvert en CI")
+    def test_student_process_is_the_oom_victim(self):
+        r = subprocess.run(["cat", "/proc/self/oom_score_adj"], capture_output=True, text=True,
+                           preexec_fn=supervisor.mark_oom_victim)
+        self.assertEqual(r.stdout.strip(), "1000")
 
 
 if __name__ == "__main__":

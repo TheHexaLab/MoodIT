@@ -234,8 +234,29 @@ def randomize_student_uid():
     STUDENT_GID = uid
 
 
+def mark_oom_victim():
+    """Désigne le processus courant comme PREMIÈRE victime de l'OOM du cgroup. Testée (POSIX).
+
+    Le superviseur est le PID 1 du conteneur : si l'OOM le choisit (il vise la tâche la plus
+    lourde, et de petits processus soumis qui remplissent les tmpfs pèsent chacun moins que
+    lui), le conteneur meurt sans JSON — panne, 502, tentative supprimée et rejouable à
+    volonté. Avec ce réglage, c'est le code soumis qui est tué, et le verdict reste imputable.
+
+    AVANT setuid : après, /proc/self appartient à root et l'écriture est refusée. Monter la
+    valeur ne demande aucune capacité ; elle est héritée par les descendants. LIMITE ASSUMÉE :
+    sans CAP_SYS_RESOURCE (que le conteneur n'a pas), le plancher n'est pas relevé, et un code
+    qui le sait peut redescendre sa propre valeur — le réglage couvre le dépassement de
+    mémoire ordinaire, pas un contournement délibéré. Au mieux : sans /proc, rien ne change."""
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write("1000")
+    except OSError:
+        pass
+
+
 def demote_student():
     """preexec_fn du processus étudiant : UID dédié, groupe de processus, limites dures."""
+    mark_oom_victim()
     os.setsid()
     os.setgroups([])
     os.setgid(STUDENT_GID)
@@ -438,12 +459,16 @@ def _survivor_pass():
         if not pid.isdigit():
             continue
         try:
-            with open("/proc/" + pid + "/status", "r") as f:
+            # errors="replace" : le nom du programme (octets libres, choisis par le code
+            # soumis) figure dans ces fichiers. Non UTF-8, il levait UnicodeDecodeError — une
+            # ValueError, absorbée plus bas : le processus n'était ni compté ni récolté.
+            with open("/proc/" + pid + "/status", "r", errors="replace") as f:
                 if real_uid(f.read()) != str(STUDENT_UID):
                     continue
             states = []
             for tid in os.listdir("/proc/" + pid + "/task"):
-                with open("/proc/" + pid + "/task/" + tid + "/stat", "r") as f:
+                with open("/proc/" + pid + "/task/" + tid + "/stat", "r",
+                          errors="replace") as f:
                     states.append(task_state(f.read()))
         except (OSError, ValueError):
             continue
@@ -1938,7 +1963,30 @@ def go_hidden_names(names, harness_code):
 
 
 GO_PACKAGE_DECL = re.compile(r"^(?:func|type|var|const)\s+(\w+)", re.M)
-GO_PACKAGE_GROUP = re.compile(r"^(?:var|const|type)\s*\(\s*\n(.*?)^\)", re.M | re.S)
+GO_GROUP_OPEN = re.compile(r"^(?:var|const|type)\s*\(\s*\n", re.M)
+GO_GROUP_CLOSE = re.compile(r"^\)", re.M)
+
+
+def go_group_bodies(source):
+    """Corps des déclarations groupées (`var (` … `)` en début de ligne). PURE (testée).
+
+    En DEUX recherches enchaînées, pas en un seul motif `ouverture(.*?)^\\)` : celui-ci
+    repartait de chaque ouverture jusqu'à la fin du texte quand aucune `)` ne la fermait —
+    100 Ko de `var (` prenaient 12 s par cas, hors de tout délai. Ici, la première ouverture
+    sans fermeture arrête tout : aucune des suivantes ne peut se fermer non plus."""
+    src_text = source or ""
+    bodies = []
+    position = 0
+    while True:
+        opened = GO_GROUP_OPEN.search(src_text, position)
+        if not opened:
+            break
+        closed = GO_GROUP_CLOSE.search(src_text, opened.end())
+        if not closed:
+            break
+        bodies.append(src_text[opened.end():closed.start()])
+        position = closed.end()
+    return bodies
 
 
 def go_package_names(source):
@@ -1947,7 +1995,7 @@ def go_package_names(source):
     Fonctions de toute signature, types, variables et constantes, formes groupées comprises
     (`var ( a = 1 ; b, c int )`). Une méthode (`func (r T) f()`) n'est pas un nom de paquet."""
     names = list(GO_PACKAGE_DECL.findall(source or ""))
-    for body in GO_PACKAGE_GROUP.findall(source or ""):
+    for body in go_group_bodies(source):
         for line in body.splitlines():
             hit = re.match(r"\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)", line)
             if hit:
@@ -2766,17 +2814,55 @@ def cpp_class_spans(source):
     return spans
 
 
+# Espace de noms NOMMÉ (`namespace util {`, `namespace a::b {`). L'anonyme (`namespace {`) n'en
+# est pas : ses membres se nomment sans qualification, `::f` les atteint.
+CPP_NAMESPACE = re.compile(r"\bnamespace\s+\w+(?:\s*::\s*\w+)*\s*\{")
+
+
+def cpp_namespace_spans(source):
+    """Plages (début, fin) des corps d'espaces de noms NOMMÉS en C++. FONCTION PURE (testée).
+
+    Une fonction ou une classe qui y vit ne s'écrit que `util::f` : le serveur généré, qui
+    l'appelait `::f`, ne compilait plus — « Échec de compilation » sur tous les cas d'une
+    réponse juste, avec une erreur dans du code que l'étudiant n'a pas écrit. Elle n'est donc
+    pas proxifiée (comme une fonction imbriquée en Rust) ; le reste du fichier l'est toujours."""
+    src_text = source or ""
+    return [(m.end() - 1, block_end(src_text, m.end() - 1))
+            for m in CPP_NAMESPACE.finditer(src_text)]
+
+
+def span_cover(spans):
+    """Index de plages pour `covered` : (débuts triés, plus grande fin atteinte). PURE (testée)."""
+    ordered = sorted(spans)
+    reach, furthest = [], -1
+    for _, finish in ordered:
+        furthest = max(furthest, finish)
+        reach.append(furthest)
+    return [begin for begin, _ in ordered], reach
+
+
+def covered(cover, position):
+    """La position est-elle STRICTEMENT dans l'une des plages de l'index ? PURE (testée).
+
+    Par dichotomie : comparer chaque déclaration à chaque plage coûtait le produit des deux —
+    des milliers de classes vides tenaient l'extraction plusieurs secondes par cas."""
+    begins, reach = cover
+    k = bisect.bisect_left(begins, position)
+    return k > 0 and reach[k - 1] > position
+
+
 def c_signatures(source, cpp=False):
     """Fonctions de premier niveau du code étudiant → [(retour, nom, [types])]. PURE (testée).
 
     Seuls int/long/double sont marshalés dans ce jalon ; `main` est écartée, ainsi que — en C++ —
-    tout ce qui vit dans un corps de classe (ce sont des méthodes, proxifiées par poignée). Une
-    signature hors liste n'est pas proxifiée : le harnais qui l'appelle ne compilera pas (message
-    au prof, jamais un faux verdict)."""
-    spans = cpp_class_spans(source) if cpp else []
+    tout ce qui vit dans un corps de classe (ce sont des méthodes, proxifiées par poignée) ou
+    dans un espace de noms nommé (cf. cpp_namespace_spans). Une signature hors liste n'est pas
+    proxifiée : le harnais qui l'appelle ne compilera pas (message au prof, jamais un faux
+    verdict)."""
+    cover = span_cover(cpp_class_spans(source) + cpp_namespace_spans(source) if cpp else [])
     hits = []
     for hit in C_FUNC.finditer(source or ""):
-        if any(begin <= hit.start() <= finish for begin, finish in spans):
+        if covered(cover, hit.start()):
             continue
         ret, ident, params = hit.group(1), hit.group(2), hit.group(3)
         ret = ret.replace(" ", "")
@@ -2792,8 +2878,32 @@ def c_signatures(source, cpp=False):
 
 CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
 CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
-# `template <...>` qui PRECEDE immediatement une declaration de classe (fin du texte avant elle).
-CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<[^{};]*>\s*\Z")
+# Debut d'un `template <...>`, et fins d'instruction ou de bloc : cf. cpp_follows_template.
+CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<")
+CPP_STATEMENT_END = re.compile(r"[{};]")
+
+
+def cpp_follows_template(src_text, position, heads, bounds):
+    """Un `template <...>` PRECEDE-t-il immediatement la declaration en `position` ? PURE (testee).
+
+    Vrai si le texte qui la precede finit par `>` et qu'un `template <` s'ouvre depuis la
+    derniere fin d'instruction ou de bloc. `heads` et `bounds` sont les positions, calculees UNE
+    fois, de CPP_TEMPLATE_HEAD et de CPP_STATEMENT_END.
+
+    L'ancien motif (`template\\s*<[^{};]*>\\s*\\Z`) etait relance sur tout le texte precedent, a
+    chaque classe, et repartait de chaque `template<` jusqu'au bout : cout CUBIQUE, dans le
+    superviseur, avant toute compilation et hors de tout delai. 39 Ko de `template<` suivis de
+    classes tenaient un cas plus de cinq minutes, le conteneur etait tue au mur (502,
+    tentative supprimee, place de correction occupee tout ce temps)."""
+    finish = position
+    while finish > 0 and src_text[finish - 1].isspace():
+        finish -= 1
+    if finish == 0 or src_text[finish - 1] != ">":
+        return False
+    k = bisect.bisect_left(bounds, position)
+    last_bound = bounds[k - 1] if k else -1
+    h = bisect.bisect_left(heads, position)
+    return h > 0 and heads[h - 1] > last_bound
 # Methode virtuelle PURE : `= 0;` apres la parenthese fermante (et ses qualificatifs).
 CPP_PURE_VIRTUAL = re.compile(r"\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?=\s*0\s*;")
 
@@ -2805,16 +2915,19 @@ def cpp_object_api(source):
     la section PUBLIQUE comptent (une `class` commence en privé, une `struct` en public)."""
     src_text = source or ""
     result = []
-    spans = cpp_class_spans(src_text)
+    cover = span_cover(cpp_class_spans(src_text) + cpp_namespace_spans(src_text))
+    heads = [m.start() for m in CPP_TEMPLATE_HEAD.finditer(src_text)]
+    bounds = [m.start() for m in CPP_STATEMENT_END.finditer(src_text)]
     for klass in CPP_CLASS.finditer(src_text):
         class_ident = klass.group(1)
         # Classe IMBRIQUEE : elle ne s'ecrit que `A::B`, et le serveur, qui la nomme `B`, ne
-        # compilait plus. Elle n'est pas proxifiee (ni ses membres pris pour ceux de A).
-        if any(d < klass.start() < f for d, f in spans):
+        # compilait plus. Elle n'est pas proxifiee (ni ses membres pris pour ceux de A). Meme
+        # chose pour une classe d'un espace de noms NOMME (`util::B`).
+        if covered(cover, klass.start()):
             continue
         # Classe TEMPLATE (`template <typename T>` sur la ligne precedente) : `std::vector<K>`
         # sans argument de template ne compile pas. Non proxifiee, comme les generiques en C#.
-        if CPP_TEMPLATE_HEAD.search(src_text[:klass.start()]):
+        if cpp_follows_template(src_text, klass.start(), heads, bounds):
             continue
         try:
             begin = src_text.index("{", klass.start())
@@ -4407,38 +4520,62 @@ def cs_object_api(source, klass):
     declares = re.findall(CS_CTOR_TPL % re.escape(klass), source or "", re.M)
     if not declares and re.search(r"\bclass\s+%s\b" % re.escape(klass), source or ""):
         ctors = [[]]
-    method_list = []
-    src_text = source or ""
-    for begin, finish, level in class_bodies(src_text, r"\bclass\s+%s\b" % re.escape(klass)):
-        depths = _closings(src_text)[0]
-        for m in CS_INSTANCE.finditer(src_text, begin, finish):
-            # Membre DIRECT de la classe visee : une autre classe du fichier (Carre a cote de
-            # Rectangle) ou une classe imbriquee donnaient des bouchons en double, que mcs
-            # refusait (CS0111) — une reponse juste notee 0.
-            if depths[m.start(2)] != level:
-                continue
-            types = param_types_of(m.group(3))
-            if types is not None and m.group(2) != "Main":
-                method_list.append((m.group(1), m.group(2), types))
+    method_list = [(ret, ident, list(types))
+                   for ret, ident, types in _cs_instance_members(source or "").get(klass, [])]
     return ctors, dedupe_signatures(method_list)
 
 
-def class_bodies(src_text, header_pattern):
-    """Corps des classes dont l'entete correspond : [(debut, fin, profondeur des membres)].
-    PURE (testee). Appariement LEXICAL (block_end) : une accolade en litteral ne compte pas."""
-    body = []
-    for header in re.finditer(header_pattern, src_text):
-        begin = src_text.find("{", header.end())
-        if begin < 0:
-            continue
-        # `class Rect;` (declaration anticipee) : l'accolade trouvee appartient a la suite.
-        if ";" in src_text[header.end():begin]:
-            continue
-        body.append((begin, block_end(src_text, begin), _closings(src_text)[0][begin] + 1))
-    return body
-
-
 CS_CLASS = re.compile(r"\bclass\s+(\w+)")
+
+
+@functools.lru_cache(maxsize=8)
+def _cs_instance_members(src_text):
+    """Methodes d'instance de CHAQUE classe du texte → {classe: [(retour, nom, [types])]}.
+    Memoise (le meme texte est relu a chaque cas) ; ne pas modifier le resultat.
+
+    Membre DIRECT de sa classe seulement : une autre classe du fichier (Carre a cote de
+    Rectangle) ou une classe imbriquee donnaient des bouchons en double, que mcs refusait
+    (CS0111) — une reponse juste notee 0.
+
+    En UNE passe : chaque methode est lue une fois, puis rattachee a la classe dont le corps
+    la contient, par l'accolade ouvrante de son bloc (dichotomie sur les accolades de sa
+    profondeur). Relire le corps de chaque classe coutait le produit des deux : 6 000 classes
+    vides prenaient 50 s par cas, et des classes homonymes imbriquees autant, dans le
+    superviseur et hors de tout delai."""
+    depths = _closings(src_text)[0]
+    # Accolade ouvrante du corps de chaque classe → son nom. Prochaine accolade et prochain
+    # point-virgule sont gardes d'un en-tete au suivant, au lieu d'etre recherches a chacun.
+    owner = {}
+    begin = semicolon = -1
+    for header in CS_CLASS.finditer(src_text):
+        if begin < header.end():
+            begin = src_text.find("{", header.end())
+            if begin < 0:
+                break            # plus aucune accolade : aucune des suivantes n'a de corps
+        if semicolon < header.end():
+            semicolon = src_text.find(";", header.end())
+            if semicolon < 0:
+                semicolon = len(src_text)
+        # `class Rect;` (declaration anticipee) : l'accolade trouvee appartient a la suite.
+        if semicolon > begin:
+            owner[begin] = header.group(1)
+    members = {}
+    if not owner:
+        return members
+    openings = {}
+    for i, c in enumerate(src_text):
+        if c == "{":
+            openings.setdefault(depths[i], []).append(i)
+    for m in CS_INSTANCE.finditer(src_text):
+        at_level = openings.get(depths[m.start(2)] - 1, [])
+        k = bisect.bisect_left(at_level, m.start(2))
+        klass = owner.get(at_level[k - 1]) if k else None
+        if klass is None or m.group(2) == "Main":
+            continue
+        types = _cs_param_types(m.group(3))
+        if types is not None:
+            members.setdefault(klass, []).append((m.group(1), m.group(2), types))
+    return members
 
 
 def _digit_separator(src_text, i):
@@ -4674,11 +4811,36 @@ def cs_has_object_api(source):
     """Une classe de PREMIER NIVEAU offre-t-elle un constructeur et une méthode d'instance ?
     PURE (testée). Indépendant du harnais, pour que canaris et cas réels soient refusés ou
     acceptés ensemble."""
-    for ident in cs_top_level_classes(source):
-        ctors, instance = cs_object_api(source, ident)
-        if ctors and instance:
-            return True
-    return False
+    return bool(cs_object_classes(source))
+
+
+# Constructeur de N'IMPORTE quelle classe : le gabarit de cs_object_api, le nom capturé.
+CS_CTOR_ANY = re.compile(CS_CTOR_TPL % r"(\w+)", re.M)
+
+
+def cs_object_classes(source):
+    """Classes de premier niveau qui offrent un constructeur ET une méthode d'instance, au sens
+    de cs_object_api. FONCTION PURE (testée).
+
+    Sans appeler cs_object_api pour chaque classe, qui relisait tout le texte à chaque fois
+    (cf. _cs_instance_members) : les constructeurs sont lus en une passe et rattachés par
+    leur nom, les méthodes viennent de la passe mémoïsée."""
+    src_text = source or ""
+    top_level = cs_top_level_classes(src_text)
+    if not top_level:
+        return []
+    wanted = set(top_level)
+    # Aucun constructeur déclaré vaut le constructeur par défaut ; sinon il en faut un aux
+    # types transportables.
+    declared, usable = set(), set()
+    for ident, params in CS_CTOR_ANY.findall(src_text):
+        if ident in wanted:
+            declared.add(ident)
+            if _cs_param_types(params) is not None:
+                usable.add(ident)
+    members = _cs_instance_members(src_text)
+    return [n for n in top_level
+            if (n in usable or n not in declared) and members.get(n)]
 
 
 def cs_student_classes(source, harness=""):
