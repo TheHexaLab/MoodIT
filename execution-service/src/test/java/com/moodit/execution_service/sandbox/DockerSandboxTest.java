@@ -635,10 +635,23 @@ class DockerSandboxTest {
         // Dès la FERMETURE du contexte (ContextClosedEvent, publié avant l'arrêt progressif du
         // serveur web), pas seulement à la destruction du bean : celle-ci vient après l'attente
         // des requêtes actives, que le SIGKILL de Docker (10 s) ne laisse pas finir.
+        // VRAI contexte Spring, avec un contexte ENFANT : la fermeture de l'enfant remonte au
+        // parent et ne doit rien arrêter (removeInFlight est sans retour) ; celle du parent, si.
         DockerSandbox sandbox = org.mockito.Mockito.mock(DockerSandbox.class);
-        new SandboxBeans().inFlightContainerCleanup(sandbox).onApplicationEvent(
-                new org.springframework.context.event.ContextClosedEvent(
-                        new org.springframework.context.support.GenericApplicationContext()));
+        var parent = new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+        parent.registerBean(DockerSandbox.class, () -> sandbox, definition -> definition.setDestroyMethodName(""));
+        parent.registerBean("inFlightContainerCleanup",
+                org.springframework.context.ApplicationListener.class,
+                () -> new SandboxBeans().inFlightContainerCleanup(sandbox, parent));
+        parent.refresh();
+        var child = new org.springframework.context.annotation.AnnotationConfigApplicationContext();
+        child.setParent(parent);
+        child.refresh();
+
+        child.close();
+        org.mockito.Mockito.verify(sandbox, org.mockito.Mockito.never()).removeInFlight();
+
+        parent.close();
         org.mockito.Mockito.verify(sandbox).removeInFlight();
 
         // Filet : même suppression à la destruction du bean.

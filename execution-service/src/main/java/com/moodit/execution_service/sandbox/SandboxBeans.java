@@ -1,6 +1,7 @@
 package com.moodit.execution_service.sandbox;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.ContextClosedEvent;
@@ -25,8 +26,16 @@ public class SandboxBeans {
      * devant elle. La requête en cours finit en 502 (panne, jamais une note).
      */
     @Bean
-    public ApplicationListener<ContextClosedEvent> inFlightContainerCleanup(DockerSandbox sandbox) {
-        return event -> sandbox.removeInFlight();
+    public ApplicationListener<ContextClosedEvent> inFlightContainerCleanup(
+            DockerSandbox sandbox, ApplicationContext context) {
+        // Seulement la fermeture de CE contexte : l'événement d'un contexte ENFANT remonte au
+        // parent, et removeInFlight est sans retour (plus aucun conteneur lancé ensuite) — la
+        // fermeture d'un enfant aurait rendu toute notation impossible jusqu'au redémarrage.
+        return event -> {
+            if (event.getApplicationContext() == context) {
+                sandbox.removeInFlight();
+            }
+        };
     }
 
     // Filet : même suppression à la destruction du bean (contexte fermé sans l'événement).
