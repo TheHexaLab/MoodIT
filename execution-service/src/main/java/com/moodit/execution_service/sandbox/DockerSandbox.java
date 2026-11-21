@@ -97,6 +97,25 @@ public class DockerSandbox {
             "kernel.sem", "1 1 1 0");
 
     /**
+     * Nombre maximal de fichiers et dossiers (inodes) de chaque tmpfs du conteneur.
+     *
+     * <p>La taille d'un tmpfs ne borne que le CONTENU des fichiers. Par défaut le noyau y autorise
+     * un inode par deux pages de mémoire de l'hôte (deux millions sur 16 Go), et chaque fichier
+     * VIDE à nom long coûte environ 1,2 Ko de mémoire noyau comptée dans le cgroup : 320 000
+     * fichiers vides suffisaient à faire tuer le superviseur par l'OOM (sortie 137 en 3 s sous
+     * 512 Mo, en 24 s sous 1,5 Go) — conteneur mort sans JSON, 502, tentative rejouable.
+     *
+     * <p>Plafonds LARGES devant le besoin réel, mesuré sur des jobs de 1 et 6 cas : au plus 1 821
+     * inodes sur {@code /box} (Go, dont le cache de compilation domine ; moins de 70 pour Java,
+     * Rust, C#, C et C++), 3 sur {@code /tmp}, 2 sur {@code /dev/shm}. Au plafond, les trois
+     * tmpfs coûtent ensemble une cinquantaine de Mo de mémoire noyau, quelle que soit la mémoire
+     * du conteneur.
+     */
+    static final int BOX_INODES = 32_768;
+    static final int TMP_INODES = 4_096;
+    static final int SHM_INODES = 1_024;
+
+    /**
      * Plafond de CHAQUE flux des journaux relus (stdout = JSON du superviseur, stderr). Le
      * superviseur borne déjà ses sorties bien en dessous ; ce plafond empêche qu'une régression
      * de son côté ne devienne un épuisement du tas du service, qui lit ces journaux en mémoire.
@@ -340,12 +359,16 @@ public class DockerSandbox {
                     .withTmpFs(Map.of(
                             // `exec` EXPLICITE : les tmpfs Docker sont noexec par défaut, et les
                             // binaires de test compilés (Go/Rust/C/C++) s'exécutent depuis /box.
-                            "/box", "rw,nosuid,exec,size=" + boxSizeMb() + "m",
-                            "/tmp", "rw,nosuid,noexec,size=" + tmpSizeMb() + "m",
+                            // `nr_inodes` : `size=` ne borne que les OCTETS. Un fichier vide
+                            // coûte quand même de la mémoire noyau (inode + entrée de
+                            // répertoire), comptée dans le cgroup — cf. BOX_INODES.
+                            "/box", "rw,nosuid,exec,size=" + boxSizeMb() + "m,nr_inodes=" + BOX_INODES,
+                            "/tmp", "rw,nosuid,noexec,size=" + tmpSizeMb() + "m,nr_inodes=" + TMP_INODES,
                             // Docker monte TOUJOURS /dev/shm (tmpfs 1777, 64 Mo par défaut) :
                             // sans cette entrée, il échappait à l'inventaire des points
                             // d'écriture de l'UID étudiant. Borné et noexec comme /tmp.
-                            "/dev/shm", "rw,nosuid,noexec,size=" + shmSizeMb() + "m"))
+                            "/dev/shm", "rw,nosuid,noexec,size=" + shmSizeMb() + "m,nr_inodes="
+                                    + SHM_INODES))
                     // IPC System V : mémoire comptée dans le cgroup mais HORS des tmpfs bornés,
                     // et qui survit au processus qui l'a créée (cf. IPC_SYSCTLS).
                     .withSysctls(IPC_SYSCTLS)

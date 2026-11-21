@@ -186,6 +186,64 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
+    void empty_files_cannot_exhaust_the_container_memory() {
+        require("C");
+        // `size=` d'un tmpfs ne borne que les octets : sans `nr_inodes`, des centaines de milliers
+        // de fichiers VIDES consommaient la mémoire noyau du cgroup jusqu'à faire tuer le
+        // superviseur (conteneur mort sans JSON → SandboxException ici, 502 en prod). La sonde
+        // tente 400 000 créations sur chacun des deux tmpfs que l'UID étudiant écrit librement.
+        DockerEvaluator small = new DockerEvaluator(
+                new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
+                System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
+        String probe = """
+                #include <fcntl.h>
+                #include <stdio.h>
+                #include <sys/stat.h>
+                #include <unistd.h>
+
+                /* Fichiers vides à nom long, mille par dossier, jusqu'au premier refus. */
+                static long remplir(const char *racine) {
+                    char nom[400];
+                    long crees = 0;
+                    for (long i = 0; i < 400000; i++) {
+                        if (i % 1000 == 0) {
+                            snprintf(nom, sizeof nom, "%s/d%ld", racine, i / 1000);
+                            if (mkdir(nom, 0700) != 0) { break; }
+                            crees++;
+                        }
+                        snprintf(nom, sizeof nom, "%s/d%ld/%0200ld", racine, i / 1000, i);
+                        int fd = open(nom, O_CREAT | O_WRONLY, 0600);
+                        if (fd < 0) { break; }
+                        close(fd);
+                        crees++;
+                    }
+                    return crees;
+                }
+
+                /* Réussit si la sonde a VRAIMENT créé des fichiers (elle tourne) et a été ARRÊTÉE
+                   par le plafond bien avant ses 400 000 créations. */
+                int doubler(int n) {
+                    long tmp = remplir("/tmp");
+                    long shm = remplir("/dev/shm");
+                    return (tmp > 100 && tmp < 10000 && shm > 100 && shm < 10000) ? n * 2 : 0;
+                }
+
+                int temoin(int n) { return n * 2; }
+                """;
+        List<TestResult> r = small.evaluate("C", probe, List.of(
+                new TestCaseInput("inodes", "return doubler(5) == 10;", 1),
+                new TestCaseInput("témoin", "return temoin(5) == 10;", 1)), null);
+        assertThat(r.get(0).passed())
+                .withFailMessage("la création de fichiers doit être arrêtée par nr_inodes, après "
+                        + "avoir commencé : %s", r.get(0))
+                .isTrue();
+        assertThat(r.get(1).passed())
+                .withFailMessage("le témoin, noté APRÈS la sonde, doit réussir : le conteneur a "
+                        + "survécu et les tmpfs ont été purgés : %s", r.get(1))
+                .isTrue();
+    }
+
+    @Test
     void execution_from_tmp_refused_for_student_code() {
         require("Go");
         // /tmp est monté noexec : un binaire déposé par l'UID étudiant ne peut pas être exécuté

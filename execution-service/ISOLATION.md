@@ -121,7 +121,9 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
 - **Conteneurs runner** : réseau coupé (`--network none`), écritures de l'UID étudiant **confinées
   aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, **dérivés de la mémoire du conteneur** (60 %,
   6 % et 2 % de `SANDBOX_MEMORY_MB`, planchers 256/32/16 Mo — cf. `DockerSandbox.boxSizeMb()` ;
-  614/61/20 Mo avec le 1 Go de la prod) et comptés dedans — les
+  614/61/20 Mo avec le 1 Go de la prod) et comptés dedans, et bornés aussi en nombre de fichiers
+  (`nr_inodes` : 32 768 / 4 096 / 1 024, cf. `DockerSandbox.BOX_INODES` — un fichier vide coûte de
+  la mémoire noyau que la taille du tmpfs ne compte pas) — les
   images verrouillent leurs répertoires monde-inscriptibles (`/var/tmp`, `/go`, cargo…), le disque
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
   minimum du superviseur (chown/droits, setuid étudiant, kill), `no-new-privileges`,

@@ -527,9 +527,11 @@ class DockerSandboxTest {
         // partout sauf /box (qui porte les binaires de test compilés).
         assertThat(hostConfig.getTmpFs())
                 .containsOnlyKeys("/box", "/tmp", "/dev/shm")
-                .containsEntry("/box", "rw,nosuid,exec,size=614m")
-                .containsEntry("/tmp", "rw,nosuid,noexec,size=61m")
-                .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m");
+                // nr_inodes : `size=` ne borne que les octets, pas le NOMBRE de fichiers, dont
+                // chacun coûte de la mémoire noyau comptée dans le cgroup.
+                .containsEntry("/box", "rw,nosuid,exec,size=614m,nr_inodes=32768")
+                .containsEntry("/tmp", "rw,nosuid,noexec,size=61m,nr_inodes=4096")
+                .containsEntry("/dev/shm", "rw,nosuid,noexec,size=20m,nr_inodes=1024");
 
         // IPC System V : mémoire du cgroup HORS des tmpfs, qui survit à son créateur. Segments
         // détruits dès qu'ils ne sont plus attachés, aucune file de messages, aucun jeu de
