@@ -187,6 +187,34 @@ describe('ManageTeamsPopup', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Ajouter une équipe' }));
   });
 
+  it('pose le focus sur le DOM à jour même si le clic suit le chargement avant ses effets', async () => {
+    // Reproduit la course vue en CI : le clic arrive pendant que les effets passifs du rendu de
+    // chargement sont encore en attente (l'observateur de mutation passe avant le planificateur
+    // de React). Hors `act`, sinon `act` viderait ces effets avant le clic.
+    const actEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    let resolveFetch: (value: typeof TEAMS) => void = () => {};
+    popup({ onFetch: () => new Promise((resolve) => { resolveFetch = resolve; }) });
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const clicked = new Promise<void>((done) => {
+        const observer = new MutationObserver(() => {
+          const button = screen.queryByRole('button', { name: 'Retirer A de Équipe 1' });
+          if (!button) return;
+          observer.disconnect();
+          button.click();
+          done();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+      resolveFetch(TEAMS);
+      await clicked;
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Retirer A de Équipe 1' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Retirer B de Équipe 1' }));
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+  });
+
   it('le dernier étudiant placé envoie le focus sur le précédent, puis sur « Ajouter une équipe »', async () => {
     popup({ onFetch: vi.fn().mockResolvedValue({ teams: [OPEN], unassigned: ['E', 'F'] }) });
     fireEvent.change(await screen.findByLabelText('Équipe de F'), { target: { value: '2' } });
@@ -306,7 +334,7 @@ describe('AssignmentView — devoirs en équipe', () => {
     expect(await screen.findByText('Votre remise')).toBeTruthy();
     expect(onJoinTeam).toHaveBeenCalledWith(10, 9, 2);
     // Le bouton cliqué a disparu : le focus va au titre de la carte d'équipe.
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Équipe 2' }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Équipe 2' })));
     expect(handlers.onAssignmentsChanged).toHaveBeenCalled();
   });
 

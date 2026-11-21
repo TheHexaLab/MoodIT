@@ -1,6 +1,6 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,16 +21,21 @@ import java.util.stream.Collectors;
 
 /**
  * Assemble {@code code étudiant + harnais} en un programme exécutable dont l'EXIT CODE traduit le
- * verdict (0 = réussi, non-zéro = échec) — Piston ne renvoie que stdout/stderr/exit, pas de valeur
+ * verdict (0 = réussi, non-zéro = échec) — le mode exec du runner ne renvoie que stdout/stderr/exit, pas de valeur
  * de retour. Le contrat du harnais (le corps RENVOIE un booléen ; une exception/panic vaut échec)
  * est enveloppé ici, PAR LANGAGE, en miroir des {@code harness_template} semés en base.
  *
- * <p>Langages gérés (les 16) : Python, JavaScript, TypeScript, Bash, PHP, Go, Rust, C, C++, C#,
- * Java, JSON, SQL, HTML, JSX, TSX. Les langages « données/vues » sont validés par un harnais JS via
- * des libs EMBARQUÉES injectées dans la soumission : HTML → parseur DOM ({@code htmlparser.js},
- * {@code doc}) ; JSX/TSX → Babel + React + ReactDOMServer ({@code react-runtime.js}, rendu en
- * {@code html}). SQL → vues numérotées {@code solution1}, {@code solution2}… (une par requête) +
- * verdict sur la sortie (cf. ExecutionService).
+ * <p>Langages assemblés ici (mode exec du runner, ex-Piston) : Python, JavaScript, TypeScript, Bash, PHP, JSON, SQL, HTML,
+ * JSX, TSX. Les langages « données/vues » sont validés par un harnais JS via des libs EMBARQUÉES
+ * injectées dans la soumission : HTML → parseur DOM ({@code htmlparser.js}, {@code doc}) ;
+ * JSX/TSX → Babel + React + ReactDOMServer ({@code react-runtime.js}, rendu en {@code html}).
+ * SQL → vues numérotées {@code solution1}, {@code solution2}… (une par requête) + verdict sur la
+ * sortie (cf. ExecutionService).
+ *
+ * <p>Les langages COMPILÉS (Go, Rust, C, C++, C#, Java) ne passent PLUS par ici pour l'évaluation
+ * (#116) : ils sont notés par le RUNNER DOCKER ({@code sandbox/DockerEvaluator} + superviseur),
+ * où le harnais booléen est compilé dans un programme séparé sous un UID séparé. Leur mode
+ * « run » (bouton play) passe par le mode exec des mêmes images.
  */
 @Component
 public class CodeAssembler {
@@ -54,8 +59,8 @@ public class CodeAssembler {
         });
     }
 
-    /** Programme prêt pour Piston : langage Piston + fichiers. */
-    public record Assembled(String pistonLanguage, List<PistonClient.File> files) {}
+    /** Programme prêt pour le mode exec du runner : runtime + fichiers (le premier est l'entrée). */
+    public record Assembled(String runtime, List<RunnerExec.File> files) {}
 
     public Assembled assemble(String language, String studentCode, String harnessCode, String nonce) {
         String code = studentCode == null ? "" : studentCode;
@@ -66,12 +71,10 @@ public class CodeAssembler {
             case "typescript" -> assembleJsRpc(code, harness, nonce, true);
             case "php" -> assemblePhpRpc(code, harness, nonce);
             case "bash" -> assembleBashRpc(code, harness, nonce);
-            case "go" -> assembleGo(code, harness, nonce);
-            case "rust" -> assembleRust(code, harness, nonce);
-            case "c" -> assembleC(code, harness, nonce);
-            case "c++" -> assembleCpp(code, harness, nonce);
-            case "csharp" -> assembleCSharp(code, harness, nonce);
-            case "java" -> assembleJava(code, harness, nonce);
+            // Langages COMPILÉS (#116) : notés par le RUNNER DOCKER (sandbox/DockerEvaluator),
+            // jamais assemblés ici — ExecutionService route avant d'arriver au switch.
+            case "go", "rust", "c", "c++", "csharp", "java" -> throw new UnsupportedLanguageException(
+                    "Langage compilé « " + language + " » : évaluation via le mode evaluate du runner");
             case "json" -> assembleJson(code, harness, nonce);
             case "sql" -> assembleSql(code, harness, nonce);
             case "html" -> assembleHtml(code, harness, nonce);
@@ -112,6 +115,19 @@ public class CodeAssembler {
         return "sql".equals(canon(language));
     }
 
+    /**
+     * Vrai si le langage est COMPILÉ (C, C++, Go, Rust, C#, Java). Ces langages ne passent PAS
+     * par l'assemblage : leur notation vit dans le runner dédié ({@code sandbox/DockerEvaluator}
+     * + {@code HarnessProjects}, harnais booléen noté par deux programmes sous deux UID) —
+     * ce prédicat sert au ROUTAGE dans {@code ExecutionService}.
+     */
+    public static boolean isCompiled(String language) {
+        return switch (canon(language)) {
+            case "c", "c++", "go", "rust", "csharp", "java" -> true;
+            default -> false;
+        };
+    }
+
     /** Nom de langage normalisé (minuscules, alias unifiés) pour le switch d'assemblage. */
     private static String canon(String language) {
         String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
@@ -127,8 +143,8 @@ public class CodeAssembler {
         };
     }
 
-    private static Assembled run(String pistonLanguage, String fileName, String code) {
-        return new Assembled(pistonLanguage, List.of(new PistonClient.File(fileName, code)));
+    private static Assembled run(String runtime, String fileName, String code) {
+        return new Assembled(runtime, List.of(new RunnerExec.File(fileName, code)));
     }
 
     /** Indente chaque ligne non vide par {@code prefix} (préserve l'indentation relative). */
@@ -150,8 +166,12 @@ public class CodeAssembler {
      * l'étudiant (fonctions/classes) y sont des PROXYS qui délèguent, par RPC (JSON sur stdin/stdout),
      * à un SERVEUR (student_server.py) où vit le vrai code étudiant. Conséquences :
      * <ul>
-     *   <li>le nonce est émis par le NOTEUR (aucun code étudiant → infalsifiable) — le résiduel de
-     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce) ;</li>
+     *   <li>le nonce est émis par le NOTEUR, où aucun code étudiant ne tourne — le résiduel de
+     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce). RÉSERVE commune à
+     *       tout le mode « exec » (Python, JS/TS, PHP, Bash, JSX/TSX) : noteur et code soumis y
+     *       partagent l'UID, la garantie dépend donc de {@code kernel.yama.ptrace_scope ≥ 1} sur
+     *       l'hôte (cf. ISOLATION.md, « Résiduel connu », et {@link #assembleBashRpc}) ; seuls les
+     *       six langages compilés portent la propriété « verdict non falsifiable » ;</li>
      *   <li>les ATTENDUS du harnais restent dans le noteur, hors de portée de l'étudiant (mémoire
      *       distincte, {@code grader.py} auto-supprimé) → passer = produire les bonnes sorties ;</li>
      *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
@@ -159,22 +179,27 @@ public class CodeAssembler {
      */
     private Assembled assemblePython(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(PY_DEF, studentCode)) {
             if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
+            if (!harnessMentions(harnessCode, f)) continue;   // mandataire inutile, cf. la méthode
+            names.add(f);
             proxies.append("def ").append(f).append("(*a):\n")
                     .append("    return __moodit_rpc({\"op\": \"call\", \"name\": \"").append(f)
                     .append("\", \"args\": list(a)})[\"value\"]\n");
         }
         for (String c : matchAll(PY_CLASS, studentCode)) {
             if (c.startsWith("__moodit")) continue;
+            if (!harnessMentions(harnessCode, c)) continue;
+            names.add(c);
             // NB : dans un corps de classe, un identifiant `__x` subit le name mangling Python
             // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
             proxies.append("class ").append(c).append(":\n")
                     .append("    def __init__(self, *a):\n")
-                    .append("        object.__setattr__(self, \"_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
+                    .append("        object.__setattr__(self, \"__moodit_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
                     .append(c).append("\", \"args\": list(a)})[\"handle\"])\n")
                     .append("    def __getattr__(self, name):\n")
-                    .append("        h = object.__getattribute__(self, \"_h\")\n")
+                    .append("        h = object.__getattribute__(self, \"__moodit_h\")\n")
                     .append("        def _call(*a):\n")
                     .append("            return globals()[\"__moodit_rpc\"]({\"op\": \"method\", \"handle\": h, \"name\": name, \"args\": list(a)})[\"value\"]\n")
                     .append("        return _call\n");
@@ -183,9 +208,31 @@ public class CodeAssembler {
         String grader = "import os as __moodit_os\n"
                 + "try:\n    __moodit_os.remove('grader.py')\nexcept Exception:\n    pass\n"
                 + "import sys as __moodit_sys, subprocess as __moodit_subprocess, json as __moodit_json\n"
+                + "import secrets as __moodit_secrets, builtins as __moodit_builtins\n"
+                // `bool` du VERDICT pris à la source : un mandataire `bool` le masquait au niveau
+                // du module, et le verdict appelait alors le code soumis.
+                + "__moodit_bool = __moodit_builtins.bool\n"
+                // REFUS d'un nom qui masque une fonction INTÉGRÉE : le mandataire généré pour
+                // `def len` ou `class abs` remplaçait, dans le harnais, la fonction intégrée du
+                // même nom par le code soumis (`abs(f(x) - 3) < 1e-9` passait avec un `abs`
+                // qui renvoie 0). Même règle que les noms réservés des langages compilés.
+                + "__moodit_shadow = [__n for __n in " + pythonStringList(names)
+                + " if hasattr(__moodit_builtins, __n)]\n"
+                + "if __moodit_shadow:\n"
+                + "    __moodit_sys.stderr.write(" + pythonStringLiteral(SHADOW_PREFIX)
+                + " + __moodit_shadow[0] + " + pythonStringLiteral(
+                        " » est réservé : il masque une fonction intégrée de Python, que le "
+                                + "harnais peut appeler. Renommer cette fonction ou cette classe, "
+                                + "puis resoumettre.\n") + ")\n"
+                + "    __moodit_sys.exit(1)\n"
                 + "__moodit_p = __moodit_subprocess.Popen([__moodit_sys.executable, 'student_server.py'],"
                 + " stdin=__moodit_subprocess.PIPE, stdout=__moodit_subprocess.PIPE, text=True)\n"
                 + "def __moodit_rpc(payload):\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse. Sans lui, le code noté
+                // — dont le stdout EST le canal de réponse — n'avait qu'à imprimer une réponse
+                // conforme AVANT d'être appelé : elle était consommée comme réponse au premier
+                // appel, et une réponse FAUSSE passait au vert sans jamais toucher au nonce.
+                + "    payload['id'] = __moodit_secrets.token_hex(8)\n"
                 + "    print(__moodit_json.dumps(payload), file=__moodit_p.stdin, flush=True)\n"
                 + "    while True:\n"
                 + "        line = __moodit_p.stdout.readline()\n"
@@ -193,42 +240,102 @@ public class CodeAssembler {
                 + "        try: r = __moodit_json.loads(line)\n"
                 + "        except Exception: continue\n"
                 // Le code étudiant partage stdout avec les réponses RPC : un print de premier niveau
-                // dont la sortie est du JSON valide (« 5 », « [1, 2] ») n'est pas une réponse.
+                // dont la sortie est du JSON valide (« 5 », « [1, 2] ») n'est pas une réponse, et
+                // une réponse qui ne porte pas l'identifiant DE CET APPEL n'en est pas une non plus.
                 + "        if not isinstance(r, dict) or 'ok' not in r: continue\n"
+                + "        if r.get('id') != payload['id']: continue\n"
                 + "        if not r.get('ok'): raise RuntimeError(str(r.get('error')))\n"
                 + "        return r\n"
                 + proxies
                 + "def __moodit_harness():\n"
                 + indent(harnessCode, "    ")
-                + "\ntry:\n    __moodit_r = bool(__moodit_harness())\nexcept BaseException:\n    __moodit_r = False\n"
+                + "\ntry:\n    __moodit_r = __moodit_bool(__moodit_harness())\nexcept BaseException:\n    __moodit_r = False\n"
                 + "if __moodit_r:\n    __moodit_sys.stderr.write(\"" + nonce + "\")\n"
                 + "try:\n    __moodit_p.stdin.close()\nexcept Exception:\n    pass\n"
                 + "__moodit_sys.exit(0 if __moodit_r else 1)\n";
         // Boucle RPC dans une FONCTION → ses variables ne polluent pas les globals (symboles étudiant).
-        String server = "import sys as __moodit_sys, json as __moodit_json\n"
+        // Les fonctions INTÉGRÉES dont la boucle a besoin sont prises dans `builtins`, AVANT le
+        // code soumis : celui-ci s'exécute dans le même module, et une fonction d'aide `print`,
+        // `len`, `str`, `getattr` ou `globals` (ou une classe `Exception`) y remplaçait
+        // l'intégrée. Le serveur répondait alors avec la fonction de l'étudiant — une réponse
+        // juste notée fausse, ou une trace Python en guise de diagnostic.
+        String server = "import sys as __moodit_sys, json as __moodit_json, builtins as __moodit_b\n"
                 + studentCode
                 + "\ndef __moodit_serve():\n"
                 + "    objs = {}\n"
                 + "    for line in __moodit_sys.stdin:\n"
                 + "        try: m = __moodit_json.loads(line)\n"
-                + "        except Exception: continue\n"
+                + "        except __moodit_b.Exception: continue\n"
                 + "        try:\n"
                 + "            op = m.get('op')\n"
                 + "            if op == 'call':\n"
-                + "                r = {'ok': True, 'value': globals()[m['name']](*m['args'])}\n"
+                + "                r = {'ok': True, 'value': __moodit_b.globals()[m['name']](*m['args'])}\n"
                 + "            elif op == 'new':\n"
-                + "                h = len(objs); objs[h] = globals()[m['class']](*m['args']); r = {'ok': True, 'handle': h}\n"
+                + "                h = __moodit_b.len(objs); objs[h] = __moodit_b.globals()[m['class']](*m['args']); r = {'ok': True, 'handle': h}\n"
                 + "            elif op == 'method':\n"
-                + "                r = {'ok': True, 'value': getattr(objs[m['handle']], m['name'])(*m['args'])}\n"
+                + "                r = {'ok': True, 'value': __moodit_b.getattr(objs[m['handle']], m['name'])(*m['args'])}\n"
                 + "            else:\n"
                 + "                r = {'ok': False, 'error': 'op inconnu'}\n"
-                + "        except Exception as e:\n"
-                + "            r = {'ok': False, 'error': str(e)}\n"
-                + "        print(__moodit_json.dumps(r), flush=True)\n"
+                + "        except __moodit_b.Exception as e:\n"
+                + "            r = {'ok': False, 'error': __moodit_b.str(e)}\n"
+                // L'identifiant reçu est RENVOYÉ : c'est ce qui rattache la réponse à SON appel.
+                + "        r['id'] = m.get('id')\n"
+                // Retour à la ligne AVANT la réponse (comme en PHP) : un `print(…, end="")` du
+                // code soumis partage ce tampon et se collait au début de la ligne de réponse,
+                // qui n'était alors plus reconnue — le couple s'attendait jusqu'au temps limite,
+                // et une réponse JUSTE était notée « Interrompu ».
+                + "        __moodit_b.print('\\n' + __moodit_json.dumps(r), flush=True)\n"
                 + "__moodit_serve()\n";
         return new Assembled("python", List.of(
-                new PistonClient.File("grader.py", grader),
-                new PistonClient.File("student_server.py", server)));
+                new RunnerExec.File("grader.py", grader),
+                new RunnerExec.File("student_server.py", server)));
+    }
+
+    /** Début du diagnostic d'un nom soumis qui masque une fonction intégrée (suivi du nom). */
+    static final String SHADOW_PREFIX = "Nom réservé : « ";
+
+    /**
+     * Le harnais emploie-t-il ce nom ? Seuls les symboles soumis que le harnais NOMME reçoivent
+     * un mandataire dans le noteur : un mandataire qu'il n'appelle pas ne sert à rien, et celui
+     * d'une fonction d'aide {@code max}, {@code sum} ou {@code test} y masquait l'intégrée du
+     * même nom — d'où un refus (« Nom réservé ») et un 0 sur une réponse juste, même quand le
+     * harnais ne s'en servait pas. Le refus ne vise donc plus que le nom que le harnais emploie.
+     *
+     * <p>Recherche du MOT dans le texte brut du harnais, chaînes et commentaires compris : dans
+     * le doute, le nom compte comme employé et garde son mandataire (comportement d'avant).
+     */
+    static boolean harnessMentions(String harnessCode, String name) {
+        return Pattern.compile("(?<![\\w$])" + Pattern.quote(name) + "(?![\\w$])")
+                .matcher(harnessCode == null ? "" : harnessCode).find();
+    }
+
+    /** Liste de chaînes littérale (Python ou JavaScript) ; les noms viennent de motifs {@code \w}. */
+    private static String pythonStringList(java.util.Collection<String> names) {
+        return names.stream().map(CodeAssembler::pythonStringLiteral)
+                .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    /**
+     * Littéral chaîne entre guillemets doubles, valable en Python comme en JavaScript : barre
+     * oblique inverse, guillemet, sauts de ligne et tout caractère non ASCII sont échappés.
+     */
+    private static String pythonStringLiteral(String text) {
+        StringBuilder out = new StringBuilder("\"");
+        for (char ch : text.toCharArray()) {
+            switch (ch) {
+                case '\\' -> out.append("\\\\");
+                case '"' -> out.append("\\\"");
+                case '\n' -> out.append("\\n");
+                default -> {
+                    if (ch < 0x20 || ch > 0x7E) {
+                        out.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        out.append(ch);
+                    }
+                }
+            }
+        }
+        return out.append('"').toString();
     }
 
     /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
@@ -244,24 +351,31 @@ public class CodeAssembler {
     // ── JavaScript / TypeScript ─────────────────────────────────────────────────
 
     /** Symboles JS de premier niveau : fonctions/const/let/var (appelables) et classes. */
+    // `export` (et `export default`) facultatif : c'est l'écriture ordinaire d'un module
+    // TypeScript, et sans lui une `export function f` ne recevait pas de mandataire — le harnais
+    // ne trouvait pas `f`, et une réponse juste était notée fausse.
+    private static final String JS_EXPORT = "(?:export\\s+(?:default\\s+)?)?";
     private static final Pattern JS_CALLABLE = Pattern.compile(
-            "(?m)^(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
-                    + "|(?m)^(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
-    private static final Pattern JS_CLASS = Pattern.compile("(?m)^class\\s+([A-Za-z_$][\\w$]*)");
+            "(?m)^" + JS_EXPORT + "(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
+                    + "|(?m)^" + JS_EXPORT + "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
+    private static final Pattern JS_CLASS = Pattern.compile(
+            "(?m)^" + JS_EXPORT + "(?:abstract\\s+)?class\\s+([A-Za-z_$][\\w$]*)");
 
     /**
      * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
      * Le NOTEUR (grader.js) exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.js)
      * héberge le code étudiant. RPC SYNCHRONE (le harnais est synchrone) via {@code fs.readSync} sur le
-     * fd du sous-processus. Le nonce est émis par le noteur (aucun code étudiant → infalsifiable).
+     * fd du sous-processus. Le nonce est émis par le noteur, où aucun code étudiant ne tourne
+     * (même réserve que Python : UID partagé, cf. {@link #assemblePython}).
      */
     private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript) {
-        // TS : fichiers nommés SANS extension → Piston les écrit en .ts et compile en .js (student_server.js,
-        // grader.js). `// @ts-nocheck` neutralise les erreurs de type (on veut exécuter, pas typer).
+        // TS : fichiers .ts, transpilés côte à côte par le runner (tsc --noCheck) en .js
+        // (student_server.js, grader.js). `// @ts-nocheck` neutralise aussi les erreurs de type
+        // à la transpilation (on veut exécuter, pas typer).
         String header = typescript ? "// @ts-nocheck\n" : "";
-        String pistonLang = typescript ? "typescript" : "javascript";
-        String graderName = typescript ? "grader" : "grader.js";
-        String serverName = typescript ? "student_server" : "student_server.js";
+        String runtimeName = typescript ? "typescript" : "javascript";
+        String graderName = typescript ? "grader.ts" : "grader.js";
+        String serverName = typescript ? "student_server.ts" : "student_server.js";
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> callables = new java.util.LinkedHashSet<>();
         Matcher mc = JS_CALLABLE.matcher(studentCode);
@@ -272,6 +386,9 @@ public class CodeAssembler {
         callables.removeAll(classes);
         callables.removeIf(n -> n.startsWith("__moodit"));   // pas de collision avec l'infra du noteur
         classes.removeIf(n -> n.startsWith("__moodit"));
+        // Mandataires des seuls noms que le harnais emploie (cf. harnessMentions).
+        callables.removeIf(n -> !harnessMentions(harnessCode, n));
+        classes.removeIf(n -> !harnessMentions(harnessCode, n));
         for (String f : callables) {
             proxies.append("function ").append(f).append("(...a){ return __moodit_rpc({op:'call',name:'")
                     .append(f).append("',args:a}).value; }\n");
@@ -281,20 +398,53 @@ public class CodeAssembler {
                     .append(" const h=__moodit_rpc({op:'new',cls:'").append(c).append("',args}).handle;")
                     .append(" return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n");
         }
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>(callables);
+        names.addAll(classes);
         // Tous les identifiants internes sont préfixés __moodit_ → aucune collision avec un symbole étudiant.
         String grader = header
+                // REFUS d'un nom qui masque un GLOBAL (Number, parseInt, isNaN, Boolean…) ou une
+                // variable du module (require…) : le mandataire, déclaré au niveau du module et
+                // hissé, remplaçait dans le harnais la fonction du même nom par le code soumis
+                // (`Number(f()) === 3` passait avec un `Number` qui renvoie 3). EN TÊTE, avant
+                // tout usage d'un nom que le mandataire hissé pourrait déjà masquer.
+                + "const __moodit_shadow=" + pythonStringList(names) + ".filter(function(n){"
+                + " return (n in [].constructor.constructor('return this')()) || [\"require\",\"module\",\"exports\",\"__filename\","
+                + "\"__dirname\",\"globalThis\"].indexOf(n)>=0; });\n"
+                + "if(__moodit_shadow.length){ const __moodit_msg=" + pythonStringLiteral(SHADOW_PREFIX)
+                + "+__moodit_shadow[0]+" + pythonStringLiteral(
+                        " » est réservé : il masque une fonction ou un objet global de JavaScript, "
+                                + "que le harnais peut appeler. Renommer cette fonction ou cette "
+                                + "classe, puis resoumettre.\n")
+                + "; try{ process.stderr.write(__moodit_msg); process.exit(1); }catch(e){}"
+                + " throw __moodit_msg; }\n"
                 + "const __moodit_cp=require('child_process'), __moodit_fs=require('fs');\n"
                 + "try { __moodit_fs.unlinkSync('grader.js'); } catch(e) {}\n"    // hors de portée du serveur
                 + "try { __moodit_fs.unlinkSync('grader.ts'); } catch(e) {}\n"    // (source TS, si présente)
                 + "const __moodit_NL=String.fromCharCode(10);\n"
                 + "const __moodit_child=__moodit_cp.spawn(process.execPath,['student_server.js'],{stdio:['pipe','pipe','inherit']});\n"
                 + "__moodit_child.stdout.pause(); const __moodit_fd=__moodit_child.stdout._handle.fd;\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse. Le stdout du serveur
+                // étudiant EST le canal de réponse : sans identifiant, il suffisait d'y écrire une
+                // réponse conforme AVANT d'être appelé pour la faire consommer comme réponse au
+                // premier appel (muter console.log ne couvre pas process.stdout.write).
+                + "const __moodit_crypto=require('crypto'); let __moodit_buf='';\n"
                 + "function __moodit_rpc(o){\n"
+                + "  o.id=__moodit_crypto.randomBytes(8).toString('hex');\n"
                 + "  __moodit_child.stdin.write(JSON.stringify(o)+__moodit_NL);\n"
-                + "  const b=Buffer.alloc(65536); let s='';\n"
-                + "  while(s.indexOf(__moodit_NL)<0){ let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
-                + "catch(e){ if(e.code==='EAGAIN') continue; throw e; } if(n===0) break; s+=b.toString('utf8',0,n); }\n"
-                + "  const r=JSON.parse(s.split(__moodit_NL)[0]); if(!r.ok) throw new Error(r.error); return r;\n"
+                + "  const b=Buffer.alloc(65536);\n"
+                + "  for(;;){\n"
+                + "    let i;\n"
+                + "    while((i=__moodit_buf.indexOf(__moodit_NL))>=0){\n"
+                + "      const line=__moodit_buf.slice(0,i); __moodit_buf=__moodit_buf.slice(i+1);\n"
+                + "      let r; try{ r=JSON.parse(line); }catch(e){ continue; }\n"
+                + "      if(!r || typeof r!=='object' || r.id!==o.id) continue;\n"
+                + "      if(!r.ok) throw new Error(r.error); return r;\n"
+                + "    }\n"
+                + "    let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
+                + "catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
+                + "    if(n===0) throw new Error('processus etudiant termine');\n"
+                + "    __moodit_buf+=b.toString('utf8',0,n);\n"
+                + "  }\n"
                 + "}\n"
                 + proxies
                 + "function __moodit_harness(){\n" + harnessCode + "\n}\n"
@@ -302,27 +452,56 @@ public class CodeAssembler {
                 + "if(__moodit_r) process.stderr.write(\"" + nonce + "\");\n"
                 + "try{ __moodit_child.stdin.end(); }catch(e){}\n"
                 + "process.exit(__moodit_r?0:1);\n";
-        // Boucle RPC dans une FONCTION → ses variables ne polluent pas la portée des symboles étudiant.
+        // Le serveur partage le MODULE du code soumis, et en JavaScript tout nom se masque : une
+        // fonction soumise est hissée en tête du module, une `const` y ouvre une zone morte.
+        // Deux règles, donc :
+        //  1. les objets globaux dont la boucle a besoin (JSON, process, String, console) sont pris
+        //     sur l'objet global AVANT le code soumis, par un chemin qui ne nomme AUCUN
+        //     identifiant (`[].constructor.constructor` est Function) : une fonction d'aide
+        //     `JSON`, `String` ou `process` ne les remplace plus ;
+        //  2. un symbole soumis est résolu par `__moodit_get`, déclarée au niveau du module, où la
+        //     seule locale est son paramètre préfixé. La boucle le faisait par un `eval` écrit au
+        //     milieu de ses propres locales (`buf`, `d`, `i`, `line`, `m`, `r`, `objs`, `hid`…) :
+        //     une fonction soumise de l'un de ces noms rendait la variable du serveur, et une
+        //     réponse juste était notée fausse.
+        //     Repli sur `exports` : pour `export const f = memo(…)`, tsc (module commonjs) n'émet
+        //     que `exports.f = …`, sans liaison locale, et l'`eval` levait « f is not defined ».
+        //     Dans un module ES, `exports` n'existe pas : l'erreur d'origine est relancée.
         String server = header
-                + "const __moodit_NL=String.fromCharCode(10);\n"
-                + "console.log=function(){}; console.info=function(){};\n"
+                + "const __moodit_G=[].constructor.constructor('return this')();\n"
+                + "const __moodit_JSON=__moodit_G.JSON, __moodit_process=__moodit_G.process,"
+                + " __moodit_String=__moodit_G.String;\n"
+                + "const __moodit_NL=__moodit_String.fromCharCode(10);\n"
+                + "__moodit_G.console.log=function(){}; __moodit_G.console.info=function(){};\n"
                 + studentCode
-                + "\nfunction __moodit_serve(){ const objs={}; let hid=0, buf='';\n"
-                + "process.stdin.on('data', d=>{ buf+=d; let i;\n"
-                + "  while((i=buf.indexOf(__moodit_NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
-                + "    let m; try{ m=JSON.parse(line); }catch(e){ continue; }\n"
-                + "    let r;\n"
+                + "\nconst __moodit_get=(__moodit_n)=>{ try{ return eval(__moodit_n); }"
+                + "catch(__moodit_e){ let __moodit_x; try{ __moodit_x=exports[__moodit_n]; }"
+                + "catch(__moodit_f){} if(__moodit_x===void 0) throw __moodit_e; return __moodit_x; } };\n"
+                + "function __moodit_serve(){ const __moodit_objs={}; let __moodit_hid=0, __moodit_buf='';\n"
+                + "__moodit_process.stdin.on('data', __moodit_d=>{ __moodit_buf+=__moodit_d; let __moodit_i;\n"
+                + "  while((__moodit_i=__moodit_buf.indexOf(__moodit_NL))>=0){"
+                + " const __moodit_line=__moodit_buf.slice(0,__moodit_i);"
+                + " __moodit_buf=__moodit_buf.slice(__moodit_i+1);\n"
+                + "    let __moodit_m; try{ __moodit_m=__moodit_JSON.parse(__moodit_line); }catch(__moodit_e){ continue; }\n"
+                + "    let __moodit_r;\n"
                 + "    try {\n"
-                + "      if(m.op==='call') r={ok:true,value: eval(m.name)(...m.args)};\n"
-                + "      else if(m.op==='new'){ const h=hid++; objs[h]=new (eval(m.cls))(...m.args); r={ok:true,handle:h}; }\n"
-                + "      else if(m.op==='method') r={ok:true,value: objs[m.handle][m.name](...m.args)};\n"
-                + "      else r={ok:false,error:'op inconnu'};\n"
-                + "    } catch(e){ r={ok:false,error:String(e && e.message || e)}; }\n"
-                + "    process.stdout.write(JSON.stringify(r)+__moodit_NL);\n"
+                + "      if(__moodit_m.op==='call') __moodit_r={ok:true,value: __moodit_get(__moodit_m.name)(...__moodit_m.args)};\n"
+                + "      else if(__moodit_m.op==='new'){ const __moodit_h=__moodit_hid++;"
+                + " __moodit_objs[__moodit_h]=new (__moodit_get(__moodit_m.cls))(...__moodit_m.args);"
+                + " __moodit_r={ok:true,handle:__moodit_h}; }\n"
+                + "      else if(__moodit_m.op==='method') __moodit_r={ok:true,value:"
+                + " __moodit_objs[__moodit_m.handle][__moodit_m.name](...__moodit_m.args)};\n"
+                + "      else __moodit_r={ok:false,error:'op inconnu'};\n"
+                + "    } catch(__moodit_e){ __moodit_r={ok:false,error:__moodit_String(__moodit_e && __moodit_e.message || __moodit_e)}; }\n"
+                // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
+                + "    __moodit_r.id=__moodit_m.id;\n"
+                // Retour à la ligne AVANT la réponse : même motif qu'en Python et en PHP — un
+                // `process.stdout.write("x")` sans saut de ligne la contaminait.
+                + "    __moodit_process.stdout.write(__moodit_NL+__moodit_JSON.stringify(__moodit_r)+__moodit_NL);\n"
                 + "  }}); }\n__moodit_serve();\n";
-        return new Assembled(pistonLang, List.of(
-                new PistonClient.File(graderName, grader),
-                new PistonClient.File(serverName, server)));
+        return new Assembled(runtimeName, List.of(
+                new RunnerExec.File(graderName, grader),
+                new RunnerExec.File(serverName, server)));
     }
 
     // ── PHP ──────────────────────────────────────────────────────────────────────
@@ -335,7 +514,8 @@ public class CodeAssembler {
      * PHP : exécution ISOLÉE en deux processus (cf. {@link #assemblePython}). Le NOTEUR (grader.php)
      * exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.php) héberge le code
      * étudiant. RPC SYNCHRONE naturel via {@code proc_open} + {@code fgets} bloquant. Le nonce est
-     * émis par le noteur (aucun code étudiant → infalsifiable).
+     * émis par le noteur, où aucun code étudiant ne tourne (même réserve que Python : UID
+     * partagé, cf. {@link #assemblePython}).
      */
     private Assembled assemblePhpRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
@@ -353,11 +533,17 @@ public class CodeAssembler {
                     .append("}\n");
         }
         String grader = "<?php\n"
+                // Vidé PUIS effacé (script déjà compilé) : un descripteur que l'interpréteur
+                // garderait ouvert ne rouvre plus qu'un fichier vide (cf. le noteur Bash).
+                + "@file_put_contents('grader.php', '');\n"
                 + "@unlink('grader.php');\n"                       // hors de portée du serveur
                 + "$__moodit_pipes = [];\n"
                 + "$__moodit_proc = proc_open(escapeshellarg(PHP_BINARY).' student_server.php',"
                 + " [0=>['pipe','r'], 1=>['pipe','w'], 2=>STDERR], $__moodit_pipes);\n"
                 + "function __moodit_rpc($o){ global $__moodit_pipes;\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse : sans lui, un echo
+                // conforme imprimé AVANT l'appel était consommé comme réponse (cf. Python).
+                + "  $o['id'] = bin2hex(random_bytes(8));\n"
                 + "  fwrite($__moodit_pipes[0], json_encode($o).\"\\n\");\n"
                 + "  while (true) {\n"
                 + "    $line = fgets($__moodit_pipes[1]);\n"
@@ -366,6 +552,7 @@ public class CodeAssembler {
                 // Le code étudiant partage stdout avec les réponses : un echo de premier niveau
                 // (« 5 », « [1,2] ») n'est pas une réponse (même correctif que pour Python).
                 + "    if (!is_array($r) || !array_key_exists('ok', $r)) continue;\n"
+                + "    if (($r['id'] ?? null) !== $o['id']) continue;\n"
                 + "    if (empty($r['ok'])) throw new Exception($r['error']);\n"
                 + "    return $r;\n"
                 + "  }\n"
@@ -389,12 +576,14 @@ public class CodeAssembler {
                 + "    elseif ($__moodit_op === 'method') $__moodit_r = ['ok'=>true,'value'=>call_user_func_array([$__moodit_objs[$__moodit_m['handle']], $__moodit_m['name']], $__moodit_m['args'])];\n"
                 + "    else $__moodit_r = ['ok'=>false,'error'=>'op inconnu'];\n"
                 + "  } catch (\\Throwable $__moodit_e) { $__moodit_r = ['ok'=>false,'error'=>$__moodit_e->getMessage()]; }\n"
+                // L'identifiant reçu est RENVOYÉ : il rattache la réponse à SON appel.
+                + "  $__moodit_r['id'] = $__moodit_m['id'] ?? null;\n"
                 // Retour à la ligne AVANT la réponse : un echo sans « \n » ne s'y colle pas.
                 + "  fwrite(STDOUT, \"\\n\".json_encode($__moodit_r).\"\\n\");\n"
                 + "}\n";
         return new Assembled("php", List.of(
-                new PistonClient.File("grader.php", grader),
-                new PistonClient.File("student_server.php", server)));
+                new RunnerExec.File("grader.php", grader),
+                new RunnerExec.File("student_server.php", server)));
     }
 
     // ── Bash ─────────────────────────────────────────────────────────────────────
@@ -407,184 +596,114 @@ public class CodeAssembler {
      * chaque appel de fonction est délégué à un SOUS-PROCESSUS FRAIS ({@code bash student_server.sh})
      * qui charge le code étudiant, lit « nom args », appelle la fonction et renvoie sa sortie. Les
      * fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas d'objets). Le nonce est émis
-     * par le noteur (aucun code étudiant → infalsifiable) ; {@code grader.sh} est auto-supprimé.
+     * par le noteur, où aucun code étudiant ne tourne ; {@code grader.sh} est auto-supprimé.
+     * Le code soumis vit dans un fichier à part ({@code solution.sh}), chargé par le répartiteur
+     * APRÈS la lecture de l'identifiant et dans un sous-shell à la sortie capturée.
+     *
+     * <p><b>Portée de la garantie.</b> Le cadrage par identifiant ferme la forge par la sortie, et
+     * le code soumis ne reçoit pas l'identifiant. Il subsiste un <b>résiduel assumé</b>, de même
+     * nature que celui du harnais au format framework : le mode « exec » du runner exécute noteur
+     * et code soumis <b>sous le même UID</b> (contrairement au chemin des harnais booléens
+     * compilés, qui sépare les UID), donc un étudiant déterminé peut encore inspecter les
+     * processus voisins selon la politique {@code ptrace} de l'hôte. Pour un examen noté, la
+     * propriété « verdict non falsifiable » ne vaut que pour les six langages compilés avec un
+     * harnais booléen.
      */
     private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
         StringBuilder proxies = new StringBuilder();
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(BASH_FUNC, studentCode)) {
             if (f.startsWith("__moodit")) continue;
+            if (!harnessMentions(harnessCode, f)) continue;   // cf. harnessMentions
+            names.add(f);
             proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
         }
-        String grader = "rm -f grader.sh 2>/dev/null\n"     // hors de portée du serveur (fd déjà ouvert)
-                + "__moodit_rpc() { local __n=\"$1\"; shift; printf '%s\\n' \"$__n $*\""
-                + " | bash student_server.sh 2>/dev/null; }\n"
+        // REFUS d'un nom qui masque une commande : en bash, une fonction passe avant les
+        // commandes internes et les programmes du PATH. Le mandataire `test() { … }` remplaçait
+        // donc, dans le harnais, le `test` de `test "$(f)" = 9` par le code soumis — de même
+        // `expr`, `grep`, `bc`… Vérifié AVANT de définir les mandataires, par `type -t` dans
+        // l'image même : la liste est exactement celle des commandes que le harnais peut appeler.
+        String shadowCheck = names.isEmpty() ? "" : "for __moodit_n in " + String.join(" ", names)
+                + "; do if [ -n \"$(type -t \"$__moodit_n\")\" ]; then printf '%s%s%s\\n' "
+                + shellSingleQuote(SHADOW_PREFIX) + " \"$__moodit_n\" "
+                + shellSingleQuote(" » est réservé : il masque une commande de bash ou du "
+                        + "système, que le harnais peut appeler. Renommer cette fonction, puis "
+                        + "resoumettre.")
+                + " >&2; exit 1; fi; done\n";
+        // CADRAGE PAR IDENTIFIANT : la valeur rendue est la ligne « <id>|valeur », et seule
+        // celle-ci est retenue. Un `echo` de premier niveau du code étudiant ne vaut donc plus
+        // réponse — c'était la forge naïve (imprimer l'attendu, ne rien imprimer dans sa
+        // fonction). Le code étudiant ne peut pas davantage CONTREFAIRE cette ligne : le
+        // répartiteur lit l'identifiant AVANT de charger ce code (la ligne de requête est déjà
+        // consommée), et il charge puis appelle dans un SOUS-SHELL où l'identifiant est retiré de
+        // la portée et dont la sortie est CAPTURÉE.
+        //
+        // Deux détails qui comptent, parce que noteur et code soumis partagent l'UID :
+        //   — le répartiteur n'est PAS un fichier : il est passé à `bash -c`. Dans un fichier, le
+        //     code soumis pouvait le réécrire, et c'est lui qui détient l'identifiant à l'appel
+        //     suivant. Son texte ne contient aucun secret, le voir sur une ligne de commande ne
+        //     donne donc rien ;
+        //   — le filtrage de la réponse se fait DANS le shell du noteur (`case`), et non par un
+        //     `sed "s/^$__id|//p"` : l'identifiant passait alors en argument d'un processus, donc
+        //     lisible par tout voisin du même UID.
+        String dispatcher = "read -r __moodit_id __moodit_name __moodit_rest\n"
+                + "__moodit_val=$(unset __moodit_id;"
+                + " . ./solution.sh >/dev/null 2>&1;"
+                + " $__moodit_name $__moodit_rest)\n"
+                // STATUT de l'appel réel (celui de la substitution) : il voyage avec la valeur.
+                // Le mandataire renvoyait toujours 0 — `if est_pair 3` était vrai pour toute
+                // réponse, et une réponse juste qui renvoie 1 était notée fausse.
+                + "__moodit_st=$?\n"
+                // La valeur part en HEXADÉCIMAL sur UNE ligne : le noteur ne retient que la ligne
+                // « id|… », une valeur multi-ligne perdait donc tout sauf sa première — réponse
+                // juste notée fausse. `-v` est OBLIGATOIRE : sans lui, od compresse les répétitions
+                // en « * » et la valeur décodée serait fausse.
+                + "printf '%s|%s|%s\\n' \"$__moodit_id\" \"$__moodit_st\" "
+                + "\"$(printf '%s' \"$__moodit_val\" | od -An -vtx1 | tr -d ' \n')\"\n";
+        // Le noteur entier est UN SEUL bloc `{ … }` : bash le lit et l'analyse en entier avant
+        // d'en exécuter la première commande. Il peut donc VIDER son propre fichier avant tout
+        // appel au code soumis. L'effacer ne suffisait pas : bash garde le script ouvert (fd 255)
+        // et, sous le même UID, /proc/<pid>/fd/255 rouvrait le fichier supprimé — harnais et
+        // nonce compris. Vidé, il ne contient plus rien ; le nonce ne vit plus qu'en mémoire.
+        String grader = "{\n"
+                + ": > grader.sh 2>/dev/null; rm -f grader.sh 2>/dev/null\n"
+                + "__moodit_srv=" + shellSingleQuote(dispatcher) + "\n"
+                + "__moodit_rpc() { local __n=\"$1\"; shift;"
+                + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
+                + " printf '%s\\n' \"$__id $__n $*\" | bash -c \"$__moodit_srv\" 2>/dev/null"
+                // Ligne « id|statut|hex » : la valeur est décodée, puis le dernier élément du
+                // tube SORT avec le statut de l'appel réel — c'est celui du tube, donc du
+                // mandataire. Statut illisible ou réponse absente → 1, jamais 0.
+                + " | { while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
+                + " __l=\"${__l#*|}\"; __moodit_dec \"${__l#*|}\";"
+                + " case \"${__l%%|*}\" in ''|*[!0-9]*) exit 1;; esac; exit \"${__l%%|*}\";;"
+                + " esac; done; exit 1; }; }\n"
+                // Décodage en bash pur (pas de xxd dans l'image) : deux hexas → un octet,
+                // puis le saut de ligne que la ligne unique du protocole avait absorbé.
+                + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
+                + shadowCheck
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
-                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n";
-        String server = studentCode
-                + "\nread -r __moodit_name __moodit_rest\n"
-                + "$__moodit_name $__moodit_rest\n";
+                + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n"
+                + "}\n";
         return new Assembled("bash", List.of(
-                new PistonClient.File("grader.sh", grader),
-                new PistonClient.File("student_server.sh", server)));
+                new RunnerExec.File("grader.sh", grader),
+                new RunnerExec.File("solution.sh", studentCode)));
     }
 
-    // ── Go ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * Go : on neutralise le {@code func main} de l'étudiant (renommé) pour installer le nôtre, qui
-     * appelle le harnais. Réussi → sortie normale (exit 0) ; échec → {@code panic} (exit non nul) —
-     * ainsi aucun import supplémentaire (os/fmt) n'est requis, évitant les conflits d'imports.
-     */
-    private Assembled assembleGo(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll("func\\s+main\\s*\\(", "func __moodit_student_main(");
-        String program = neutralized
-                + "\n\nfunc __moodit_harness() bool {\n"
-                + harnessCode
-                + "\n}\n"
-                + "func main() {\n"
-                + "\tif __moodit_harness() {\n"
-                + "\t\tprint(\"" + nonce + "\")\n"
-                + "\t}\n"
-                + "}\n";
-        return new Assembled("go", List.of(new PistonClient.File("main.go", program)));
+    /** Littéral shell à guillemets simples, sûr pour un texte quelconque. */
+    private static String shellSingleQuote(String sourceText) {
+        return "'" + sourceText.replace("'", "'\\''") + "'";
     }
 
-    // ── Rust ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Rust : on neutralise le {@code fn main} éventuel de l'étudiant, puis notre main asserte le
-     * harnais (dernière expression = valeur de retour). {@code assert!} panique (exit non nul) si
-     * faux ; un {@code panic!} de l'étudiant vaut aussi échec. Aucun import requis.
-     */
-    private Assembled assembleRust(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll("fn\\s+main\\s*\\(", "fn __moodit_student_main(");
-        String program = neutralized
-                + "\n\nfn __moodit_harness() -> bool {\n"
-                + harnessCode
-                + "\n}\n"
-                + "fn main() {\n"
-                + "    if __moodit_harness() {\n"
-                + "        eprint!(\"" + nonce + "\");\n"
-                + "    }\n"
-                + "}\n";
-        return new Assembled("rust", List.of(new PistonClient.File("main.rs", program)));
-    }
-
-    // ── C ────────────────────────────────────────────────────────────────────────
-
-    /**
-     * C : le {@code main} de l'étudiant est renommé par macro ({@code #define main …}) avant son
-     * code, puis rétabli. Le harnais renvoie un {@code int} (non nul = réussi, cf. contrat) ; notre
-     * main en déduit l'exit code. Pas d'exceptions en C.
-     */
-    private Assembled assembleC(String studentCode, String harnessCode, String nonce) {
-        String program = "#define main __moodit_student_main\n"
-                + studentCode
-                + "\n#undef main\n"
-                + "#include <stdio.h>\n"
-                + "static int __moodit_harness(void) {\n"
-                + harnessCode
-                + "\n}\n"
-                + "int main(void) {\n"
-                + "    int __moodit_r = __moodit_harness();\n"
-                + "    if (__moodit_r != 0) fputs(\"" + nonce + "\", stderr);\n"
-                + "    return __moodit_r != 0 ? 0 : 1;\n"
-                + "}\n";
-        return new Assembled("c", List.of(new PistonClient.File("main.c", program)));
-    }
-
-    // ── C++ ──────────────────────────────────────────────────────────────────────
-
-    /**
-     * C++ : même bascule par macro que le C. Le harnais renvoie un {@code bool} ; une exception
-     * (capturée) vaut échec (exit 1).
-     */
-    private Assembled assembleCpp(String studentCode, String harnessCode, String nonce) {
-        String program = "#define main __moodit_student_main\n"
-                + studentCode
-                + "\n#undef main\n"
-                + "#include <iostream>\n"
-                + "static bool __moodit_harness() {\n"
-                + harnessCode
-                + "\n}\n"
-                + "int main() {\n"
-                + "    try {\n"
-                + "        if (__moodit_harness()) { std::cerr << \"" + nonce + "\"; return 0; }\n"
-                + "        return 1;\n"
-                + "    } catch (...) { return 1; }\n"
-                + "}\n";
-        return new Assembled("c++", List.of(new PistonClient.File("main.cpp", program)));
-    }
-
-    // ── C# ───────────────────────────────────────────────────────────────────────
-
-    /**
-     * C# : le {@code Main} de l'étudiant est renommé pour ne laisser qu'UN point d'entrée (le
-     * nôtre). Le harnais renvoie un {@code bool} ; une exception vaut échec. On qualifie tout via
-     * {@code System.*} pour ne dépendre d'aucun {@code using} supplémentaire.
-     */
-    private Assembled assembleCSharp(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode.replaceAll(
-                "(static\\s+(?:void|int)\\s+)Main(\\s*\\()", "$1__moodit_student_main$2");
-        String program = neutralized
-                + "\n\nclass __MooditHarness {\n"
-                + "    static bool __moodit_run() {\n"
-                + harnessCode
-                + "\n    }\n"
-                + "    static int Main() {\n"
-                + "        try {\n"
-                + "            if (__moodit_run()) { System.Console.Error.Write(\"" + nonce + "\"); return 0; }\n"
-                + "            return 1;\n"
-                + "        }\n"
-                + "        catch (System.Exception __e) { System.Console.Error.WriteLine(__e); return 1; }\n"
-                + "    }\n"
-                + "}\n";
-        return new Assembled("csharp", List.of(new PistonClient.File("main.cs", program)));
-    }
-
-    // ── Java ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Java : Piston exécute en mode « fichier-source unique » ({@code java Fichier.java}), donc la
-     * PREMIÈRE classe top-level doit porter le {@code main} (JEP 330) — ce mode tolère plusieurs
-     * classes publiques, donc on n'a PAS à toucher aux classes de l'étudiant (POO, abstract,
-     * interface… restent valides). Notre classe d'entrée {@code __MooditMain} (nom improbable pour
-     * ne pas heurter une classe étudiant, ex. « Main ») vient EN PREMIER ; on neutralise seulement
-     * le {@code main} étudiant pour éviter deux entrées. Le harnais référence les classes étudiant
-     * (ex. {@code new Rectangle(...)}, {@code Solution.solution(...)}).
-     */
-    private Assembled assembleJava(String studentCode, String harnessCode, String nonce) {
-        String neutralized = studentCode
-                .replaceAll("(static\\s+void\\s+)main(\\s*\\(\\s*String)", "$1__moodit_student_main$2");
-        String program = "public class __MooditMain {\n"
-                + "    static boolean __moodit_harness() {\n"
-                + harnessCode
-                + "\n    }\n"
-                + "    public static void main(String[] __args) {\n"
-                + "        try {\n"
-                + "            boolean __moodit_r = __moodit_harness();\n"
-                + "            if (__moodit_r) System.err.print(\"" + nonce + "\");\n"
-                + "            System.exit(__moodit_r ? 0 : 1);\n"
-                + "        } catch (Throwable __t) {\n"
-                + "            __t.printStackTrace();\n"
-                + "            System.exit(1);\n"
-                + "        }\n"
-                + "    }\n"
-                + "}\n\n"
-                + neutralized
-                + "\n";
-        return new Assembled("java", List.of(new PistonClient.File("Main.java", program)));
-    }
 
     /**
      * Nom de fichier pour un « run » Java : la classe publique doit correspondre au fichier
      * ({@code Solution} → {@code Solution.java}). À défaut, {@code Main.java}.
      */
+    /** Même règle que la notation : un seul lecteur du nom de fichier Java. */
     private static String javaFileName(String studentCode) {
-        var matcher = java.util.regex.Pattern
-                .compile("public\\s+class\\s+(\\w+)").matcher(studentCode);
-        return matcher.find() ? matcher.group(1) + ".java" : "Main.java";
+        return com.moodit.execution_service.sandbox.HarnessProjects.javaFileName(studentCode, "Main");
     }
 
     // ── JSON ─────────────────────────────────────────────────────────────────────
@@ -615,8 +734,8 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("submission.json", studentJson)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("submission.json", studentJson)));
     }
 
     /**
@@ -633,8 +752,8 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("submission.json", studentJson)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("submission.json", studentJson)));
     }
 
     // ── SQL (SQLite) ─────────────────────────────────────────────────────────────
@@ -660,7 +779,7 @@ public class CodeAssembler {
     /**
      * Noms (minuscules) des tables de TRAVAIL déclarées dans le SETUP du harnais (partie avant le
      * marqueur). Sert de LISTE BLANCHE au filtrage du dump : la phase 2 ne recharge QUE ces tables.
-     * Découple le filtrage de la plomberie du paquet Piston (ex. table {@code argv}) : tout ce qui
+     * Découple le filtrage de la plomberie de l'environnement sqlite (ex. table {@code argv}) : tout ce qui
      * n'est pas déclaré par le prof — plomberie, {@code sqlite_*}, tables fabriquées par l'étudiant —
      * est ignoré, quel que soit le paquet.
      */
@@ -709,7 +828,7 @@ public class CodeAssembler {
         }
         program.append('\n');
         appendFenced(program, harnessCode, nonce);
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -732,7 +851,7 @@ public class CodeAssembler {
         program.append("SELECT '").append(sqlDumpStart(nonce)).append("';\n");
         program.append(".dump\n");
         program.append("SELECT '").append(sqlDumpEnd(nonce)).append("';\n");
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -750,7 +869,7 @@ public class CodeAssembler {
             program.append('\n');
         }
         appendFenced(program, verdict, nonce);
-        return new Assembled("sqlite3", List.of(new PistonClient.File("main.sql", program.toString())));
+        return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
@@ -758,7 +877,7 @@ public class CodeAssembler {
      * {@code INSERT}) portant sur une table de la LISTE BLANCHE {@code allowedTables} (les tables de
      * travail déclarées par le prof, cf. {@link #sqlWorkingTables}). On jette donc TOUT le reste :
      * {@code CREATE VIEW}/{@code TRIGGER}/{@code INDEX}, {@code PRAGMA}, {@code BEGIN}/{@code COMMIT},
-     * la plomberie du paquet Piston ({@code argv}), les tables {@code sqlite_*}, et toute table
+     * la plomberie de l'environnement sqlite ({@code argv}), les tables {@code sqlite_*}, et toute table
      * fabriquée par l'étudiant. La phase 2 ne rejoue ainsi que des tables ATTENDUES + des INSERT à
      * littéraux échappés — aucun objet exécutable, aucun couplage aux internes du paquet.
      */
@@ -792,6 +911,12 @@ public class CodeAssembler {
      * Le découpage suit la même lexique que SQLite pour le {@code ;} : c'est ce qui garantit qu'aucun
      * fragment étudiant ne « déborde » de son {@code CREATE VIEW}. Les segments vides (blancs ou
      * commentaires seuls) sont ignorés.
+     *
+     * <p>Une ligne qui ne contient que {@code go} ou {@code /} (hors chaîne et commentaire) est
+     * AUSSI une fin d'instruction : l'interpréteur {@code sqlite3} la traite comme un {@code ;}
+     * (héritage SQL Server / Oracle). Sans cette règle, une telle ligne faisait sortir la
+     * réponse de son {@code CREATE VIEW} : la suite s'exécutait au premier niveau, commandes
+     * point comprises, et pouvait imprimer un bloc de verdict avant le vrai.
      */
     static List<String> splitSqlStatements(String sql) {
         List<String> statements = new ArrayList<>();
@@ -804,6 +929,16 @@ public class CodeAssembler {
         while (i < n) {
             char c = sql.charAt(i);
             char next = i + 1 < n ? sql.charAt(i + 1) : '\0';
+            if (i == 0 || sql.charAt(i - 1) == '\n') { // début de ligne : terminateur go ou / ?
+                int eol = sql.indexOf('\n', i);
+                int lineEnd = eol < 0 ? n : eol;
+                if (isShellTerminatorLine(sql.substring(i, lineEnd))) {
+                    addStatement(statements, current);
+                    current.setLength(0);
+                    i = eol < 0 ? n : eol + 1;
+                    continue;
+                }
+            }
             if (c == '-' && next == '-') { // commentaire de ligne
                 int end = sql.indexOf('\n', i + 2);
                 end = end < 0 ? n : end + 1; // inclut le saut de ligne
@@ -835,6 +970,57 @@ public class CodeAssembler {
         }
         addStatement(statements, current);
         return statements;
+    }
+
+    /**
+     * Vrai si la ligne est un terminateur d'instruction pour l'interpréteur {@code sqlite3} :
+     * {@code go} (casse indifférente) ou {@code /}, entourés seulement de blancs et de
+     * commentaires fermés — même règle que {@code line_is_command_terminator} du shell SQLite.
+     * Plus large que lui au besoin (découper davantage ne laisse rien déborder), jamais plus
+     * étroite.
+     */
+    static boolean isShellTerminatorLine(String line) {
+        int i = 0;
+        int n = line.length();
+        while (i < n && isSqlShellSpace(line.charAt(i))) {
+            i++;
+        }
+        if (i < n && line.charAt(i) == '/') {
+            return onlyBlanksOrComments(line, i + 1);
+        }
+        if (i + 1 < n && Character.toLowerCase(line.charAt(i)) == 'g'
+                && Character.toLowerCase(line.charAt(i + 1)) == 'o') {
+            return onlyBlanksOrComments(line, i + 2);
+        }
+        return false;
+    }
+
+    /** Reste de ligne fait uniquement de blancs, de {@code -- …} et de {@code /* … *}{@code /} fermés. */
+    private static boolean onlyBlanksOrComments(String line, int from) {
+        int i = from;
+        int n = line.length();
+        while (i < n) {
+            char c = line.charAt(i);
+            if (isSqlShellSpace(c)) {
+                i++;
+            } else if (c == '-' && i + 1 < n && line.charAt(i + 1) == '-') {
+                return true; // commentaire jusqu'à la fin de la ligne
+            } else if (c == '/' && i + 1 < n && line.charAt(i + 1) == '*') {
+                int close = line.indexOf("*/", i + 2);
+                if (close < 0) {
+                    return false; // commentaire ouvert : l'instruction n'est pas complète
+                }
+                i = close + 2;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Blancs au sens de {@code isspace} du C (ce qu'utilise le shell SQLite). */
+    private static boolean isSqlShellSpace(char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\u000B' || c == '\f';
     }
 
     /** Position APRÈS le délimiteur fermant d'un littéral ouvert en {@code start} par {@code quote}
@@ -898,9 +1084,9 @@ public class CodeAssembler {
                 + "  process.exit(1);\n"
                 + "}\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", main),
-                new PistonClient.File("htmlparser.js", vendor("htmlparser.js")),
-                new PistonClient.File("submission.html", studentHtml)));
+                new RunnerExec.File("main.js", main),
+                new RunnerExec.File("htmlparser.js", vendor("htmlparser.js")),
+                new RunnerExec.File("submission.html", studentHtml)));
     }
 
     // ── JSX / TSX (React) ────────────────────────────────────────────────────────
@@ -917,7 +1103,8 @@ public class CodeAssembler {
         // (main.js) exécute le harnais INCHANGÉ avec des proxys DOM ; le SERVEUR (jsx-server.js)
         // transpile + rend/monte le composant étudiant et détient le DOM. `html`, `mount`, `click`,
         // `fireEvent` et les nœuds DOM (querySelector, textContent…) sont proxifiés par RPC synchrone.
-        // Le nonce est émis par le noteur (aucun code étudiant → infalsifiable) — plus de fichier nonce.
+        // Le nonce est émis par le noteur, où aucun code étudiant ne tourne — plus de fichier nonce
+        // (même réserve que Python : UID partagé, cf. assemblePython).
         String server = "const fs = require('fs');\n"
                 + "const rt = require('./react-runtime.js');\n"
                 + "const { React, ReactDOMServer, ReactDOMClient, act, HappyDOM, Babel } = rt;\n"
@@ -925,6 +1112,10 @@ public class CodeAssembler {
                 + "global.window = win; global.document = win.document; global.navigator = win.navigator;\n"
                 + "globalThis.IS_REACT_ACT_ENVIRONMENT = true;\n"
                 + "['HTMLElement','Element','Node','Text','Event','MouseEvent','KeyboardEvent','InputEvent','CustomEvent','getComputedStyle','customElements','requestAnimationFrame','cancelAnimationFrame'].forEach(function(k){ if(win[k]!==undefined) global[k]=win[k]; });\n"
+                // console.log/info neutralisés AVANT le chargement du composant : le stdout
+                // du serveur est le canal de réponse, et un log honnête au niveau module ou
+                // pendant le rendu le polluait — comme dans le serveur JS ordinaire.
+                + "console.log=function(){}; console.info=function(){};\n"
                 + "let Composant;\n"
                 + "try {\n"
                 + "  let src = fs.readFileSync(__dirname + '/component.tsx','utf8');\n"
@@ -952,16 +1143,34 @@ public class CodeAssembler {
                 + "      else if(m.op==='fireEvent'){ act(function(){ reg[m.handle].dispatchEvent(new window.Event(m.type, Object.assign({bubbles:true,cancelable:true}, m.init||{}))); }); r={ok:true,value:null}; }\n"
                 + "      else r={ok:false,error:'op inconnu'};\n"
                 + "    } catch(e){ r={ok:false,error:String(e&&e.message||e)}; }\n"
-                + "    process.stdout.write(JSON.stringify(r)+NL);\n"
+                // L'identifiant reçu est RENVOYÉ (il rattache la réponse à SON appel), et
+                // la réponse est AUTO-CADRÉE par un saut de ligne initial : une écriture
+                // étudiante sans saut de ligne final ne la contamine pas.
+                + "    r.id=m.id;\n"
+                + "    process.stdout.write(NL+JSON.stringify(r)+NL);\n"
                 + "  }});\n";
         String grader = "const cp=require('child_process'), fs=require('fs');\n"
                 + "try{fs.unlinkSync('main.js');}catch(e){}\n"
                 + "const NL=String.fromCharCode(10);\n"
                 + "const child=cp.spawn(process.execPath,['jsx-server.js'],{stdio:['pipe','pipe','inherit']});\n"
                 + "child.stdout.pause(); const outFd=child.stdout._handle.fd;\n"
-                + "function rpc(o){ child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20); let s='';\n"
-                + "  while(s.indexOf(NL)<0){ let n; try{n=fs.readSync(outFd,b,0,b.length,null);}catch(e){if(e.code==='EAGAIN')continue;throw e;} if(n===0)break; s+=b.toString('utf8',0,n); }\n"
-                + "  const r=JSON.parse(s.split(NL)[0]); if(!r.ok) throw new Error(r.error); return r; }\n"
+                // IDENTIFIANT IMPRÉVISIBLE par appel, exigé dans la réponse — même invariant
+                // que les neuf autres répartiteurs : sans lui, une ligne conforme écrite
+                // d'avance par le composant était consommée comme réponse (devancement), et
+                // un console.log honnête cassait le JSON de la première ligne (réponse juste
+                // notée 0). Tampon PERSISTANT : l'ancien lecteur jetait tout ce qui suivait
+                // la première ligne à chaque appel.
+                + "const crypto=require('crypto'); let buf='';\n"
+                + "function rpc(o){ o.id=crypto.randomBytes(8).toString('hex');\n"
+                + "  child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20);\n"
+                + "  for(;;){ let i;\n"
+                + "    while((i=buf.indexOf(NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
+                + "      let r; try{ r=JSON.parse(line); }catch(e){ continue; }\n"
+                + "      if(!r || typeof r!=='object' || r.id!==o.id) continue;\n"
+                + "      if(!r.ok) throw new Error(r.error); return r; }\n"
+                + "    let n; try{ n=fs.readSync(outFd,b,0,b.length,null); }catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
+                + "    if(n===0) throw new Error('processus etudiant termine'); \n"
+                + "    buf+=b.toString('utf8',0,n); } }\n"
                 + "function uw(r){ if(r.node!==undefined) return elp(r.node); return r.value; }\n"
                 + "function elp(handle){ return new Proxy({__h:handle}, { get(t,p){ if(p==='__h')return handle;\n"
                 + "  const r=rpc({op:'get',handle,name:String(p)});\n"
@@ -979,9 +1188,9 @@ public class CodeAssembler {
                 + "try{ child.stdin.end(); }catch(e){}\n"
                 + "process.exit(__moodit_r?0:1);\n";
         return new Assembled("javascript", List.of(
-                new PistonClient.File("main.js", grader),
-                new PistonClient.File("jsx-server.js", server),
-                new PistonClient.File("react-runtime.js", vendor("react-runtime.js")),
-                new PistonClient.File("component.tsx", studentCode)));
+                new RunnerExec.File("main.js", grader),
+                new RunnerExec.File("jsx-server.js", server),
+                new RunnerExec.File("react-runtime.js", vendor("react-runtime.js")),
+                new RunnerExec.File("component.tsx", studentCode)));
     }
 }

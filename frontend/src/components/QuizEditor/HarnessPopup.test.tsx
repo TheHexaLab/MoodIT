@@ -3,7 +3,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { HarnessBody } from './HarnessPopup';
 import { EditorShell } from './EditorShell';
 import { defaultHarnessLabels } from './harnessLabels';
-import { type TestCaseDraft } from './editorTypes';
+import { type TestCaseDraft, defaultHarness } from './editorTypes';
 import { type Language } from '../../types/domain';
 import './editorTestSetup';
 
@@ -58,6 +58,28 @@ describe('HarnessBody', () => {
     renderHarness({ testCases: cases });
     const names = screen.getAllByPlaceholderText(t.namePlaceholder) as HTMLInputElement[];
     expect(names.map((n) => n.value)).toEqual(['Cas A', 'Cas B']);
+  });
+
+  it('« Ajouter » fait défiler la liste jusqu’au nouveau harnais', () => {
+    // jsdom n'implémente pas scrollIntoView, et rAF est rendu synchrone pour observer l'effet.
+    const scrolled = vi.fn();
+    const previousScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    const raf = vi
+      .spyOn(globalThis, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+    try {
+      renderHarness();
+      fireEvent.click(screen.getByText(`+ ${t.add}`));
+      expect(scrolled).toHaveBeenCalled();
+    } finally {
+      raf.mockRestore();
+      // Restaurer le prototype : sans ça, le mock fuyait dans les tests suivants du fichier.
+      Element.prototype.scrollIntoView = previousScrollIntoView;
+    }
   });
 
   it('« Ajouter » insère une carte avec le squelette par défaut et poids 1', () => {
@@ -179,6 +201,37 @@ describe('HarnessBody', () => {
       fireEvent.change(weightInput, { target: { value: '' } });
       const save = screen.getByText(t.save).closest('button') as HTMLButtonElement;
       expect(save.disabled).toBe(true);
+    });
+  });
+
+  // Harnais-code PARTOUT, y compris les langages compilés (notés en deux processus isolés) :
+  // l'éditeur montre toujours l'éditeur de harnais-code.
+  describe('harnais-code pour un langage compilé', () => {
+    const JAVA: Language = { id: 5, name: 'Java' };
+
+    it("affiche l'éditeur de harnais-code pour un compilé", () => {
+      renderHarness({
+        harnessLanguage: JAVA,
+        testCases: [{ id: 1, name: 'A', harnessCode: 'return Main.doubler(5) == 10;', weight: 1 }],
+      });
+      expect(screen.getByLabelText(t.codeAria(1))).toBeTruthy();
+    });
+
+    it('« Ajouter » insère le gabarit booléen du langage compilé', () => {
+      // Le gabarit vient de defaultHarness, comme dans QuizEditor : l'ancien gabarit Java
+      // (« lève une exception ») décrivait une forme que le runner refuse.
+      const { onSave } = renderHarness({
+        harnessLanguage: JAVA,
+        defaultHarnessCode: defaultHarness(JAVA, undefined),
+      });
+      fireEvent.click(screen.getByText(`+ ${t.add}`));
+      fireEvent.change(screen.getByPlaceholderText(t.namePlaceholder), {
+        target: { value: 'A' },
+      });
+      fireEvent.click(screen.getByText(t.save));
+      const saved = onSave.mock.calls[0][0] as TestCaseDraft[];
+      expect(saved[0].harnessCode).toMatch(/renvoie true/);
+      expect(saved[0].harnessCode).not.toMatch(/exception/);
     });
   });
 });

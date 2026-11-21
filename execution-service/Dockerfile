@@ -1,5 +1,5 @@
-# JS vendor stage : bundle en fichiers UNIQUES les libs JS injectées dans le sandbox Piston pour
-# les langages « données/vues » (HTML → parseur DOM). Piston n'a ni npm ni réseau : on embarque
+# JS vendor stage : bundle en fichiers UNIQUES les libs JS injectées dans le conteneur runner pour
+# les langages « données/vues » (HTML → parseur DOM). Le runner n'a ni npm ni réseau : on embarque
 # ces bundles dans l'image et l'assembleur les joint à la soumission.
 FROM node:24-alpine AS jsvendor
 WORKDIR /vendor
@@ -21,7 +21,13 @@ FROM eclipse-temurin:25-jdk AS builder
 WORKDIR /app
 COPY gradlew ./
 COPY gradle ./gradle
-RUN apt-get update && apt-get install -y dos2unix && dos2unix gradlew && chmod +x gradlew
+# Fins de ligne de gradlew : `sed`, et NON `apt-get install dos2unix`. Cette installation
+# etait une dependance RESEAU sur le chemin critique de la CI et du deploiement : une panne
+# DNS du runner (archive.ubuntu.com non resolu) faisait echouer la construction des six
+# images, sans qu'une ligne du depot ait change. `.gitattributes` garantit deja LF partout
+# (`* text=auto eol=lf`), et `sed` est dans l'image de base — la normalisation ne reste donc
+# que comme filet, pour des sources recues hors de git (archive produite sous Windows).
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
 COPY build.gradle.kts settings.gradle.kts ./
 RUN ./gradlew dependencies --no-daemon
 COPY src ./src

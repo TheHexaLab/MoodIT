@@ -62,8 +62,7 @@ step() { printf '\n[%s] ===== %s =====\n' "$(date '+%F %T')" "$*" >>"$LOG"
 fail() { printf '[%s] ÉCHEC : %s\n' "$(date '+%F %T')" "$*" >>"$LOG"
          printf '\n%s✖ ÉCHEC : %s%s\n' "$RED" "$*" "$RST"; exit 1; }
 
-# Conteneurs à longue durée de vie (piston_init et db_migrate sont one-shot, traités à part).
-SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_piston moodit_execution"
+SERVICES_UP="moodit_caddy moodit_postgres moodit_frontend moodit_gateway moodit_core moodit_auth moodit_permission moodit_mcp moodit_execution"
 BOX_H="${BOX_H:-14}"   # hauteur (lignes) de la boîte de sortie du build
 
 # Répète un caractère n fois (gère l'UTF-8 des bordures).
@@ -169,9 +168,6 @@ hcheck() {
       printf '[%s] health %s: %s%s (KO)\n' "$(date '+%F %T')" "$name" "$st" "${health:+ ($health)}" >>"$LOG"; allok=0
     fi
   done
-  st="$(docker inspect -f '{{.State.Status}}' moodit_piston_init 2>/dev/null || echo absent)"
-  health="$(docker inspect -f '{{.State.ExitCode}}' moodit_piston_init 2>/dev/null || echo '?')"
-  printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "piston_init" "$DIM" "$st" "$health" "$RST"
   st="$(docker inspect -f '{{.State.Status}}' moodit_db_migrate 2>/dev/null || echo absent)"
   health="$(docker inspect -f '{{.State.ExitCode}}' moodit_db_migrate 2>/dev/null || echo '?')"
   printf '   %s·%s %-14s %s%s (exit %s, one-shot)%s\n' "$DIM" "$RST" "db_migrate" "$DIM" "$st" "$health" "$RST"
@@ -237,6 +233,21 @@ if ! git reset --hard "origin/$BRANCH"; then
   fail "git reset --hard origin/$BRANCH impossible — aucun changement appliqué."
 fi
 ok "Code aligné sur origin/$BRANCH (${REMOTE:0:8})"
+# Images runner taguées par COMMIT, lues par execution-service via SANDBOX_IMAGE_TAG (compose) :
+# le service et le superviseur ne se parlent sans version de format que s'ils viennent du même
+# commit. Construire les nouvelles images ne touche donc plus celles du service encore en place.
+# Le commit retenu est le DERNIER qui touche l'un des deux : le commit déployé changeait à chaque
+# mise à jour, et compose recréait execution-service — corrections en cours coupées — même pour
+# un déploiement du seul frontend.
+runner_tag() {
+  local c
+  c="$(git log -1 --format=%H "$1" -- docker/runners execution-service 2>/dev/null)"
+  c="${c:-$1}"
+  printf '%s' "${c:0:12}"
+}
+NEW_RUNNER_TAG="$(runner_tag "$REMOTE")"
+OLD_RUNNER_TAG="$(runner_tag "$LOCAL")"
+export MOODIT_RUNNER_TAG="$NEW_RUNNER_TAG"
 log "Résumé des changements :"
 git --no-pager log --oneline --no-decorate "${LOCAL}..${REMOTE}" 2>/dev/null | head -n 15 | sed 's/^/     /' || true
 
@@ -261,6 +272,13 @@ fi
 rollback() {
   warn "Rollback du code vers ${LOCAL:0:8}…"
   git reset --hard "$LOCAL" >/dev/null 2>&1 || true
+  # Images runner de l'ANCIENNE version : sans elles, l'ancien service tournerait avec celles
+  # du commit refusé. `latest` d'abord (un ancien compose ne lit que lui), puis le tag du commit.
+  export MOODIT_RUNNER_TAG="$OLD_RUNNER_TAG"
+  MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
+    || warn "Rollback : images runner (latest) non reconstruites."
+  bash docker/runners/build.sh >>"$LOG" 2>&1 \
+    || warn "Rollback : images runner (${MOODIT_RUNNER_TAG}) non reconstruites."
   $COMPOSE up -d --build >>"$LOG" 2>&1 || warn "Rollback : échec du redémarrage de l'ancienne version."
   fail "Build/déploiement de la nouvelle version échoué — ancienne version restaurée."
 }
@@ -268,10 +286,24 @@ rollback() {
 step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
+# Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
+if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
 ok "Images construites."
 
+# Mode exec (interprétés, SQL, vues) : noteur et code soumis y partagent l'UID, et seul
+# kernel.yama.ptrace_scope ≥ 1 empêche le code soumis de lire la mémoire du noteur (cf.
+# execution-service/ISOLATION.md, « Résiduel connu »). Les conteneurs héritent de la valeur de
+# l'hôte. Avertissement, pas un échec : les six langages compilés ne dépendent pas de ce réglage.
+PTRACE_SCOPE="$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo absent)"
+case "$PTRACE_SCOPE" in
+  1|2|3) : ;;
+  *) warn "kernel.yama.ptrace_scope = ${PTRACE_SCOPE} sur l'hôte : la note des langages INTERPRÉTÉS est falsifiable. Corriger : « sysctl -w kernel.yama.ptrace_scope=1 », et le rendre durable dans /etc/sysctl.d/." ;;
+esac
+
 step "5/5 · Redémarrage des services"
-if ! stream "Démarrage des services" $COMPOSE up -d; then rollback; fi
+# --remove-orphans : retire les conteneurs des services disparus du compose (ex. piston,
+# piston-init après #116) — sinon ils tournent pour toujours (restart: unless-stopped).
+if ! stream "Démarrage des services" $COMPOSE up -d --remove-orphans; then rollback; fi
 ok "Services démarrés."
 
 # Le Caddyfile est monté comme fichier seul : `up -d` ne recrée pas Caddy quand seul ce fichier
@@ -290,6 +322,14 @@ fi
 
 # --- 4. Nettoyage des images orphelines -------------------------------------
 docker image prune -f >/dev/null 2>&1 || true
+# Images runner des commits ANTÉRIEURS : on garde latest, la version déployée et la précédente
+# (rollback à la main). Une image encore utilisée par un conteneur n'est pas supprimée.
+docker images --format '{{.Repository}}:{{.Tag}}' | grep '^moodit-runner-' | while read -r image; do
+  case "${image##*:}" in
+    latest|"$NEW_RUNNER_TAG"|"$OLD_RUNNER_TAG") ;;
+    *) docker rmi "$image" >/dev/null 2>&1 || true ;;
+  esac
+done
 
 # --- 5. Health check --------------------------------------------------------
 step "Vérification de santé"

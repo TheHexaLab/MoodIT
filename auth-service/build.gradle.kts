@@ -70,7 +70,7 @@ tasks.test {
 
 // Tests de mutation (#90) : `./gradlew pitest` (rapport build/reports/pitest/). PIT modifie le code
 // (conditions inversées, retours changés…) et vérifie que les tests le détectent. Lancé la nuit et
-// sur main, pas sur chaque PR (plusieurs minutes). Tests exigeant Postgres ou Piston exclus.
+// sur main, pas sur chaque PR (plusieurs minutes). Tests exigeant Postgres ou Docker exclus.
 pitest {
     pitestVersion = "1.30.1"
     junit5PluginVersion = "1.2.3"

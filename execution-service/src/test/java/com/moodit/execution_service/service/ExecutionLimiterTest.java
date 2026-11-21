@@ -222,4 +222,85 @@ class ExecutionLimiterTest {
         // Bornes minimales acceptées.
         assertThat(new ExecutionLimiter(1, 0, 1).availableSlots()).isEqualTo(1);
     }
+
+    @Test
+    void a_slot_stays_reserved_for_internal_grading() throws Exception {
+        // max = 2 : le PUBLIC ne peut occuper qu'UNE place — un conteneur de notation public
+        // (qui peut vivre des minutes) ne doit jamais affamer la correction interne.
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> holder = occupy(pool, release, limiter::withSandboxSlot);
+            // Deuxième appel PUBLIC : refusé — la place restante est réservée à l'interne.
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
+                    .isInstanceOf(ExecutionBusyException.class);
+            // Un appel INTERNE, lui, obtient la place réservée.
+            assertThat(limiter.asInternal(() -> limiter.withSandboxSlot(() -> "interne")))
+                    .isEqualTo("interne");
+            release.countDown();
+            assertThat(holder.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void a_slot_stays_reserved_for_public_calls() throws Exception {
+        // max = 3 (prod) : les corrections internes n'occupent que DEUX places — une file de
+        // soumissions (fin d'examen) ne doit jamais refuser tous les « Exécuter ».
+        ExecutionLimiter limiter = new ExecutionLimiter(3, 0, 200, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> g1 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            Future<String> g2 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            // Troisième correction : refusée après son attente — la place restante est publique.
+            assertThatThrownBy(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> "non")))
+                    .isInstanceOf(ExecutionBusyException.class)
+                    .hasMessage(ExecutionBusyException.SANDBOX_BUSY);
+            assertThat(limiter.availableSlots()).isEqualTo(1);
+            // Un appel PUBLIC, lui, obtient la place réservée, sans attendre.
+            assertThat(limiter.withSandboxSlot(() -> "public")).isEqualTo("public");
+            release.countDown();
+            assertThat(g1.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            assertThat(g2.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            // Places rendues des deux côtés : une correction repasse.
+            assertThat(limiter.availableSlots()).isEqualTo(3);
+            assertThat(limiter.asInternal(() -> limiter.withSandboxSlot(() -> "interne"))).isEqualTo("interne");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void internal_context_is_visible_and_restored() {
+        // Le mur du conteneur dépend de ce drapeau (public : plafond court).
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 2);
+        assertThat(limiter.isInternal()).isFalse();
+        assertThat(limiter.asInternal(limiter::isInternal)).isTrue();
+        assertThat(limiter.isInternal()).isFalse();
+    }
+
+    @Test
+    void public_wait_does_not_exceed_configured_delay() throws Exception {
+        // Les deux acquisitions (place publique puis place globale) partagent UNE échéance :
+        // sinon l'appelant patientait 2 × queue-wait-ms avant son 429.
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 300, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            occupy(pool, release, limiter::withSandboxSlot);   // occupe l'unique place publique
+            long start = System.nanoTime();
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
+                    .isInstanceOf(ExecutionBusyException.class);
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertThat(elapsedMs).isLessThan(600);            // < 2 × 300 ms
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
 }

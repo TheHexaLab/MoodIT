@@ -36,7 +36,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.TransactionDefinition;
 
 /**
  * Soumission ASYNCHRONE d'une tentative ({@link QuizService#submitQuiz}) et correction en tâche de
@@ -129,7 +131,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
         @org.junit.jupiter.params.provider.MethodSource("ordresMalFormes")
         @DisplayName("Ordre soumis qui n'est pas une permutation des éléments → refusé (400), rien d'enregistré")
-        void ordreMalForme_refuse(String cas, Integer[] ids) {
+        void ordreMalForme_refuse(String caseInput, Integer[] ids) {
             when(quizRepository.findById(4)).thenReturn(Optional.of(orderingQuiz()));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
 
@@ -205,7 +207,43 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
             verify(eventPublisher).publishEvent(event.capture());
             assertThat(event.getValue().attemptId()).isEqualTo(55);
+            // La question Code n'a aucun harnais : rien à exécuter, donc pool rapide.
+            assertThat(event.getValue().needsSandbox()).isFalse();
             verify(transactionManager).commit(any());
+        }
+
+        @Test
+        @DisplayName("Question Code avec harnais → évènement marqué needsSandbox (pool du code)")
+        void questionCodeAvecHarnais_needsSandbox() {
+            testCase(codeQ, 90, "cas", 1);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> {
+                Attempt a = inv.getArgument(0);
+                a.setId(57);
+                return a;
+            });
+
+            service.submitQuiz(4, body(), EMAIL);
+
+            ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
+            verify(eventPublisher).publishEvent(event.capture());
+            assertThat(event.getValue()).isEqualTo(new AttemptSubmittedEvent(57, true));
+        }
+
+        @Test
+        @DisplayName("Harnais sur une question qui n'est pas de type Code → pas de sandbox")
+        void harnaisHorsQuestionCode_pasDeSandbox() {
+            testCase(choiceQ, 91, "cas", 1);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.submitQuiz(4, body(), EMAIL);
+
+            ArgumentCaptor<AttemptSubmittedEvent> event = ArgumentCaptor.forClass(AttemptSubmittedEvent.class);
+            verify(eventPublisher).publishEvent(event.capture());
+            assertThat(event.getValue().needsSandbox()).isFalse();
         }
 
         @Test
@@ -279,7 +317,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             service.gradeAttempt(ATTEMPT_ID);
 
             verifyNoInteractions(executionClient, realtimePublisher, submissionTestCaseRepository);
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
         }
 
         @Test
@@ -287,14 +325,17 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @SuppressWarnings("unchecked")
         void succes_persisteVerdictsEtPousse() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            // Le temps limite de la QUESTION doit arriver tel quel à l'exécution (épinglé par
+            // eq(30_000) plus bas : un null silencieux passerait avec any()).
+            codeQ.setExecTimeoutMs(30_000);
             // Harnais triés par id (31 puis 32) → verdicts alignés sur cet ordre.
-            when(executionClient.evaluate(eq("python"), eq("print(1)"), any())).thenReturn(List.of(true, false));
+            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), eq(30_000))).thenReturn(List.of(true, false));
 
             service.gradeAttempt(ATTEMPT_ID);
 
             ArgumentCaptor<List<ExecutionClient.Harness>> harnesses = ArgumentCaptor.forClass(List.class);
             // Une seule question exécutée : celle sans harnais et la question à choix sont ignorées.
-            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture());
+            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), eq(30_000));
             assertThat(harnesses.getValue()).containsExactly(
                     new ExecutionClient.Harness("cas A", "assert cas A", 2),
                     new ExecutionClient.Harness("cas B", "assert cas B", 1));
@@ -310,7 +351,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             assertThat(attempt.getStatus()).isEqualTo("done");
             verify(attemptRepository).save(attempt);
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
         }
 
         @Test
@@ -318,23 +359,42 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void sansLangage_langageNull() {
             codeQ.setLanguage(null);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(executionClient).evaluate(eq(null), eq("print(1)"), any());
+            verify(executionClient).evaluate(eq(null), eq("print(1)"), any(), any());
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
+        }
+
+        @Test
+        @DisplayName("Correction interrompue par l'arrêt de core → tentative LAISSÉE pending (reprise au démarrage)")
+        void correctionInterrompue_laissePending() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any()))
+                    .thenThrow(new com.moodit.core_service.exception.GradingInterruptedException());
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            // Ni suppression, ni verdict, ni notification : resumePendingGradings la reprendra.
+            verify(attemptRepository, never()).delete(any());
+            verify(attemptRepository, never()).findByIdForUpdate(any());
+            verify(realtimePublisher, never()).quizAttemptFailed(anyLong(), anyLong(), anyLong(), any());
+            verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
+            verifyNoInteractions(submissionTestCaseRepository);
+            assertThat(attempt.getStatus()).isEqualTo("pending");
         }
 
         @Test
         @DisplayName("Sandbox indisponible (null) → pending SUPPRIMÉ et push quiz:attempt-failed")
         void sandboxIndisponible_supprimeEtNotifie() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
             verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
             verifyNoInteractions(submissionTestCaseRepository);
@@ -342,14 +402,58 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Démarrage → chaque pending revient avec son pool (harnais ou non)")
+        void pendingGradings_aiguilleSelonLesHarnais() {
+            Question choiceOnly = question(40, SINGLE, 1.0, 0);
+            Quiz choiceQuiz = quiz(5, course(1), choiceOnly);
+            Attempt choiceAttempt = attempt(71, choiceQuiz, eva, 1, "pending");
+            when(attemptRepository.findByStatusOrderByIdAsc("pending"))
+                    .thenReturn(List.of(attempt, choiceAttempt));
+
+            assertThat(service.pendingGradings()).containsExactly(
+                    new AttemptSubmittedEvent(ATTEMPT_ID, true),
+                    new AttemptSubmittedEvent(71, false));
+            verifyNoInteractions(executionClient, realtimePublisher);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+        }
+
+        @Test
+        @DisplayName("Démarrage sans pending → liste vide")
+        void pendingGradings_aucun() {
+            when(attemptRepository.findByStatusOrderByIdAsc("pending")).thenReturn(List.of());
+
+            assertThat(service.pendingGradings()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Correction refusée par l'executor → pending supprimé dans une NOUVELLE transaction, push failed")
+        void abandon_supprimeDansUneNouvelleTransaction() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+
+            service.abandonGrading(ATTEMPT_ID, new TaskRejectedException("file pleine"));
+
+            verify(attemptRepository).delete(attempt);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
+            verifyNoInteractions(executionClient);
+            // Appelé depuis le rappel after-commit de la soumission : en REQUIRED, la lecture et la
+            // suppression rejoindraient la transaction déjà committée et ne seraient jamais écrites.
+            ArgumentCaptor<TransactionDefinition> defs = ArgumentCaptor.forClass(TransactionDefinition.class);
+            verify(transactionManager, times(2)).getTransaction(defs.capture());
+            assertThat(defs.getAllValues()).allSatisfy(def -> assertThat(def.getPropagationBehavior())
+                    .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+        }
+
+        @Test
         @DisplayName("Nombre de verdicts incohérent → traité comme une indisponibilité (suppression)")
         void verdictsIncoherents_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
         }
 
@@ -357,11 +461,12 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Erreur inattendue pendant l'exécution → pending supprimé quand même")
         void erreurInattendue_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
         }
 
@@ -371,11 +476,12 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))
                     .thenThrow(new IllegalStateException("BD indisponible"));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).delete(attempt);
             verifyNoInteractions(realtimePublisher);
         }
 
@@ -385,12 +491,60 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))   // contexte
                     .thenReturn(Optional.empty());      // finalisation, puis lookup de l'échec
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(attemptRepository).deleteById(ATTEMPT_ID);
+            verify(attemptRepository).findByIdForUpdate(ATTEMPT_ID);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verify(attemptRepository, never()).save(any());
+            verifyNoInteractions(realtimePublisher);
+        }
+
+        @Test
+        @DisplayName("Tentative déjà corrigée (reprise au démarrage) → rien n'est exécuté, ni supprimé, ni poussé")
+        void dejaCorrigee_rienAFaire() {
+            attempt.setStatus("done");
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verifyNoInteractions(executionClient, realtimePublisher, submissionTestCaseRepository);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+            verify(attemptRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Finalisée par une autre passe pendant l'exécution → aucune écriture, aucun push, pas de suppression")
+        void finaliseeParUneAutrePasse_ignoree() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenAnswer(inv -> {
+                attempt.setStatus("done"); // l'autre passe a committé pendant le sandbox
+                return List.of(true, true);
+            });
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verifyNoInteractions(submissionTestCaseRepository, realtimePublisher);
+            verify(attemptRepository, never()).save(any());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+        }
+
+        @Test
+        @DisplayName("Échec d'une passe alors que l'autre a finalisé → la tentative done n'est PAS supprimée, aucun push failed")
+        void echecApresFinalisationParLAutre_rienNestSupprime() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            // Clé (submission, test_case) déjà écrite par l'autre passe.
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(submissionTestCaseRepository.save(any()))
+                    .thenThrow(new DataIntegrityViolationException("pk"));
+            // Relue sous verrou : l'autre passe l'a finalisée.
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID))
+                    .thenReturn(Optional.of(attempt(ATTEMPT_ID, quiz, eva, 1, "done")));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verifyNoInteractions(realtimePublisher);
         }
 
@@ -398,14 +552,14 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Push WS en échec après correction → la tentative corrigée n'est PAS supprimée")
         void pushEchoue_tentativeConservee() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
             doThrow(new IllegalStateException("WS fermé"))
                     .when(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
 
             service.gradeAttempt(ATTEMPT_ID);
 
             assertThat(attempt.getStatus()).isEqualTo("done");
-            verify(attemptRepository, never()).deleteById(anyInt());
+            verify(attemptRepository, never()).delete(any(Attempt.class));
             verify(realtimePublisher, never())
                     .quizAttemptFailed(anyLong(), anyLong(), anyLong(), any());
         }

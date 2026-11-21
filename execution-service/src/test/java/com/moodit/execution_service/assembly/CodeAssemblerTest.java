@@ -1,11 +1,12 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,9 +31,9 @@ class CodeAssemblerTest {
     void python_isolates_student_in_a_separate_process_via_rpc() {
         var a = assembler.assemble("Python", "def solution():\n    return 5",
                 "return solution() == 5", "MOODIT_OK_deadbeef");
-        assertThat(a.pistonLanguage()).isEqualTo("python");
+        assertThat(a.runtime()).isEqualTo("python");
         // Deux fichiers : le NOTEUR (grader.py, en 1er = point d'entrée) et le SERVEUR étudiant.
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.py", "student_server.py");
         String grader = a.files().get(0).content();
         String server = a.files().get(1).content();
@@ -66,8 +67,8 @@ class CodeAssemblerTest {
     void javascript_isolates_student_via_rpc() {
         var a = assembler.assemble("JavaScript", "function doubler(n){ return n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_js");
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.js", "student_server.js");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n)", "MOODIT_OK_js");
         assertThat(a.files().get(0).content())
@@ -75,14 +76,92 @@ class CodeAssemblerTest {
                 .contains("unlinkSync('grader.js')");   // auto-suppression du noteur
     }
 
+    /**
+     * Le serveur partage le module du code soumis : après lui, il ne doit plus nommer que ses
+     * propres identifiants. Un nom nu d'intégrée ou d'objet global y serait celui que l'étudiant
+     * a pu redéfinir (fonction d'aide {@code print}, {@code JSON}, variable {@code process}…).
+     */
     @Test
-    void typescript_uses_extensionless_names_and_ts_nocheck() {
+    void python_server_takes_its_builtins_before_the_submitted_code() {
+        var a = assembler.assemble("Python", "def print(x):\n    return None\ndef f():\n    return 5",
+                "return f() == 5", "N");
+        String server = a.files().get(1).content();
+        assertThat(server).startsWith(
+                "import sys as __moodit_sys, json as __moodit_json, builtins as __moodit_b\n");
+        String loop = server.substring(server.indexOf("def __moodit_serve():"));
+        assertThat(loop)
+                .contains("__moodit_b.globals()[m['name']]")
+                .contains("__moodit_b.len(objs)")
+                .contains("__moodit_b.getattr(objs[m['handle']], m['name'])")
+                .contains("__moodit_b.str(e)")
+                .contains("except __moodit_b.Exception")
+                .contains("__moodit_b.print('\\n' + __moodit_json.dumps(r), flush=True)");
+        assertThat(loop).doesNotContainPattern("(?<![.\\w])(print|len|str|getattr|globals)\\(");
+        // L'attribut de la poignée ne peut plus porter le nom d'une méthode soumise.
+        var withClass = assembler.assemble("Python", "class R:\n    def _h(self):\n        return 1",
+                "return R()._h() == 1", "N");
+        assertThat(withClass.files().get(0).content())
+                .contains("\"__moodit_h\"").doesNotContain("\"_h\"");
+    }
+
+    @Test
+    void javascript_server_names_only_its_own_identifiers_after_the_submitted_code() {
+        for (String language : List.of("JavaScript", "TypeScript")) {
+            var a = assembler.assemble(language, "function i(x){ return x; }",
+                    "return i(1) === 1;", "N");
+            String server = a.files().get(1).content();
+            // Objets globaux pris AVANT le code soumis, sans nommer d'identifiant masquable.
+            int student = server.indexOf("function i(x)");
+            assertThat(server.substring(0, student))
+                    .as(language)
+                    .contains("const __moodit_G=[].constructor.constructor('return this')();")
+                    .contains("__moodit_JSON=__moodit_G.JSON")
+                    .contains("__moodit_process=__moodit_G.process")
+                    .contains("__moodit_String=__moodit_G.String");
+            // Après lui : résolution hors des locales de la boucle, et rien que des noms préfixés.
+            String after = server.substring(student + "function i(x){ return x; }".length());
+            assertThat(after)
+                    // `eval` d'abord ; `exports` n'est qu'un repli (cf. le test d'exécution
+                    // typescript_export_forms_are_graded : `export const f = memo(…)`).
+                    .startsWith("\nconst __moodit_get=(__moodit_n)=>{ try{ return eval(__moodit_n); }"
+                            + "catch(__moodit_e){ let __moodit_x; try{ __moodit_x=exports[__moodit_n]; }"
+                            + "catch(__moodit_f){} if(__moodit_x===void 0) throw __moodit_e;"
+                            + " return __moodit_x; } };\n")
+                    .contains("__moodit_get(__moodit_m.name)(...__moodit_m.args)")
+                    .contains("new (__moodit_get(__moodit_m.cls))(...__moodit_m.args)");
+            String code = after.replaceAll("'[^']*'", "''");
+            assertThat(code).doesNotContainPattern(
+                    "(?<![.\\w$])(JSON|process|String|console|objs|hid|buf|line)\\b");
+            assertThat(code).doesNotContainPattern("(?<![.\\w$])(d|i|m|r|h|e)(?![\\w$:])");
+        }
+    }
+
+    @Test
+    void typescript_exported_symbols_get_a_proxy() {
+        // `export function f` est l'écriture ordinaire d'un module TypeScript : sans mandataire,
+        // le harnais ne trouvait pas `f` et une réponse juste était notée fausse.
+        var a = assembler.assemble("TypeScript",
+                "export function doubler(n: number): number { return n * 2; }\n"
+                        + "export const tripler = (n: number): number => n * 3;\n"
+                        + "export default class Rect { aire(): number { return 1; } }\n"
+                        + "export abstract class Forme { }\n",
+                "return doubler(1) === 2 && tripler(1) === 3 && new Rect().aire() === 1;", "N");
+        assertThat(a.files().get(0).content())
+                .contains("function doubler(...a)")
+                .contains("function tripler(...a)")
+                .contains("const Rect = new Proxy(")
+                .doesNotContain("const Forme");      // le harnais ne la nomme pas
+    }
+
+    @Test
+    void typescript_named_ts_and_type_checking_disabled() {
         var a = assembler.assemble("TypeScript", "function doubler(n: number): number { return n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_ts");
-        assertThat(a.pistonLanguage()).isEqualTo("typescript");
-        // Fichiers SANS extension → Piston écrit du .ts et compile en .js (student_server.js).
-        assertThat(a.files()).extracting(PistonClient.File::name)
-                .containsExactly("grader", "student_server");
+        assertThat(a.runtime()).isEqualTo("typescript");
+        // Fichiers .ts : transpilés côte à côte par le runner (tsc --noCheck) en .js
+        // (student_server.js, résolu par le spawn du grader).
+        assertThat(a.files()).extracting(RunnerExec.File::name)
+                .containsExactly("grader.ts", "student_server.ts");
         assertThat(a.files().get(0).content()).startsWith("// @ts-nocheck");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler(n: number)", "MOODIT_OK_ts");
     }
@@ -91,8 +170,8 @@ class CodeAssemblerTest {
     void php_isolates_student_via_rpc() {
         var a = assembler.assemble("PHP", "<?php\nfunction doubler($n){ return $n*2; }",
                 "return doubler(5) === 10;", "MOODIT_OK_php");
-        assertThat(a.pistonLanguage()).isEqualTo("php");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("php");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("grader.php", "student_server.php");
         assertRpcIsolation(a, "return doubler(5) === 10;", "function doubler($n)", "MOODIT_OK_php");
         assertThat(a.files().get(0).content())
@@ -103,12 +182,28 @@ class CodeAssemblerTest {
     void bash_isolates_student_via_rpc() {
         var a = assembler.assemble("Bash", "doubler() { echo $(( $1 * 2 )); }",
                 "[ \"$(doubler 5)\" = \"10\" ]", "MOODIT_OK_bash");
-        assertThat(a.pistonLanguage()).isEqualTo("bash");
-        assertThat(a.files()).extracting(PistonClient.File::name)
-                .containsExactly("grader.sh", "student_server.sh");
-        assertRpcIsolation(a, "$(doubler 5)", "doubler() {", "MOODIT_OK_bash");
+        assertThat(a.runtime()).isEqualTo("bash");
+        // Le code soumis est dans son PROPRE fichier : le répartiteur lit l'identifiant de
+        // l'appel avant de le charger, et le charge dans un sous-shell à la sortie capturée. Le
+        // répartiteur, lui, n'est pas un fichier — le code soumis pourrait le réécrire.
+        assertThat(a.files()).extracting(RunnerExec.File::name)
+                .containsExactly("grader.sh", "solution.sh");
+        assertThat(a.files().get(0).content()).contains("$(doubler 5)").contains("MOODIT_OK_bash");
+        assertThat(a.files().get(1).content()).contains("doubler() {")
+                .doesNotContain("MOODIT_OK_bash");
         assertThat(a.files().get(0).content())
                 .contains("doubler() { __moodit_rpc doubler").contains("rm -f grader.sh");
+        // Le noteur est un seul bloc, analysé en entier par bash avant toute exécution, qui VIDE
+        // son fichier en premier : le fd 255 que bash garde ouvert ne rouvre plus ni harnais ni
+        // nonce (/proc/<pid>/fd/255, même UID que le code soumis).
+        String grader = a.files().get(0).content();
+        assertThat(grader).startsWith("{\n: > grader.sh 2>/dev/null; rm -f grader.sh")
+                .endsWith("fi\n}\n");
+        // La valeur voyage en HEX sur UNE ligne (od -v : sans lui, les répétitions se
+        // compressent en « * ») et le noteur la décode : une valeur multi-ligne perdait tout
+        // sauf sa première ligne — réponse juste notée fausse.
+        assertThat(a.files().get(0).content())
+                .contains("od -An -vtx1").contains("__moodit_dec");
     }
 
     @Test
@@ -139,7 +234,7 @@ class CodeAssemblerTest {
         var asm = new CodeAssembler(vendorDir.toString());
         var a = asm.assemble("JSX", "function Composant(){ return React.createElement('h1', null, 'Bonjour'); }",
                 "return html.includes('<h1>Bonjour</h1>');", "MOODIT_OK_jsx");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("main.js", "jsx-server.js", "react-runtime.js", "component.tsx")
                 .doesNotContain("moodit-nonce.txt", "harness.js");   // plus de fichier nonce ni harnais voisin
         String grader = a.files().get(0).content();
@@ -157,50 +252,33 @@ class CodeAssemblerTest {
     }
 
     @Test
-    void java_puts_our_entry_first_and_renames_student_main() {
-        var a = assembler.assemble("Java",
-                "public class Solution { public static int solution(){ return 5; } "
-                        + "public static void main(String[] a){} }",
-                "return Solution.solution() == 5;", "MOODIT_OK_java");
-        assertThat(a.pistonLanguage()).isEqualTo("java");
-        String c = onlyFileContent(a);
-        assertThat(c).startsWith("public class __MooditMain");   // notre classe d'entrée en 1er
-        assertThat(c).contains("__moodit_student_main");         // main étudiant neutralisé
-        assertThat(c).contains("MOODIT_OK_java");
-    }
-
-    @Test
-    void c_neutralizes_main_via_macro() {
-        var a = assembler.assemble("C", "int solution(void){ return 5; }",
-                "return solution() == 5;", "MOODIT_OK_c");
-        String c = onlyFileContent(a);
-        assertThat(c).contains("#define main __moodit_student_main");
-        assertThat(c).contains("#undef main");
-        assertThat(c).contains("MOODIT_OK_c");
-    }
-
-    @Test
     void language_aliases_are_resolved() {
-        assertThat(assembler.assemble("js", "function solution(){}", "return true;", "N").pistonLanguage())
+        assertThat(assembler.assemble("js", "function solution(){}", "return true;", "N").runtime())
                 .isEqualTo("javascript");
-        assertThat(assembler.assemble("cpp", "int solution(){return 0;}", "return true;", "N").pistonLanguage())
-                .isEqualTo("c++");
-        assertThat(assembler.assemble("c#", "class S{}", "return true;", "N").pistonLanguage())
-                .isEqualTo("csharp");
+    }
+
+    @Test
+    void compiled_languages_are_rejected_here_evaluated_by_docker_runner() {
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
+        for (String language : new String[] {"Java", "C#", "Go", "Rust", "C", "C++", "cpp", "cs"}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> assembler.assemble(language, "code", "harnais", "N"))
+                    .isInstanceOf(UnsupportedLanguageException.class);
+        }
     }
 
     @Test
     void json_produces_main_and_submission_files() {
         var a = assembler.assemble("JSON", "{\"nom\":\"Alice\"}", "return data.nom === 'Alice';", "N");
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactlyInAnyOrder("main.js", "submission.json");
     }
 
     @Test
     void sql_exposes_student_query_as_solution_view() {
         var a = assembler.assemble("SQL", "SELECT nom FROM t", "SELECT count(*) FROM solution = 1;", "N");
-        assertThat(a.pistonLanguage()).isEqualTo("sqlite3");
+        assertThat(a.runtime()).isEqualTo("sqlite3");
         // Requête unique → solution1, et l'alias « solution » pour la compat mono-requête.
         assertThat(onlyFileContent(a))
                 .contains("CREATE VIEW solution1 AS")
@@ -233,6 +311,141 @@ class CodeAssemblerTest {
         String content = onlyFileContent(a);
         assertThat(content).contains("CREATE VIEW solution1 AS");
         assertThat(content).doesNotContain("CREATE VIEW solution2 AS"); // une seule instruction
+    }
+
+    @Test
+    void sql_go_or_slash_line_cannot_take_the_answer_out_of_its_view() {
+        // Revue #246 : sqlite3 traite une ligne « go » ou « / » seule comme un `;`. Le
+        // découpage ne coupait que sur `;` : la suite de la réponse sortait du CREATE VIEW et
+        // s'exécutait au premier niveau (commandes point comprises), où elle pouvait imprimer
+        // un faux bloc de verdict. Elle est désormais enfermée dans sa propre vue.
+        var a = assembler.assemble("SQL", "SELECT 0\ngo\n.print evade\n/\nSELECT 2",
+                "SELECT 1;", "N");
+        String content = onlyFileContent(a);
+        assertThat(content)
+                .contains("CREATE VIEW solution1 AS\nSELECT 0\n;")
+                .contains("CREATE VIEW solution2 AS\n.print evade\n;")
+                .contains("CREATE VIEW solution3 AS\nSELECT 2\n;")
+                .doesNotContain("\ngo\n");
+    }
+
+    @Test
+    void splitSqlStatements_go_and_slash_lines_are_terminators_like_the_sqlite_shell() {
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\n  GO  \nSELECT 2\n/\nSELECT 3"))
+                .containsExactly("SELECT 1", "SELECT 2", "SELECT 3");
+        // Blancs et commentaires fermés autour : toujours un terminateur (règle du shell).
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngo -- fin\nSELECT 2\n\t/ /* x */\r\nSELECT 3"))
+                .containsExactly("SELECT 1", "SELECT 2", "SELECT 3");
+        // Première ligne du texte, et dernière sans saut de ligne final.
+        assertThat(CodeAssembler.splitSqlStatements("go\nSELECT 1\ngo")).containsExactly("SELECT 1");
+        // Dans une chaîne, un identifiant ou un commentaire : PAS un terminateur.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 'a\ngo\nb'")).containsExactly("SELECT 'a\ngo\nb'");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1 /*\ngo\n*/")).containsExactly("SELECT 1 /*\ngo\n*/");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT \"a\n/\nb\"")).containsExactly("SELECT \"a\n/\nb\"");
+        // Ni « go » collé à autre chose, ni une ligne qui ne fait que commencer par go.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngoal\nFROM t\ngo;")).hasSize(1);
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\n/ 2\nFROM t")).hasSize(1);
+        assertThat(CodeAssembler.splitSqlStatements("SELECT 1\ngo /* ouvert\n*/ FROM t")).hasSize(1);
+    }
+
+    @Test
+    void filterDumpToData_a_go_line_cannot_smuggle_a_statement_into_phase_2() {
+        String dump = "CREATE TABLE t(v);\nINSERT INTO t VALUES(1)\ngo\nSELECT 'forge';\n";
+        assertThat(CodeAssembler.filterDumpToData(dump, java.util.Set.of("t")))
+                .contains("INSERT INTO t VALUES(1)")
+                .doesNotContain("forge");
+    }
+
+    @Test
+    void python_verdict_uses_the_real_bool_and_refuses_shadowed_builtins() {
+        // Revue #246 : un mandataire `bool` masquait la fonction intégrée dans le VERDICT
+        // (`bool(__moodit_harness())`), et tout harnais passait.
+        var a = assembler.assemble("Python", "def bool(x):\n    return True\ndef f():\n    return 0",
+                "return bool(f()) == 1", "N");
+        String grader = a.files().get(0).content();
+        assertThat(grader)
+                .contains("__moodit_bool = __moodit_builtins.bool")
+                .contains("__moodit_r = __moodit_bool(__moodit_harness())")
+                .doesNotContain("= bool(__moodit_harness())")
+                // Refus vérifié AVANT le lancement du processus étudiant.
+                .contains("[\"bool\", \"f\"] if hasattr(__moodit_builtins, __n)");
+        assertThat(grader.indexOf("if __moodit_shadow:"))
+                .isLessThan(grader.indexOf("__moodit_subprocess.Popen"));
+    }
+
+    @Test
+    void helper_the_harness_does_not_name_gets_no_proxy_and_no_refusal() {
+        // Revue #246 : une fonction d'aide `max`, `sum`, `File` ou `test` que le harnais
+        // n'appelle pas était refusée (« Nom réservé ») — 0 sur une réponse juste. Sans
+        // mandataire dans le noteur, elle n'y masque plus rien et n'a plus à être refusée.
+        String py = assembler.assemble("Python",
+                "def max(a, b):\n    return a if a > b else b\ndef plus_grand(a, b, c):\n"
+                        + "    return max(a, max(b, c))\nclass sum:\n    pass",
+                "return plus_grand(1, 9, 3) == 9", "N").files().get(0).content();
+        assertThat(py)
+                .contains("[\"plus_grand\"] if hasattr(__moodit_builtins, __n)")
+                .contains("def plus_grand(*a):")
+                .doesNotContain("def max(*a):")
+                .doesNotContain("class sum:");
+
+        String js = assembler.assemble("JavaScript",
+                "class File { taille(){ return 1; } }\nfunction parseInt(x){ return 0; }\n"
+                        + "const double = (n) => n * 2;",
+                "return double(4) === 8;", "N").files().get(0).content();
+        assertThat(js)
+                .startsWith("const __moodit_shadow=[\"double\"]")
+                .contains("function double(...a)")
+                .doesNotContain("function parseInt(...a)")
+                .doesNotContain("const File = new Proxy");
+
+        String sh = assembler.assemble("Bash", "test() { echo 1; }\ncarre() { echo $(( $1 * $1 )); }",
+                "[ \"$(carre 3)\" = 9 ]", "N").files().get(0).content();
+        assertThat(sh)
+                .contains("for __moodit_n in carre; do")
+                .contains("carre() { __moodit_rpc carre \"$@\"; }")
+                .doesNotContain("test() { __moodit_rpc");
+    }
+
+    @Test
+    void harnessMentions_matches_whole_identifiers_only() {
+        assertThat(CodeAssembler.harnessMentions("return max(1, 2) == 2", "max")).isTrue();
+        assertThat(CodeAssembler.harnessMentions("return maximum(1, 2) == 2", "max")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return le_max(1, 2) == 2", "max")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "f")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "$f")).isTrue();
+        assertThat(CodeAssembler.harnessMentions(null, "f")).isFalse();
+        // Dans le doute (chaîne, commentaire), le nom compte comme employé.
+        assertThat(CodeAssembler.harnessMentions("return f() == 'max'", "max")).isTrue();
+    }
+
+    @Test
+    void javascript_refuses_names_that_shadow_a_global_before_any_use() {
+        var a = assembler.assemble("JavaScript", "function Number(x){ return 3; }\nconst f = () => 0;",
+                "return Number(f()) === 3;", "N");
+        String grader = a.files().get(0).content();
+        assertThat(grader)
+                .startsWith("const __moodit_shadow=[\"Number\", \"f\"]")
+                .contains("(n in [].constructor.constructor('return this')())")
+                .contains("\"require\"");
+        var ts = assembler.assemble("TypeScript", "function parseInt(x: string): number { return 3; }",
+                "return parseInt('1') === 3;", "N");
+        assertThat(ts.files().get(0).content())
+                .startsWith("// @ts-nocheck\nconst __moodit_shadow=[\"parseInt\"]");
+    }
+
+    @Test
+    void bash_refuses_names_that_shadow_a_command_and_propagates_the_status() {
+        var a = assembler.assemble("Bash", "test() { :; }\nest_pair() { return 1; }",
+                "test \"$(est_pair 4)\" = 9", "N");
+        String grader = a.files().get(0).content();
+        // Refus par `type -t` dans l'image, AVANT de définir les mandataires.
+        assertThat(grader).contains("for __moodit_n in test est_pair; do if [ -n \"$(type -t");
+        assertThat(grader.indexOf("type -t")).isLessThan(grader.indexOf("test() { __moodit_rpc"));
+        // Le statut de l'appel réel voyage avec la valeur et devient celui du mandataire.
+        assertThat(grader).contains("__moodit_st=$?").contains("exit \"${__l%%|*}\"");
+        // Sans fonction soumise : pas de boucle de refus (une liste vide serait inutile).
+        assertThat(assembler.assemble("Bash", "x=1", "true", "N").files().get(0).content())
+                .doesNotContain("for __moodit_n in");
     }
 
     @Test
@@ -375,7 +588,7 @@ class CodeAssemblerTest {
     @Test
     void run_returns_student_code_verbatim() {
         var a = assembler.assembleRun("Python", "print('hi')");
-        assertThat(a.pistonLanguage()).isEqualTo("python");
+        assertThat(a.runtime()).isEqualTo("python");
         assertThat(onlyFileContent(a)).isEqualTo("print('hi')");
     }
 

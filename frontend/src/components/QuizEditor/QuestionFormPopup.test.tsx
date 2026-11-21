@@ -326,6 +326,78 @@ describe('QuestionFormBody', () => {
     expect(saveButton(t.add).disabled).toBe(false);
   });
 
+  it('code : le temps limite saisi en secondes est stocké en millisecondes', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel, { exact: false }), { target: { value: '5' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(5000);
+  });
+
+  it('code : vider le temps limite revient au défaut du sandbox', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      execTimeoutMs: 8000,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    expect(input.value).toBe('8');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBeUndefined();
+  });
+
+  it('code : le temps limite est borné à 1-60 s entières (saisie et blur)', () => {
+    // Sans bornage, la valeur partait telle quelle au backend et l'aperçu « Tester »
+    // divergeait de la correction réelle. Ces cas échouent si le clamp est retiré.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '61' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('60');
+
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('1');
+
+    fireEvent.change(input, { target: { value: '2.6' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('3');
+
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(3000);
+  });
+
+  it('code : la frappe n’est pas réécrite en cours de saisie (bornage au blur)', () => {
+    // Sans tampon texte, le clamp s'appliquait à CHAQUE frappe : taper « 75 » affichait « 7 »
+    // puis « 60 », et l'utilisateur ne pouvait plus corriger sa saisie.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '7' } });
+    expect(input.value).toBe('7');
+    fireEvent.change(input, { target: { value: '75' } });
+    expect(input.value).toBe('75');        // la frappe reste intacte…
+    fireEvent.blur(input);
+    expect(input.value).toBe('60');        // …et n'est bornée qu'à la sortie du champ.
+  });
+
   it('code : changer de langage repose le code de départ et vide les harnais', () => {
     const draft: QuestionDraft = {
       ...emptyQuestionDraft('coding'),

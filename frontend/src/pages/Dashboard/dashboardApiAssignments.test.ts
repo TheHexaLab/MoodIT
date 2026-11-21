@@ -47,7 +47,13 @@ describe('devoirs : données fictives', () => {
   });
 
   it('une remise s’ajoute au devoir et le remplace au besoin', async () => {
-    const [assignment] = (await fetchAssignments(3)).filter((a) => !a.submission);
+    // Le devoir à l’échéance la plus LOINTAINE : les échéances fictives sont relatives à
+    // « maintenant » en heure LOCALE, et le premier devoir de la liste peut échoir le jour
+    // même — déjà passé en CI (UTC) mais pas en local (UTC−5), donc « late » basculait
+    // selon le fuseau et l’heure du run. Celui de la semaine prochaine ne bascule jamais.
+    const candidats = (await fetchAssignments(3)).filter((a) => !a.submission && a.dueAt);
+    const assignment = candidats.reduce((x, y) =>
+      new Date(x.dueAt!) > new Date(y.dueAt!) ? x : y);
 
     const updated = await submitAssignment(3, assignment.id, ['mon.zip']);
     expect(updated.submission?.fileNames).toEqual(['mon.zip']);
@@ -227,10 +233,17 @@ describe('devoirs : données fictives', () => {
 
   it('une remise n’est en retard que si la date limite est passée', async () => {
     const assignments = await fetchAssignments(9);
-    const open = assignments.find((a) => new Date(a.dueAt!) > new Date() && a.submittedCount > 0)!;
-    const over = assignments.find(
-      (a) => new Date(a.dueAt!) < new Date() && a.gradedCount < a.submittedCount
-    )!;
+    // « Ouvert » = l'échéance la plus LOINTAINE parmi les devoirs à remises (la fixture garantit
+    // +21 jours), « dépassé » = la plus ANCIENNE parmi les sous-notés (−28 jours) : les find(...)!
+    // précédents prenaient « un futur quelconque » — un samedi soir UTC, plus aucune échéance de
+    // la semaine n'était future, et le ! transformait le trou en TypeError, CI rouge jusqu'au
+    // lendemain. Les deux gardes rendent le contrat de la fixture explicite et bruyant.
+    const avecRemises = assignments.filter((a) => a.dueAt && a.submittedCount > 0);
+    const open = avecRemises.reduce((x, y) => (new Date(x.dueAt!) > new Date(y.dueAt!) ? x : y));
+    const sousNotes = assignments.filter((a) => a.dueAt && a.gradedCount < a.submittedCount);
+    const over = sousNotes.reduce((x, y) => (new Date(x.dueAt!) < new Date(y.dueAt!) ? x : y));
+    expect(new Date(open.dueAt!).getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(over.dueAt!).getTime()).toBeLessThan(Date.now());
     expect((await fetchAssignmentSubmissions(open)).some((r) => r.status === 'late')).toBe(false);
     expect((await fetchAssignmentSubmissions(over)).some((r) => r.status === 'late')).toBe(true);
   });

@@ -131,3 +131,59 @@ jobs:
         with:
           sarif_file: trivy.sarif
           category: trivy-${{ matrix.service }}
+
+  # ─────────────────────────────────────────────────────────────────────────────────────────
+  # Images RUNNER (#116) : les seules où tourne du code étudiant, et les seules que rien ne
+  # scannait — la matrice ci-dessus ne couvre que les services, qui n'exécutent que notre code.
+  #
+  # NON BLOQUANT pour ces images, et c'est un choix mesuré : au crible de la CI (CRITICAL,
+  # corrigeables), sept sont à zéro, mais `go` en compte une quarantaine, `c` (gcc) 205 et `rust`
+  # 208, toutes venant des images officielles de chaînes de compilation. Bloquer dessus arrêterait
+  # le dépôt sur des CVE amont qu'une PR ne peut pas corriger ; les résultats remontent donc dans
+  # Code scanning, visibles et suivis, au lieu de n'être vus par personne. Réduire ces chiffres
+  # (bases plus minces pour c/go/rust) se décide à froid, pas dans un gate.
+  #
+  # UNE CATÉGORIE PAR IMAGE, comme le job ci-dessus. Un seul téléversement de dix SARIF échouerait :
+  # `upload-sarif` n'identifie un run que par le nom, la version et le GUID de l'outil, plus
+  # `automationDetails.id` — six champs identiques dans les dix SARIF de Trivy. L'action refuse
+  # alors « multiple SARIF runs with the same category », et l'échec n'apparaîtrait qu'après la
+  # fusion, ce job ne tournant pas sur les PR.
+  trivy-runners:
+    name: Trivy — runner ${{ matrix.lang }}
+    runs-on: ubuntu-latest
+    # Pas sur les PR : construire ces images à chaque proposition taxerait la CI pour un résultat
+    # informatif. Le gate BLOQUANT des sept services, lui, reste sur les PR.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [java, csharp, go, rust, c, python, node, php, bash, sqlite]
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # build.sh reste la seule source de vérité sur la façon de construire ces images.
+      - name: Construire l'image runner
+        run: bash docker/runners/build.sh ${{ matrix.lang }}
+
+      - name: Scanner l'image runner
+        run: |
+          trivy() { docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache -v "$PWD:/out" "$TRIVY_IMAGE" "$@"; }
+          # SARIF limité aux CRITICAL : c'est la sévérité sur laquelle porte la règle du dépôt, et
+          # au-delà de 5 000 résultats par run Code scanning tronque (c et rust en comptent ~200
+          # en CRITICAL, mais plus de 1 900 avec les HIGH). Le tableau du journal, lui, garde
+          # HIGH+CRITICAL : la vue complète reste consultable.
+          trivy image --severity CRITICAL --ignore-unfixed --exit-code 0 \
+            --format sarif --output /out/trivy.sarif moodit-runner-${{ matrix.lang }}:latest
+          trivy image -q --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --skip-db-update \
+            moodit-runner-${{ matrix.lang }}:latest
+
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-runner-${{ matrix.lang }}

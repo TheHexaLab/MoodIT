@@ -1,7 +1,7 @@
 package com.moodit.execution_service.controller;
 
 import com.moodit.execution_service.assembly.UnsupportedLanguageException;
-import com.moodit.execution_service.piston.PistonException;
+import com.moodit.execution_service.sandbox.SandboxException;
 import com.moodit.execution_service.service.ExecutionBusyException;
 
 import org.springframework.http.HttpHeaders;
@@ -21,9 +21,18 @@ public class GlobalExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
     }
 
-    /** Sandbox injoignable / en erreur → 502 (dépendance amont indisponible). */
-    @ExceptionHandler(PistonException.class)
-    public ProblemDetail handlePiston(PistonException e) {
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /**
+     * Sandbox Docker injoignable / en erreur (#116) → 502 (dépendance amont indisponible).
+     * La cause est JOURNALISÉE : la réponse reste générique, et sans cette trace une image runner
+     * absente, un mur dépassé ou un démon muet — qui suppriment chacun une tentative — ne
+     * laissaient rien à l'exploitant pour les distinguer.
+     */
+    @ExceptionHandler(SandboxException.class)
+    public ProblemDetail handleSandbox(SandboxException e) {
+        LOG.warn("Sandbox d'exécution en échec (502) : {}", e.getMessage(), e);
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
                 "Sandbox d'exécution indisponible");
     }

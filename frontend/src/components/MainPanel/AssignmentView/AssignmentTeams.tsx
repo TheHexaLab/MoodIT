@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './AssignmentView.module.css';
 import formStyles from './AssignmentFormPopup.module.css';
 import { Popup } from '../../Popup/Popup';
@@ -212,10 +212,16 @@ export function ManageTeamsPopup({
    * Retirer un membre, une équipe ou placer un étudiant fait disparaître le contrôle cliqué. Le focus
    * sortirait alors de la fenêtre (Échap et Tab ne marcheraient plus) : on le pose au prochain rendu
    * sur le premier sélecteur trouvé, sinon sur « Ajouter une équipe ».
+   *
+   * Effet de mise en page, pas `useEffect` : un effet passif encore en attente du rendu précédent
+   * (ex. celui qui suit le chargement) est vidé par React juste avant le rendu du clic, donc APRÈS
+   * que le gestionnaire a posé la demande. Il la consommait alors sur l'ancien DOM : le focus allait
+   * au contrôle cliqué, qui disparaissait aussitôt, et retombait sur <body>. Un effet de mise en
+   * page s'exécute dans le même commit que le rendu : il voit toujours le DOM à jour.
    */
   const focusAfterRender = useRef<string[] | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const selectors = focusAfterRender.current;
     if (!selectors) return;
     focusAfterRender.current = null;

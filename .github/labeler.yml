@@ -23,7 +23,7 @@ permission-service:
 
 execution-service:
   - changed-files:
-      - any-glob-to-any-file: ["execution-service/**", "piston/**"]
+      - any-glob-to-any-file: ["execution-service/**", "docker/runners/**"]
 
 mcp-service:
   - changed-files:

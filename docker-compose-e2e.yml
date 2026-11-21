@@ -3,7 +3,7 @@
 #
 #   docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml \
 #     up -d --build --no-deps --wait postgres mailpit auth-service core-service permission-service \
-#     mcp-service piston execution-service gateway frontend
+#     mcp-service execution-service gateway frontend
 #
 # Profil dev : requis par l'endpoint de validation /auth/verify/{username} et par le code 2FA fixe
 # (DEV_FIXED_2FA_CODE, refusé hors dev). `environment:` l'emporte sur le `.env.docker` des services
@@ -14,7 +14,8 @@
 #  - Courriels : capturés par Mailpit (faux SMTP, API http://localhost:8025) au lieu de Gmail ; les
 #    tests y lisent les codes de validation / réinitialisation.
 #  - MCP : LLM_API_KEY vide → repli déterministe de mcp-service, sans Ollama ni réseau.
-#  - Piston : démarré sans piston-init (12 langages) ; la CI n'installe que Python.
+#  - Code étudiant : exécuté par les conteneurs runner (#116) via le démon Docker de l'hôte ;
+#    start-stack.sh ne construit que l'image Python (seul langage des quiz e2e).
 #  - Base : Flyway applique aussi db/demo (données de démo), jamais chargées en prod.
 
 x-e2e-env: &e2e-env
@@ -77,12 +78,6 @@ services:
   mcp-service:
     container_name: moodit_e2e_mcp
     environment: *e2e-env
-  piston:
-    container_name: moodit_e2e_piston
-    ports:
-      # Installation de Python par start-stack.sh (curl depuis l'hôte), comme docker-compose-ci.yml.
-      # Lié à 127.0.0.1 : aucun autre conteneur ne joint Piston par l'adresse de l'hôte.
-      - "127.0.0.1:2000:2000"
   execution-service:
     container_name: moodit_e2e_execution
     environment: *e2e-env

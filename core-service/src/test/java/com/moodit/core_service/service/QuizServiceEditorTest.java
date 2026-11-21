@@ -273,6 +273,31 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             verify(quizRepository).save(any(Quiz.class));
         }
 
+        @Test
+        @DisplayName("execTimeoutMs : non positif → null (défaut du sandbox), plafonné à 60 s, arrondi à la seconde supérieure")
+        void execTimeout_normalizedOnWrite() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            java.util.function.Function<Integer, QuestionDTO> q = ms -> QuestionDTO.builder()
+                    .qType("multiple_choice").execTimeoutMs(ms)
+                    .answers(List.of(AnswerDTO.builder().content("A").isCorrect(true).build()))
+                    .build();
+
+            service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(q.apply(-5_000), q.apply(999_999), q.apply(30_000), q.apply(null),
+                            q.apply(1_500), q.apply(1), q.apply(Integer.MAX_VALUE)))
+                    .build());
+
+            org.mockito.ArgumentCaptor<Quiz> saved = org.mockito.ArgumentCaptor.forClass(Quiz.class);
+            verify(quizRepository).save(saved.capture());
+            // 1 500 ms → 2 s : le runner tronquait à 1 s ce que core budgétait à 1,5 s.
+            assertThat(saved.getValue().getQuestions())
+                    .extracting(com.moodit.core_service.model.Question::getExecTimeoutMs)
+                    .containsExactly(null, 60_000, 30_000, null, 2_000, 1_000, 60_000);
+        }
+
         /** Remise en ordre (2e question du quiz) dont les éléments portent ces correctOrder. */
         private QuizDetailDTO orderingQuiz(Integer... orders) {
             List<DragItemDTO> items = new java.util.ArrayList<>();

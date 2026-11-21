@@ -1,7 +1,7 @@
 # Déploiement MoodIT sur un VPS Hetzner (~8 €/mois)
 
 Guide de bout en bout : d'un compte Hetzner vide à l'app en HTTPS.
-LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **Piston** (nécessite un VPS, pas un PaaS).
+LLM = **Groq** sur le VPS (choix de coût, voir « Modèle d'IA ») ; ailleurs, un modèle local (Ollama). Sandbox de code = **conteneurs runner Docker** (#116 — nécessite un VPS avec Docker, pas un PaaS).
 
 ---
 
@@ -24,9 +24,11 @@ Dans la console Hetzner → **Add Server** :
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images Docker du projet se buildent sur place, **sauf Piston** : son image
-> amont (`ghcr.io/engineer-man/piston`, épinglée par digest dans `piston/Dockerfile`) n'existe
-> qu'en linux/amd64. Pour Piston, prendre un serveur **x86** (CX32), comme la prod actuelle.
+> ARM (CAX) : les images des SERVICES se buildent sur place, mais **pas celles des runners**
+> depuis #116 : les Dockerfile java et csharp refusent volontairement une base non amd64
+> (invariant du miroir apt), et `python/requirements.txt` ne porte que des empreintes
+> amd64. Pour un hôte d'exécution, prendre du x86 ;
+> la prod actuelle tourne sur **x86** (CX32).
 
 ## 2. Pointer le domaine
 
@@ -86,12 +88,16 @@ sed -i 's/moodit.example.com/TON_DOMAINE/' deploy/Caddyfile
 Depuis la **racine** du repo :
 
 ```bash
+# Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
+# Conteneurs jetables lancés par execution-service pour noter Go/Rust/C/C++/C#/Java
+# (les 10 images, ~8,5 Go au total ; à relancer quand docker/runners/ change).
+./docker/runners/build.sh
+
 docker compose -f docker-compose-hetzner.yml up -d --build
 ```
 
-Le premier build prend quelques minutes (6 services Java + frontend + Piston).
-`piston-init` installe les 12 langages puis s'arrête (normal), de même que `db-migrate`, qui crée
-le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
+Le premier build prend quelques minutes (6 services Java + frontend + les 10 images runner).
+`db-migrate` s'arrête après avoir créé le schéma et les données de référence avec Flyway (voir « Changement de schéma »).
 
 Suivre les logs :
 
@@ -103,7 +109,7 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 
 - Ouvre **https://moodit.example.com** → l'app se charge en HTTPS (cadenas OK).
 - Crée un compte → tu reçois le **code par email** → connexion.
-- Ouvre un quiz de code, soumets → correction via Piston (WebSocket met à jour le score).
+- Ouvre un quiz de code, soumets → correction via les conteneurs runner (WebSocket met à jour le score).
 - (Admin) lance une **analyse MCP** → résultat via Groq, ou repli déterministe si la clé est absente.
 
 ---
@@ -117,6 +123,15 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 | Mettre à jour le code | `./deploy/update.sh` (voir « Mettre à jour la prod ») |
 | Redémarrer | `docker compose -f docker-compose-hetzner.yml restart <service>` |
 | Tout arrêter | `docker compose -f docker-compose-hetzner.yml down` |
+
+**Redémarrer `execution-service` pendant des corrections.** Une correction en cours au moment de
+l'arrêt est perdue : sa tentative est supprimée et l'étudiant resoumet. Les corrections en file
+dans core, elles, attendent : core retente la connexion pendant
+`EXEC_UNREACHABLE_RETRY_MS` (2 min par défaut) avant d'abandonner, ce qui couvre un `restart`,
+un `./deploy/update.sh` ou un redémarrage de l'hôte où core est prêt le premier. Au-delà de ce
+délai, chaque correction en file est abandonnée à son tour (tentative supprimée) : pour un arrêt
+plus long, attendre que la file soit vide (`SELECT count(*) FROM Attempt WHERE status =
+'pending';` rend 0) ou prévenir les enseignants.
 
 ### Mettre à jour la prod
 
@@ -138,7 +153,129 @@ Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
 docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 ```
 
+> **Premier déploiement de #116 — l'ancien `update.sh` s'exécute.** Le script qui tire cette
+> version est celui d'AVANT elle (bash garde le fichier ouvert) : il ne construit pas les images
+> runner, ne pose pas `MOODIT_RUNNER_TAG`, ne passe pas `--remove-orphans`, et surveille encore
+> `moodit_piston`. Sans images, toute exécution rend 502 et les tentatives sont supprimées. Et
+> le clone du serveur est encore sur l'ancien commit, où `docker/runners/` n'existe pas : les
+> images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
+>
+> ```bash
+> git fetch origin deploiement
+> git worktree add --detach /tmp/moodit-runners origin/deploiement
+> MOODIT_RUNNER_TAG=latest bash /tmp/moodit-runners/docker/runners/build.sh   # les 10 images, en latest
+> git worktree remove /tmp/moodit-runners
+> ./deploy/update.sh           # l'ANCIEN script bascule le code ; execution-service lit « latest »
+> ./deploy/update.sh --force   # le NOUVEAU : images taguées par commit, --remove-orphans (Piston)
+> ```
+
 ### Changement de schéma : migrations Flyway
+
+> **Déploiement du runner (#116) — une seule forme de harnais.** Le harnais d'un langage compilé
+> est un CORPS qui renvoie un **booléen**, noté par le modèle à deux processus et deux UID
+> (verdict non falsifiable). C'est la forme des gabarits installés par `V5`, et la seule notée.
+>
+> Le format **vrai test du framework** (JUnit, NUnit, go test, cargo test, `moodit_check.h`) a
+> existé dans une version intermédiaire de #116 et il est **retiré** : il compilait le harnais
+> AVEC le code de l'étudiant, donc le processus qui détenait le secret était celui que l'étudiant
+> contrôle. Un harnais qui en porte le marqueur est désormais refusé avec un diagnostic, avant
+> toute prise de place sandbox. Le format framework n'a jamais été déployé (la production était
+> à `V3`), donc aucune question n'est à convertir DE ce format. **Mais attention aux questions
+> compilées antérieures à #116** : écrites pour l'époque où le harnais était compilé avec le code
+> de l'étudiant, elles pouvaient échanger n'importe quel type. Le chemin booléen ne transporte
+> que les entiers, flottants, booléens et chaînes (et seulement int/long/double en C et C++) :
+> un harnais existant qui passe un tableau, une structure ou une collection ne compilera plus —
+> `passed=false` pour chaque étudiant, sans panne visible. **Étape bloquante du déploiement :
+> rejouer chaque harnais compilé contre le NOUVEAU noteur**, avec
+> `deploy/check-compiled-harnesses.py`. Pas avec « Tester » sur la prod encore en place : elle
+> passe toujours par Piston, qui compile le harnais avec le code de l'étudiant et accepte tous
+> les types — un harnais qui cassera sous le noteur booléen y reste vert.
+>
+> Le script envoie le code de départ et les harnais de chaque question compilée à l'endpoint
+> interne de correction, puis classe chaque question : **BLOQUANT** (le harnais ne compile pas
+> contre la signature, diagnostic du compilateur à l'appui : 0 pour tout le monde), **À VÉRIFIER**
+> (pas de code de départ, code de départ qui ne compile pas seul ou sans fonction aux types
+> transportables, compilation du harnais expirée ou tuée, harnais qui appelle une fonction absente
+> du code de départ, noteur muet ou qui refuse le format, détail non reconnu : rejouer à la main
+> avec une solution) ou **OK**
+> (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
+> fermé). Il sort en 1 tant qu'il reste un BLOQUANT ou un
+> À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Le jeton interne est lu
+> dans le conteneur et jamais affiché.
+>
+> **Questions interprétées : noms réservés.** Le même script rejoue aussi les questions Python,
+> JavaScript, TypeScript et Bash, pour un seul contrôle. Depuis #116, une fonction ou une classe
+> que le harnais nomme et qui porte le nom d'une intégrée du langage (`sum`, `max`, `len` en
+> Python ; `Number`, `parseInt` en JavaScript ; `test`, `factor` en Bash) est refusée avec
+> « Nom réservé », alors qu'elle se notait avant : le mandataire généré à ce nom remplaçait
+> l'intégrée dans le harnais. Une question dont l'énoncé impose un tel nom note donc 0 à tout le
+> monde, avec la consigne de renommer. Elle sort **BLOQUANT** (et son quiz est fermé par
+> `--unpublish`) : renommer la fonction dans l'énoncé, le code de départ et les harnais. Une
+> question interprétée sans code de départ sort À VÉRIFIER, comme une compilée : la rejouer avec
+> une solution (« Tester »).
+>
+> Le contrôle se fait en **deux temps**, parce que le script interroge le nouveau noteur : lancé
+> seulement après la bascule, il laisse une fenêtre (plusieurs minutes par question compilée)
+> pendant laquelle un quiz au harnais cassé est déjà ouvert et note 0 sur une tentative unique.
+>
+> **1. AVANT la mise en prod (obligatoire).** Une pile locale de cette version
+> (`docker-compose-dev.yml` + images runner construites + execution-service lancé), chargée d'un
+> dump de la base de prod, puis `EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… python3
+> deploy/check-compiled-harnesses.py` (sous Docker Desktop, l'IP d'un conteneur n'est pas
+> joignable depuis l'hôte : `EXEC_URL` est obligatoire). Le harnais C/C++ dispose de
+> `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
+> Corriger dans l'éditeur de la prod encore en place les harnais sortis BLOQUANT, ou fermer leurs
+> quiz, **avant** de lancer `./deploy/update.sh` ; noter les À VÉRIFIER à rejouer après. Si ce
+> contrôle préalable est impossible, fermer avant la bascule tous les quiz publiés qui portent
+> une question de code compilée ou interprétée, et ne les rouvrir qu'après une sortie en 0.
+>
+> **2. Juste APRÈS `./deploy/update.sh`.** Rejouer contre la prod, qui est la seule référence :
+>
+> ```bash
+> # Heure de la bascule, à noter AVANT update.sh (horloge de la base) : elle borne la fenêtre
+> # ci-dessous.
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT NOW()::timestamp;"
+> # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT, le
+> # temps de corriger leurs harnais dans l'éditeur.
+> python3 deploy/check-compiled-harnesses.py --unpublish
+> ```
+>
+> Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et
+> la fermeture, et recevoir 0 sans faute de leur part. Lister ces tentatives (`<ids>` : les quiz
+> que le script vient de fermer ; `<bascule>` : l'heure notée) :
+>
+> ```bash
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+>   "SELECT id, quiz_id, user_id, submitted_at FROM Attempt
+>     WHERE quiz_id IN (<ids>) AND submitted_at >= '<bascule>' ORDER BY quiz_id, submitted_at;"
+> ```
+>
+> Avec l'accord de l'enseignant, supprimer ces lignes (`DELETE FROM Attempt WHERE id IN (…)`,
+> les réponses suivent par cascade) rend leur tentative unique aux étudiants concernés.
+>
+> **Retour arrière.** Tant que la purge ci-dessous n'est pas faite, revenir au commit précédent
+> (`git reset --hard <commit>` puis `./deploy/update.sh`, ou le rollback automatique du script)
+> retrouve Piston tel quel : son image et son volume (qui porte ses paquets) sont encore là. `V4` est
+> additive (colonne nullable), l'ancien core démarre donc avec elle. `V5`, elle, **n'est pas
+> réversible** : elle a réécrit les six gabarits de harnais compilés au format booléen, et
+> l'ancienne version les lirait tels quels — après un retour arrière, restaurer ces gabarits depuis
+> la sauvegarde que `update.sh` prend avant les migrations, ou les recréer dans l'éditeur.
+>
+> **La purge est le point de non-retour** : après elle, un retour arrière oblige à reconstruire
+> l'image Piston et à réinstaller ses onze paquets (`piston-init`, réseau requis, plusieurs minutes
+> sans exécution de code). Ne la faire qu'une fois la bascule validée —
+> `check-compiled-harnesses.py` en sortie 0, puis au moins un quiz de code corrigé de bout en bout
+> en prod. D'ici là, ses conteneurs (`restart: unless-stopped`) survivent au retrait du compose et
+> gardent le volume occupé, sans gêner la nouvelle version :
+>
+> ```bash
+> docker rm -f moodit_piston moodit_piston_init 2>/dev/null
+> docker volume rm moodit_piston_data
+> docker network rm moodit_sandbox 2>/dev/null   # réseau « sandbox » du compose, s'il reste
+> # L'image Piston (~1,5 Go) est TAGUÉE : `prune` ne la retire pas — la nommer explicitement
+> # (son nom exact : `docker images | grep -i piston`).
+> docker image rm $(docker images --filter "reference=*piston*" -q)
+> ```
 
 Le schéma est versionné avec [Flyway](https://documentation.red-gate.com/flyway) (#96). Le
 service one-shot `db-migrate` des fichiers compose applique, au démarrage, les versions de
@@ -217,7 +354,13 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 ## Notes de coût / dimensionnement
 
 - **~8 Go de RAM** suffisent : les 6 services Java sont plafonnés (`-Xmx`, `mem_limit`
-  dans le compose). Total observé ≈ 3,5-4 Go → marge confortable.
+  dans le compose). Total observé ≈ 3,5-4 Go au repos. **Pointes de notation (#116)** : chaque
+  conteneur runner s'ajoute à ce total pendant qu'il tourne : la pointe vaut
+  `SANDBOX_MEMORY_MB` × `EXEC_MAX_CONCURRENT` et autant de vCPU que `SANDBOX_CPUS` ×
+  `EXEC_MAX_CONCURRENT`. **Valeurs effectives de ce VPS** (`docker-compose-hetzner.yml`) :
+  1 Go et 1 vCPU par conteneur, 3 places → **3 Go et 3 vCPU en pointe** (les défauts 1,5 Go /
+  2 vCPU visent le dev). Sur ~3,5-4 Go au repos, la marge restante est donc d'environ 1 Go :
+  c'est le poste à surveiller avant d'augmenter l'une de ces bornes.
 - **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
 - Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
   **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
@@ -229,21 +372,102 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Seuls les ports **80/443** sont exposés (Caddy). Tous les services applicatifs et la base
   restent sur le réseau Docker `internal`, injoignables depuis Internet.
 - Le TLS est géré et renouvelé automatiquement par Caddy.
-- Piston est seul sur le réseau `sandbox`, partagé uniquement avec `execution-service` (et
-  `piston-init`) : ni le gateway, ni core-service, ni Postgres ne peuvent le joindre. Le code
-  exécuté n'a aucun accès réseau (espace de noms réseau vide d'isolate).
-- Piston ne tourne **plus** en `privileged` : capacités limitées à ce qu'isolate utilise
-  (`SYS_ADMIN`, `NET_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`,
-  `FOWNER`, `KILL`), seccomp par défaut de Docker actif, cgroup privé. AppArmor est levé pour ce
-  seul conteneur (le profil `docker-default` interdit de remonter `/sys/fs/cgroup` en écriture).
-  Si Piston ne démarre pas (« remontage de /sys/fs/cgroup impossible »), vérifier que l'hôte est
-  en cgroup v2 et que `cap_add` / `cgroup: private` sont bien appliqués.
-- Limites par exécution : 3 s d'exécution, 10 s de compilation, 256 Mo de mémoire à l'exécution
-  et 512 Mo à la compilation, 1 Mio de sortie par flux. Côté execution-service : 2 exécutions
-  simultanées au plus (`EXEC_MAX_CONCURRENT`, file d'attente de 5 s) et 2 requêtes en cours par
-  utilisateur (`EXEC_MAX_PER_USER`) ; au-delà, l'interface affiche « Trop d'exécutions en cours ».
-  Le conteneur Piston est plafonné à 1,5 Go (`mem_limit`) : 2 compilations de 512 Mo, plus une
-  marge pour l'API Piston. Relever `EXEC_MAX_CONCURRENT` impose de relever ce plafond d'autant.
-- Image Piston épinglée par digest (`piston/Dockerfile`). Pour la mettre à jour :
-  `docker buildx imagetools inspect ghcr.io/engineer-man/piston:latest`, remplacer le digest,
-  puis vérifier le job CI `integration` (vrai Piston) avant de déployer.
+- Le code étudiant ne s'exécute QUE dans les conteneurs runner jetables (voir ci-dessous) :
+  réseau coupé, limites mémoire/PID/CPU, UID dédié. Aucun service n'exécute de code non fiable
+  dans son propre processus.
+- Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
+  notation, configurable par question jusqu'à 60 s), mémoire par conteneur
+  (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
+  `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod). Corrections et
+  « Exécuter »/« Tester » ont **chacun au plus deux places** (`EXEC_MAX_CONCURRENT − 1`) : chaque
+  côté en garde toujours une, même pendant une rafale de l'autre. La garantie porte sur **une**
+  place, pas sur deux : quand deux « Tester » longs tiennent les deux places publiques, une
+  seule correction passe ; la seconde attend `EXEC_INTERNAL_QUEUE_WAIT_MS`, puis sa tentative
+  est supprimée et l'étudiant resoumet. File d'attente publique
+  `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
+  au-delà, l'interface affiche « Trop d'exécutions en cours ».
+- **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
+  des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
+  tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
+  comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,
+  `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
+  aucune capacité au-delà du minimum du superviseur root). Dans le conteneur, le code étudiant
+  tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
+  fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
+  Capacité : une correction compilée tient une place (au plus `EXEC_MAX_CONCURRENT − 1`, 2 en
+  prod, pour les corrections) pendant TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
+  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet.
+  Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
+  boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
+  plafond que le mur d'un conteneur compilé ; 4 min pour un « Tester » public). Au-delà, les
+  harnais restants ne sont pas lancés. Ce qui suit dépend de la CAUSE, sur une soumission
+  d'étudiant (le « Tester » public garde toujours ses verdicts « non évalué ») :
+  - **note partielle** (harnais restants « non évalué ») quand la cause est imputable au code
+    soumis : solution lente qui épuise le budget par son propre travail, harnais interrompu
+    (timeout, `SIGKILL`), panne d'environnement (`OSError` : disque, processus) ;
+  - **502, tentative supprimée, l'étudiant resoumet** quand elle ne l'est pas : budget épuisé
+    surtout par l'ATTENTE d'une place (surcharge — le temps d'attente est mesuré et retiré du
+    travail), ou erreur de logique du superviseur (« notation incomplète »). Des canaris
+    incohérents (falsification) l'emportent toujours : jamais de 502 dans ce cas. Cette variable est lue par execution-service **et**
+  par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
+  la changer pour un seul des deux ferait abandonner des corrections encore en cours.
+  **Côté core, les quiz à harnais ont leur propre pool** (`AsyncConfig.quizCodeExecutor`) : autant
+  de corrections en parallèle que `QUIZ_CODE_GRADING_THREADS` (3 par défaut, 2 en prod), à garder
+  **égal** à `EXEC_MAX_CONCURRENT − 1`, les places accordées aux corrections — moins laisse des
+  places vides, plus fait attendre des corrections dans la file d'execution-service jusqu'à leur
+  abandon. Les deux se règlent dans
+  `docker-compose-hetzner.yml`, l'un dans le bloc de core-service, l'autre dans celui
+  d'execution-service. Les quiz SANS harnais passent par un autre pool (`quizExecutor`) et
+  n'attendent jamais derrière une correction compilée. Au-delà de la file du pool de code
+  (`QUIZ_CODE_GRADING_QUEUE`, 500), une soumission est refusée proprement : tentative supprimée,
+  `quiz:attempt-failed` poussé, l'étudiant resoumet. Le bouton « Tester » d'un
+  prof sur une question compilée pèse autant qu'une correction (même conteneur, même place).
+  Une CLASSE ENTIÈRE qui soumet un quiz compilé dans la même minute (fin de créneau, examen)
+  attendra longtemps ses résultats : avant ce scénario, relever **ensemble**
+  `QUIZ_CODE_GRADING_THREADS` et `EXEC_MAX_CONCURRENT` à la mesure du groupe
+  (`nb_étudiants × durée_correction / places`, la RAM suit — voir « coût / dimensionnement »),
+  ou étaler les soumissions. Rejouage automatique et dimensionnement pour un examen : #272.
+- **`strace` n'est plus utilisé, et la capacité `SYS_PTRACE` n'est plus accordée.** Elles
+  servaient à tracer le code soumis pour détecter une lecture du harnais — nécessaire quand le
+  harnais vivait dans un fichier qu'il pouvait ouvrir, c'est-à-dire sur le format « vraie classe
+  de test du framework », retiré de #116. Le harnais est maintenant compilé dans un programme
+  séparé, sous un UID séparé : il n'y a rien à surveiller, donc plus d'alerte d'exploitation de
+  ce côté, et le conteneur ne peut plus tracer aucun processus.
+- **Conteneurs orphelins, et accès root-équivalent à l'hôte par le socket Docker.**
+  Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
+  notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
+  `execution-service` les balaie au démarrage puis toutes les 10 min (`OrphanSweeper`), une fois
+  passé un délai de grâce de 20 min qui protège les corrections en cours ; on peut les lister à la main avec
+  `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
+  `/var/run/docker.sock` : c'est un accès
+  **root-équivalent au démon de l'hôte**, et il faut en mesurer la portée — contrairement à
+  l'ancien Piston (isolé sur son réseau dédié), `execution-service` est routé depuis Internet
+  (`/exec/**` via le gateway) et c'est lui qui analyse le code étudiant, les harnais et la sortie
+  des conteneurs. Un défaut d'exécution de code dans ce service ne se paierait donc plus par un
+  conteneur sandbox compromis, mais par l'hôte entier (Postgres et Caddy compris). Les appels
+  restent authentifiés (gateway, `X-Internal-Token`), `/exec/evaluate` est réservé aux éditeurs
+  de quiz et le service n'expose aucune route d'administration. Le durcissement attendu (#271), à faire
+  avant tout usage à plus grande échelle, **ne peut pas être un simple filtre de routes**
+  (du type `tecnativa/docker-socket-proxy` réglé sur `containers/create|start|wait|logs|delete`
+  et `images/inspect`) : un tel filtre ne regarde pas le CORPS de `POST /containers/create`, où
+  `Privileged`, `Binds: ["/:/host"]`, `Mounts` ou `Devices` passeraient encore — il laisserait
+  donc l'hôte entier à portée. Il faut l'une de ces deux mesures :
+  - un intermédiaire qui **valide le corps** de chaque création et refuse tout ce qui s'écarte de
+    ce que `DockerSandbox` demande : image `moodit-runner-*` seulement, `NetworkMode=none`, ni
+    `Privileged`, ni `Binds`/`Mounts`/`Devices`, capacités limitées à la liste du sandbox,
+    `no-new-privileges` présent ;
+  - ou un **démon Docker rootless dédié** aux runners, dont le socket seul est monté : une
+    évasion n'y donne que l'utilisateur non privilégié de ce démon.
+
+  En complément, faire tourner `execution-service` sous un utilisateur non root (`USER` dans son
+  `Dockerfile`, `group_add` sur le GID du socket de l'hôte dans le compose) : ce GID dépend de
+  l'hôte, d'où son report dans ce suivi (#271). Les images sont construites par
+  `./docker/runners/build.sh` (à relancer quand `docker/runners/` change — `deploy/update.sh` le
+  fait automatiquement). En prod, `update.sh` les tague par **commit** — le dernier qui touche
+  `docker/runners/` ou `execution-service/`, pour qu'un déploiement qui ne les change pas ne
+  redémarre pas le service en pleine correction (`MOODIT_RUNNER_TAG`,
+  repris par execution-service via `SANDBOX_IMAGE_TAG` dans le compose) en plus de `latest` :
+  le format d'échange avec le superviseur n'a pas de version, et un service ne tourne ainsi
+  jamais avec les images d'un autre commit — ni pendant un déploiement, ni après un rollback,
+  qui reconstruit celles de la version restaurée. Les tags des commits plus anciens que le
+  précédent sont supprimés à chaque déploiement.

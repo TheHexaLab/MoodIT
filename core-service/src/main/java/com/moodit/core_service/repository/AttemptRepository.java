@@ -3,6 +3,8 @@ package com.moodit.core_service.repository;
 import com.moodit.core_service.model.Attempt;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -18,6 +20,21 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
 
     /** Nombre de tentatives déjà faites (→ numéro de la prochaine, et garde tentative unique). */
     long countByQuiz_IdAndUser_Id(Integer quizId, Integer userId);
+
+    /**
+     * Tentatives d'un statut donné, plus anciennes d'abord : au démarrage de core, les
+     * {@code "pending"} dont la correction a été perdue (cf. QuizGradingListener).
+     */
+    List<Attempt> findByStatusOrderByIdAsc(String status);
+
+    /**
+     * Tentative VERROUILLÉE en écriture jusqu'à la fin de la transaction ({@code SELECT … FOR
+     * UPDATE}). Sert à l'abandon d'une correction : le statut relu sous verrou dit si une autre
+     * passe l'a finalisée en {@code "done"} entre-temps, auquel cas elle n'est pas supprimée.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM Attempt a WHERE a.id = :id")
+    Optional<Attempt> findByIdForUpdate(@Param("id") Integer id);
 
     /** Une tentative précise, restreinte à son propriétaire (autorisation). */
     Optional<Attempt> findByIdAndUser_Id(Integer id, Integer userId);
