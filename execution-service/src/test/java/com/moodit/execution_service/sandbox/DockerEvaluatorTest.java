@@ -230,6 +230,33 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void supervisor_stderr_is_logged_up_to_1000_characters() {
+        // Le stderr du superviseur entre dans le journal tronqué à 1000 caractères : complet
+        // jusqu'à la borne, coupé avec « … » au-delà.
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DockerEvaluator.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            String atLimit = DockerEvaluator.SUBMITTED_CODE_STAGE
+                    + "x".repeat(1000 - DockerEvaluator.SUBMITTED_CODE_STAGE.length());
+            for (String stderr : new String[] {atLimit, atLimit + "y"}) {
+                appender.list.clear();
+                when(sandbox.run(any(), anyMap(), anyLong()))
+                        .thenReturn(new DockerSandbox.ContainerRun("pas du json", stderr, 1));
+                assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                        .isInstanceOf(NoVerdictException.class);
+                assertThat(appender.list).first().extracting(e -> e.getFormattedMessage())
+                        .asString().endsWith(" : " + (stderr == atLimit ? atLimit : atLimit + "…"));
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
     void supervisor_error_throws_sandbox_exception() {
         supervisorReturns("{\"v\":1,\"error\":\"fichiers du job non reçus\"}");
         // Erreur DÉCLARÉE par le superviseur (dépôt du job raté) : panne d'infrastructure, pas

@@ -394,6 +394,20 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void isShellTerminatorLine_bornes_exactes() {
+        // Lignes coupées pile en fin de chaîne : aucun accès au-delà du dernier caractère.
+        assertThat(CodeAssembler.isShellTerminatorLine("   ")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("g")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("go -")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("go /")).isFalse();
+        // Commentaire de ligne, puis commentaire de bloc fermé, après le terminateur.
+        assertThat(CodeAssembler.isShellTerminatorLine("go -- x")).isTrue();
+        assertThat(CodeAssembler.isShellTerminatorLine("/ /* x */")).isTrue();
+        // « */ » cherché APRÈS l'ouverture « /* » : celui-ci ne la ferme pas.
+        assertThat(CodeAssembler.isShellTerminatorLine("/ /*/")).isFalse();
+    }
+
+    @Test
     void splitSqlStatements_reste_lineaire_sur_un_litteral_plein_de_commentaires_ouverts() {
         // Dump de phase 1 (contenu étudiant, jusqu'à 512 000 caractères) : une valeur faite de
         // « /* » répétés. L'ancien test « porte du SQL » (regex) relançait un balayage jusqu'à la
