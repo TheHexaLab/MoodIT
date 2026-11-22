@@ -27,6 +27,17 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
      */
     List<Attempt> findByStatusOrderByIdAsc(String status);
 
+    /** Tentatives d'un quiz dans un statut donné, les plus anciennes d'abord (« à revoir », #116 S4). */
+    List<Attempt> findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(Integer quizId, String status);
+
+    /**
+     * Nombre de tentatives dans un statut donné, par quiz d'un cours : {@code [quizId, nombre]}.
+     * UNE requête pour toute la liste de l'éditeur (compteur « à revoir », #116 S4).
+     */
+    @Query("SELECT a.quiz.id, COUNT(a) FROM Attempt a"
+            + " WHERE a.quiz.course.id = :courseId AND a.status = :status GROUP BY a.quiz.id")
+    List<Object[]> countByStatusPerQuiz(@Param("courseId") Integer courseId, @Param("status") String status);
+
     /**
      * Tentative VERROUILLÉE en écriture jusqu'à la fin de la transaction ({@code SELECT … FOR
      * UPDATE}). Sert à l'abandon d'une correction : le statut relu sous verrou dit si une autre

@@ -19,6 +19,7 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.GradingFailureRepository;
 import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
@@ -69,6 +70,7 @@ abstract class QuizServiceTestSupport {
     @Mock PlatformTransactionManager transactionManager;
     @Mock ApplicationEventPublisher eventPublisher;
     @Mock AuditLogService auditLogService;
+    @Mock GradingFailureRepository gradingFailureRepository;
 
     final ObjectMapper objectMapper = new ObjectMapper();
     /** Graine fixée : mélanges reproductibles. Ids publics des éléments via {@link #pub}. */
@@ -81,7 +83,7 @@ abstract class QuizServiceTestSupport {
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
-                auditLogService, obfuscator);
+                auditLogService, obfuscator, gradingFailureRepository);
     }
 
     /** Id PUBLIC (passation) d'un élément déplaçable. */

@@ -458,6 +458,17 @@ public class PermissionService {
                 "DELETE",
                 "/quizzes/{quizId}",
                 (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
+            // Tentatives « a revoir » (#116, S4) : correction echouee sans verdict au-dela du
+            // plafond. Les voir et relancer leur correction relevent de la gestion du quiz. La
+            // regle ne porte que sur le quiz : core verifie que la tentative lui appartient (404).
+            rule(
+                "GET",
+                "/quizzes/{quizId}/review-attempts",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
+            rule(
+                "POST",
+                "/quizzes/{quizId}/attempts/{attemptId}/regrade",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
         // etre abonne a un programme du cours du quiz. La lecture et la soumission exigent en

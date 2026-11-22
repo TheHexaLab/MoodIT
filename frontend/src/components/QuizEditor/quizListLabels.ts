@@ -19,6 +19,10 @@ export interface QuizListLabels {
   deleteAria: (title: string) => string;
   /** Bouton de création. */
   create: string;
+  /** Pastille des tentatives « à revoir » d'un quiz (#116). */
+  reviewBadge: (count: number) => string;
+  /** aria-label de cette pastille (ouvre la liste des tentatives à revoir). */
+  reviewAria: (title: string, count: number) => string;
 }
 
 /** Textes par défaut (FR) du corps liste. */
@@ -31,4 +35,7 @@ export const defaultQuizListLabels: QuizListLabels = {
   editAria: (title) => `Modifier ${title}`,
   deleteAria: (title) => `Supprimer ${title}`,
   create: 'Créer un quiz',
+  reviewBadge: (count) => `${count} à revoir`,
+  reviewAria: (title, count) =>
+    `${count} tentative${count > 1 ? 's' : ''} à revoir pour ${title}`,
 };

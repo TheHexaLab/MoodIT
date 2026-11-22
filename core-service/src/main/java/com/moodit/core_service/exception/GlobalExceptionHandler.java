@@ -80,6 +80,14 @@ public class GlobalExceptionHandler {
                 .body(ex.getMessage());
     }
 
+    //Relance de correction refusée : tentative pas « à revoir », ou correction déjà en cours (#116, S4)
+    @ExceptionHandler(AttemptNotReviewableException.class)
+    public ResponseEntity<String> handleAttemptNotReviewable(AttemptNotReviewableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .body(ex.getMessage());
+    }
+
     //Vérification du code impossible (service d'exécution indisponible) : la tentative n'a pas
     //été enregistrée, l'étudiant peut renvoyer. 503 pour signaler un échec transitoire côté serveur.
     @ExceptionHandler(CodeVerificationUnavailableException.class)

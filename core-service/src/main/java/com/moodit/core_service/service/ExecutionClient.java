@@ -1,12 +1,17 @@
 package com.moodit.core_service.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.GradingInterruptedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -331,6 +336,12 @@ public class ExecutionClient {
                 return Arrays.stream(verdicts).map(Verdict::passed).toList();
             } catch (RestClientException e) {
                 long remainingMs = Duration.ofNanos(retryDeadline - System.nanoTime()).toMillis();
+                if (noVerdict(e)) {
+                    // Le conteneur a TOURNÉ sans rendre de verdict : échec compté par étudiant
+                    // et par quiz (#116, S4), jamais retenté ici.
+                    log.warn("Exécution du code (langage {}) sans verdict : {}", language, e.getMessage());
+                    throw new CodeVerificationNoVerdictException();
+                }
                 if (!unreachable(e) || remainingMs <= 0) {
                     log.warn("Exécution du code (langage {}) échouée : {}", language, e.getMessage());
                     return null;
@@ -348,6 +359,28 @@ public class ExecutionClient {
                 }
                 delay = Math.min(delay * 2, RETRY_MAX_DELAY_MS);
             }
+        }
+    }
+
+    /** Propriété et valeur du 502 d'execution-service quand le conteneur n'a rendu aucun verdict. */
+    static final String CAUSE = "cause";
+    static final String NO_VERDICT = "sans_verdict";
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * Le 502 d'execution-service porte-t-il la cause {@code sans_verdict} (le conteneur a tourné sans
+     * rendre de verdict) ? Tout autre échec — sandbox indisponible, corps illisible, autre statut —
+     * reste une indisponibilité, qui ne compte pas.
+     */
+    static boolean noVerdict(RestClientException e) {
+        if (!(e instanceof HttpServerErrorException server)
+                || server.getStatusCode().value() != HttpStatus.BAD_GATEWAY.value()) {
+            return false;
+        }
+        try {
+            return NO_VERDICT.equals(JSON.readTree(server.getResponseBodyAsString()).path(CAUSE).asText());
+        } catch (JsonProcessingException | RuntimeException unreadable) {
+            return false;
         }
     }
 

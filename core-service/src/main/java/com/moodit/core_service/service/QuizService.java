@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.AttemptNotReviewableException;
+import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
 import com.moodit.core_service.exception.GradingInterruptedException;
 import com.moodit.core_service.exception.CourseNotFoundException;
@@ -14,6 +16,7 @@ import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.GradingFailureRepository;
 import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
@@ -23,6 +26,7 @@ import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -66,6 +70,26 @@ public class QuizService {
     private final ApplicationEventPublisher eventPublisher;
     private final AuditLogService auditLogService;
     private final QuizItemObfuscator itemObfuscator;
+    private final GradingFailureRepository gradingFailureRepository;
+
+    /**
+     * Statut d'une tentative gardée « à revoir » par l'enseignant (#116, S4) : sa correction a
+     * échoué SANS VERDICT trop souvent pour être encore supprimée et resoumise.
+     */
+    public static final String REVIEW = "review";
+
+    /**
+     * Plafond des échecs de correction SANS VERDICT par étudiant et par quiz (#116, S4). En deçà,
+     * la tentative échouée est supprimée et l'étudiant resoumet ; à partir de ce compte, elle est
+     * gardée « à revoir ». Une sandbox simplement indisponible ne compte pas.
+     */
+    @Value("${app.quiz.grading.max-no-verdict-failures:3}")
+    private int maxNoVerdictFailures = 3;
+
+    /** Pour les tests construits sans Spring. */
+    void setMaxNoVerdictFailures(int maxNoVerdictFailures) {
+        this.maxNoVerdictFailures = maxNoVerdictFailures;
+    }
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -121,11 +145,24 @@ public class QuizService {
     public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
+        // Vue ÉDITEUR : compteur des tentatives « à revoir » par quiz (#116, S4), en une requête.
+        Map<Integer, Integer> toReview = new HashMap<>();
+        if (!publishedOnly) {
+            for (Object[] row : attemptRepository.countByStatusPerQuiz(courseId, REVIEW)) {
+                toReview.put((Integer) row[0], ((Number) row[1]).intValue());
+            }
+        }
         return (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes()).stream()
                 .filter(q -> !publishedOnly || Boolean.TRUE.equals(q.getIsPublished()))
                 .sorted(Comparator.comparing(Quiz::getPosition,
                         Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(this::toQuizMetaDTO)
+                .map(q -> {
+                    QuizDTO dto = toQuizMetaDTO(q);
+                    if (!publishedOnly) {
+                        dto.setReviewAttemptCount(toReview.getOrDefault(q.getId(), 0));
+                    }
+                    return dto;
+                })
                 .toList();
     }
 
@@ -514,8 +551,23 @@ public class QuizService {
      * destinataire et le push sont best-effort (à défaut, le front retombe sur son polling). Une
      * {@link CodeVerificationUnavailableException} est attendue (sandbox indisponible) ; toute autre
      * exception est un incident, journalisé.
+     *
+     * <p>Plafond (#116, S4) : un échec SANS VERDICT ({@link CodeVerificationNoVerdictException} —
+     * le conteneur a tourné sans rendre de verdict) est compté par étudiant et par quiz. Supprimer
+     * la tentative offrait sinon un nouvel essai à volonté sur une question à tentative unique, à
+     * tout code soumis capable de provoquer cet échec. Dès que le compte atteint
+     * {@code app.quiz.grading.max-no-verdict-failures}, la tentative n'est plus supprimée : elle
+     * reste en {@value #REVIEW}, « à revoir » par l'enseignant, et l'événement porte la raison
+     * {@value #REVIEW}. Le compte n'est pas une note : l'enseignant relance la correction
+     * ({@link #regradeAttempt}). Sur un quiz SANS reprise, une fois le plafond atteint, TOUT échec
+     * garde la tentative à revoir : l'étudiant ne peut plus soumettre, la seule correction encore
+     * possible est une relance de l'enseignant, et une panne de la sandbox pendant celle-ci ne
+     * doit pas effacer la tentative qu'il a sous les yeux. Sur un quiz AVEC reprise, une panne
+     * supprime la tentative comme d'habitude (l'étudiant resoumet ; la garder ne ferait que
+     * charger l'enseignant). Une correction aboutie remet le compte à zéro (cf. finalizeAttempt).
      */
     private void failGrading(Integer attemptId, RuntimeException cause) {
+        boolean noVerdict = cause instanceof CodeVerificationNoVerdictException;
         if (!(cause instanceof CodeVerificationUnavailableException)) {
             log.error("Correction de la tentative {} en échec inattendu : suppression du pending",
                     attemptId, cause);
@@ -542,21 +594,111 @@ public class QuizService {
         // l'entité : soumissions et verdicts partent par la cascade JPA.
         TransactionTemplate delTx = new TransactionTemplate(transactionManager);
         delTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        Boolean deleted = delTx.execute(status -> attemptRepository.findByIdForUpdate(attemptId)
+        String outcome = delTx.execute(status -> attemptRepository.findByIdForUpdate(attemptId)
                 .filter(a -> "pending".equals(a.getStatus()))
                 .map(a -> {
+                    int failures = noVerdictFailuresAfter(a, noVerdict);
+                    boolean capped = failures >= maxNoVerdictFailures
+                            && (noVerdict || !Boolean.TRUE.equals(a.getQuiz().getAllowRetry()));
+                    if (capped) {
+                        a.setStatus(REVIEW);
+                        attemptRepository.save(a);
+                        return REVIEW;
+                    }
                     attemptRepository.delete(a);
-                    return true;
+                    return "deleted";
                 })
-                .orElse(false));
-        if (!Boolean.TRUE.equals(deleted)) {
+                .orElse(null));
+        if (outcome == null) {
             log.info("Tentative {} plus en pending : déjà corrigée ou supprimée, rien à abandonner",
                     attemptId);
             return;
         }
-        if (who != null) {
-            realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, null);
+        boolean kept = REVIEW.equals(outcome);
+        if (kept) {
+            log.warn("Tentative {} gardée à revoir : plafond de {} échecs sans verdict atteint",
+                    attemptId, maxNoVerdictFailures);
         }
+        if (who != null) {
+            realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, kept ? REVIEW : null);
+        }
+    }
+
+    /**
+     * Échecs SANS VERDICT de l'auteur sur ce quiz, celui-ci compris s'il en est un (il est alors
+     * enregistré). Appelée dans la transaction qui verrouille la tentative : un seul pending existe
+     * par (quiz, étudiant), donc deux échecs du même étudiant ne se croisent pas ici.
+     */
+    private int noVerdictFailuresAfter(Attempt attempt, boolean noVerdict) {
+        GradingFailure.Key key = new GradingFailure.Key(attempt.getQuiz().getId(), attempt.getUser().getId());
+        GradingFailure failure = gradingFailureRepository.findById(key).orElse(null);
+        if (!noVerdict) {
+            return failure == null ? 0 : failure.getNoVerdictCount();
+        }
+        if (failure == null) {
+            failure = new GradingFailure();
+            failure.setQuizId(attempt.getQuiz().getId());
+            failure.setUserId(attempt.getUser().getId());
+            failure.setNoVerdictCount(0);
+        }
+        failure.setNoVerdictCount(failure.getNoVerdictCount() + 1);
+        failure.setLastFailureAt(LocalDateTime.now());
+        gradingFailureRepository.save(failure);
+        return failure.getNoVerdictCount();
+    }
+
+    /**
+     * Tentatives « à revoir » d'un quiz (#116, S4), pour l'enseignant : leur correction a échoué
+     * sans verdict au-delà du plafond. Autorisation par rôle assurée en amont par le
+     * permission-service (gestionnaires du contenu du quiz).
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewAttemptDTO> getAttemptsToReview(Integer quizId) {
+        return attemptRepository.findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(quizId, REVIEW).stream()
+                .map(a -> new ReviewAttemptDTO(
+                        a.getId(),
+                        a.getAttemptNo(),
+                        a.getUser().getFirstName() + " " + a.getUser().getLastName(),
+                        a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC),
+                        gradingFailureRepository.findById(
+                                        new GradingFailure.Key(quizId, a.getUser().getId()))
+                                .map(GradingFailure::getNoVerdictCount).orElse(0)))
+                .toList();
+    }
+
+    /**
+     * L'enseignant RELANCE la correction d'une tentative « à revoir » (#116, S4) : elle repasse en
+     * {@code "pending"} et repart en correction après commit, comme une soumission. Si elle échoue
+     * encore, elle revient à revoir (le plafond est déjà atteint, cf. {@link #failGrading}) ; si
+     * elle aboutit, l'étudiant reçoit son résultat ({@code quiz:attempt-graded}).
+     *
+     * <p>404 si la tentative n'appartient pas à ce quiz (la règle d'autorisation ne porte que sur
+     * le quiz) ; 409 si elle n'est pas à revoir, ou si l'étudiant a déjà une correction en cours
+     * sur ce quiz (index {@code uq_attempt_pending}).
+     */
+    public void regradeAttempt(Integer quizId, Integer attemptId) {
+        TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
+        writeTx.executeWithoutResult(status -> {
+            Attempt attempt = attemptRepository.findByIdForUpdate(attemptId)
+                    .filter(a -> a.getQuiz().getId().equals(quizId))
+                    .orElseThrow(AttemptNotFoundException::new);
+            if (!REVIEW.equals(attempt.getStatus())) {
+                throw new AttemptNotReviewableException();
+            }
+            attempt.setStatus("pending");
+            try {
+                attemptRepository.saveAndFlush(attempt);
+            } catch (DataIntegrityViolationException e) {
+                throw new AttemptNotReviewableException();
+            }
+            Quiz quiz = attempt.getQuiz();
+            auditLogService.record("QUIZ_REGRADE", "QUIZ", quizId,
+                    "Correction relancée : tentative " + attempt.getAttemptNo() + " de "
+                            + attempt.getUser().getFirstName() + " " + attempt.getUser().getLastName()
+                            + " au quiz « " + quiz.getTitle() + " »",
+                    AuditContext.ofChildOfCourse(quiz.getCourse()));
+            eventPublisher.publishEvent(new AttemptSubmittedEvent(attempt.getId(), needsSandbox(quiz)));
+        });
     }
 
     /**
@@ -657,6 +799,10 @@ public class QuizService {
         }
         attempt.setStatus("done");
         attemptRepository.save(attempt);
+        // Correction ABOUTIE : les échecs sans verdict passés de l'étudiant sur ce quiz ne
+        // comptent plus (#116, S4) — le plafond vise une série d'échecs, pas un cumul à vie.
+        gradingFailureRepository.deleteById(
+                new GradingFailure.Key(attempt.getQuiz().getId(), attempt.getUser().getId()));
         return true;
     }
 
@@ -678,15 +824,19 @@ public class QuizService {
                 .orElseThrow(UserNotFoundException::new);
         return attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(quizId, user.getId()).stream()
                 // Les tentatives en cours de correction ("pending") ne font pas partie de l'historique.
-                .filter(a -> "done".equals(a.getStatus()))
+                // Une tentative « à revoir » (#116, S4) en fait partie : elle consomme la tentative
+                // unique, et l'étudiant doit le voir — sans note, puisqu'aucun verdict n'existe.
+                .filter(a -> "done".equals(a.getStatus()) || REVIEW.equals(a.getStatus()))
                 .map(a -> {
                     QuizResultDTO r = computeAttemptResult(a);
+                    boolean review = REVIEW.equals(a.getStatus());
                     return new AttemptSummaryDTO(
                             a.getId(),
                             a.getAttemptNo(),
-                            r.getEarned(),
+                            review ? null : r.getEarned(),
                             r.getMax(),
-                            a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC));
+                            a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC),
+                            a.getStatus());
                 })
                 .toList();
     }

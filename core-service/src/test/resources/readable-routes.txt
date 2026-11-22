@@ -29,6 +29,7 @@ GET /api/quizzes/{quizId}
 GET /api/quizzes/{quizId}/attempts
 GET /api/quizzes/{quizId}/attempts/{attemptId}
 GET /api/quizzes/{quizId}/edit
+GET /api/quizzes/{quizId}/review-attempts
 GET /api/roles
 GET /api/roles/global/candidates
 GET /api/roles/global/users

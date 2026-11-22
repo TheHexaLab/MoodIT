@@ -30,6 +30,8 @@ import {
   submitQuiz,
   fetchQuizAttempts,
   fetchAttemptResult,
+  fetchReviewAttempts,
+  regradeAttempt,
   evaluateCode,
   runCode,
   createQuiz,
@@ -376,6 +378,26 @@ describe('fetchAttemptResult', () => {
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(fetchAttemptResult(5, 1)).rejects.toThrow('Échec chargement de la tentative');
+  });
+});
+
+describe('tentatives à revoir (#116)', () => {
+  it('fetchReviewAttempts : GET /api/quizzes/:id/review-attempts', async () => {
+    const list = [{ attemptId: 81, attemptNo: 2, studentName: 'Éva', noVerdictFailures: 3 }];
+    mockedApiFetch.mockResolvedValueOnce(res(list));
+    await expect(fetchReviewAttempts(5)).resolves.toEqual(list);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/review-attempts');
+    mockedApiFetch.mockResolvedValueOnce(errRes());
+    await expect(fetchReviewAttempts(5)).rejects.toThrow('Échec chargement des tentatives à revoir');
+  });
+
+  it('regradeAttempt : POST /api/quizzes/:id/attempts/:attemptId/regrade', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res(null, { status: 202 }));
+    await regradeAttempt(5, 81);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/attempts/81/regrade');
+    expect(callArgs()[1]).toMatchObject({ method: 'POST' });
+    mockedApiFetch.mockResolvedValueOnce(errRes());
+    await expect(regradeAttempt(5, 81)).rejects.toThrow('Échec de la relance de la correction');
   });
 });
 

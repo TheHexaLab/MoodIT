@@ -62,6 +62,19 @@ export interface QuestionDraft {
 }
 
 /**
+ * Tentative « à revoir » d'un quiz, vue par l'enseignant (#116) : sa correction automatique a
+ * échoué sans verdict trop souvent. `noVerdictFailures` = échecs sans verdict de l'étudiant sur ce
+ * quiz.
+ */
+export interface ReviewAttempt {
+  attemptId: number;
+  attemptNo: number;
+  studentName: string;
+  submittedAt?: string | null;
+  noVerdictFailures: number;
+}
+
+/**
  * Handlers CRUD de l'éditeur (API-ready). Chacun reçoit ce qu'il faut pour
  * persister et peut renvoyer l'entité fraîchement persistée (id réel serveur).
  */
@@ -109,6 +122,10 @@ export interface QuizEditorHandlers {
    * l'onglet « Tester » d'une question Code. Renvoie la sortie brute (stdout/stderr/exit).
    */
   onRunCode?: (input: RunCodeInput) => MaybePromise<RunResult>;
+  /** Charge les tentatives « à revoir » d'un quiz (#116). */
+  onFetchReviewAttempts?: (quizId: number) => MaybePromise<ReviewAttempt[]>;
+  /** Relance la correction d'une tentative « à revoir » (#116). */
+  onRegradeAttempt?: (quizId: number, attemptId: number) => MaybePromise<unknown>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */

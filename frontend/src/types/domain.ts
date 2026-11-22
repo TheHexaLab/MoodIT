@@ -138,6 +138,11 @@ export interface Quiz {
    * La liste affiche `questions?.length ?? questionCount`. Absent dans le détail.
    */
   questionCount?: number;
+  /**
+   * Tentatives « à revoir » du quiz : leur correction a échoué sans verdict trop souvent, elles
+   * attendent l'enseignant (#116). Vue ÉDITEUR seulement (absent de la vue étudiant).
+   */
+  reviewAttemptCount?: number;
 }
 
 /**

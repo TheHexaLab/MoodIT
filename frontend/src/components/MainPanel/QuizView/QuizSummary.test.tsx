@@ -109,6 +109,17 @@ describe('QuizSummary', () => {
     expect(screen.getByText('#2 · 15/15')).toBeTruthy();
   });
 
+  it('tentative à revoir (#116) : puce « à revoir », ignorée du meilleur score', () => {
+    const attempts: AttemptSummary[] = [
+      { id: 100, attemptNo: 1, earned: 8, max: 15 },
+      { id: 101, attemptNo: 2, earned: null, max: 15, status: 'review' },
+    ];
+    const { onSelectAttempt } = renderSummary({ attempts, currentAttemptId: 100 });
+    expect(screen.getByText('Meilleur score : 53.3 %')).toBeTruthy();
+    fireEvent.click(screen.getByText('#2 · à revoir'));
+    expect(onSelectAttempt).toHaveBeenCalledWith(101);
+  });
+
   it('clic sur une puce de tentative → onSelectAttempt(id)', () => {
     const attempts: AttemptSummary[] = [
       { id: 100, attemptNo: 1, earned: 8, max: 15 },

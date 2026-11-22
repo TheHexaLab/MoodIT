@@ -181,6 +181,31 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | code soumis à des milliers de fonctions (100 Ko) : bouchons du noteur recompilés à chaque cas (ils portent le nonce) | 3 cas + 2 canaris : C 34 s, C++ 43 s, Go 60 s, Java 28 s, C# 8 s, tous notés ; Rust 2 730 fonctions : compilateur tué à 1 Go, échec noté | borné (≤ une solution lente honnête) |
 | fichiers de l'image inscriptibles | `/tmp` seulement, masqué par le tmpfs ; à l'exécution, `/box` (dossiers de l'étudiant) et `/tmp` | réglage existant |
 
+### Mort sans verdict : journal et plafond (S3, S4)
+
+- **S3 — journal.** Avant de supprimer le conteneur, `DockerSandbox` lit `State.OOMKilled`
+  (`ContainerRun.oomKilled`). Docker le pose dès qu'UN processus du conteneur a été tué par l'OOM
+  (mesuré : même quand le superviseur a rendu son JSON et que la sortie vaut 0) ; seule la
+  combinaison sortie 137 + OOMKilled + aucun verdict désigne le superviseur
+  (`ContainerRun.supervisorOomKilled`). Ce cas est journalisé en ERREUR à part : le superviseur
+  est à -1000 et le code soumis ne peut plus l'atteindre, c'est donc l'isolation qui est en
+  défaut. La réponse reste un 502 — jamais une note.
+- **S4 — plafond.** Le 502 porte sa cause (`cause` du ProblemDetail) : `sans_verdict` quand le
+  conteneur a tourné sans rendre de verdict (superviseur muet ou illisible, verdict des canaris
+  absent, notation incomplète, mur réellement écoulé, sortie démesurée — `NoVerdictException`),
+  `indisponible` sinon (démon injoignable ou flux d'attente coupé avant le mur, image absente,
+  service en arrêt — y compris un conteneur supprimé par l'arrêt pendant la notation). Core compte les
+  `sans_verdict` par étudiant et par quiz (table `Grading_Failure`, migration V6). En deçà de
+  `QUIZ_MAX_NO_VERDICT_FAILURES` (3), la tentative est supprimée et l'étudiant resoumet, comme
+  avant ; au-delà, elle est GARDÉE en statut `review` : elle consomme la tentative unique, sans
+  note, et l'étudiant voit « transmise à votre enseignant ». L'enseignant la retrouve dans
+  l'éditeur de quiz (pastille « N à revoir ») et relance sa correction
+  (`POST /api/quizzes/{quizId}/attempts/{attemptId}/regrade`). Sur un quiz SANS reprise, une fois
+  le plafond atteint, tout échec garde la tentative à revoir, panne de la sandbox comprise : seule
+  une relance de l'enseignant peut encore la corriger, et une panne pendant celle-ci n'efface pas
+  la tentative qu'il a sous les yeux. Sur un quiz AVEC reprise, une panne supprime la tentative
+  comme d'habitude. Une correction aboutie remet le compte à zéro.
+
 ### Restes ouverts
 
 - **Pas de borne par utilisateur sur le chemin interne** (3 fils de correction de code dans core,
@@ -190,8 +215,9 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   terme est aussi celui d'une solution honnête qui boucle —, sous le plafond de 15 min. Un
   artefact de plus de 64 Mo ou de 256 fichiers n'est pas gardé : sa compilation est refaite à
   chaque cas. Le nombre de soumissions d'un étudiant est borné par la tentative unique (une par
-  quiz) ; seul un 502 l'autorise à recommencer — voir S3/S4 dans la PR. Aucune correction n'est perdue (elles
-  attendent dans la file de core), elles peuvent être retardées.
+  quiz) ; un 502 « sans verdict » ne lui rend la main que trois fois (voir « Mort sans verdict :
+  plafond » ci-dessous). Aucune correction n'est perdue (elles attendent dans la file de core),
+  elles peuvent être retardées.
 - **Mémoire noyau non comptée** : les objets que le code soumis peut créer sous le profil de
   Docker ont été balayés (tableau ci-dessus) ; ceux qui restent permis sont bornés par les rlimits
   et rendus à la mort. Un objet non compté qui aurait échappé au balayage retomberait sur l'OOM
@@ -250,8 +276,9 @@ d'après les signatures réellement présentes dans le code soumis.
   manquante FAIT ÉCHOUER le job.
 - Dev local : démon Docker requis (Windows : named pipe, détecté automatiquement par
   `DockerSandbox`). Sans démon ni images, les tests s'ignorent et l'évaluation compilée répond 502
-  — côté core, la tentative en attente est alors SUPPRIMÉE (`quiz:attempt-failed`) et l'étudiant
-  doit resoumettre : il n'existe pas de rejouage automatique.
+  (cause `indisponible`) — côté core, la tentative en attente est alors SUPPRIMÉE
+  (`quiz:attempt-failed`) et l'étudiant doit resoumettre : il n'existe pas de rejouage
+  automatique. Seuls les 502 `sans_verdict` sont comptés (plafond ci-dessus).
 
 Images du mode « exec » : `python` (numpy/pandas/scipy/sympy), `node` (+ tsc — JS, TS et les
 harnais JS de JSON/HTML/JSX/TSX, bundles vendor fournis avec le job), `php`, `bash`, `sqlite`.

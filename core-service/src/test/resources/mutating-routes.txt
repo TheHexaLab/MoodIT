@@ -28,6 +28,7 @@ POST /api/forums/posts
 POST /api/forums/posts/votes
 POST /api/programs/courses
 POST /api/programs/users
+POST /api/quizzes/{quizId}/attempts/{attemptId}/regrade
 POST /api/quizzes/{quizId}/submissions
 POST /api/roles/change
 POST /api/roles/global/change

@@ -97,6 +97,28 @@ class ExecutionClientTest {
     }
 
     @Test
+    @DisplayName("502 de cause « sans_verdict » → exception dédiée (comptée), autres 502 → null")
+    void evaluate_sansVerdict_exceptionDediee() throws Exception {
+        // #116, S4 : le conteneur a tourné sans verdict. Core compte ces échecs par étudiant et
+        // par quiz ; une sandbox indisponible, elle, reste un null qui ne compte pas.
+        String url = startStub(502, "{\"status\":502,\"detail\":\"Notation sans verdict\","
+                + "\"cause\":\"sans_verdict\"}", 0);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> client(url, 2_000, 2_000).evaluate("Python", "code", TWO_HARNESSES))
+                .isInstanceOf(com.moodit.core_service.exception.CodeVerificationNoVerdictException.class);
+        server.stop(0);
+
+        for (String[] reply : new String[][] {
+                {"502", "{\"cause\":\"indisponible\"}"}, {"502", "pas du json"}, {"502", ""},
+                {"500", "{\"cause\":\"sans_verdict\"}"}}) {
+            String other = startStub(Integer.parseInt(reply[0]), reply[1], 0);
+            assertThat(client(other, 2_000, 2_000).evaluate("Python", "code", TWO_HARNESSES))
+                    .as("%s %s", reply[0], reply[1]).isNull();
+            server.stop(0);
+        }
+        server = null;
+    }
+
+    @Test
     @DisplayName("Corps vide → null")
     void evaluate_corpsVide_null() throws Exception {
         String url = startStub(200, "", 0);

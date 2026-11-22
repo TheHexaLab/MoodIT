@@ -16,11 +16,16 @@ import static org.mockito.Mockito.when;
 import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.CourseQuizStatsDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
+import com.moodit.core_service.dto.ReviewAttemptDTO;
 import com.moodit.core_service.dto.SubmittedAnswerDTO;
 import com.moodit.core_service.exception.AlreadySubmittedException;
+import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.AttemptNotReviewableException;
+import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Attempt;
+import com.moodit.core_service.model.GradingFailure;
 import com.moodit.core_service.model.Question;
 import com.moodit.core_service.model.Quiz;
 import com.moodit.core_service.model.Submission;
@@ -352,6 +357,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             verify(attemptRepository).save(attempt);
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
             verify(attemptRepository, never()).delete(any(Attempt.class));
+            // Correction aboutie : le compte des échecs sans verdict repart de zéro (#116, S4).
+            verify(gradingFailureRepository).deleteById(new GradingFailure.Key(4, 3));
         }
 
         @Test
@@ -578,6 +585,134 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             assertThat(a.getStatus()).isEqualTo("done");
             verify(realtimePublisher).quizAttemptGraded(3L, 5L, ATTEMPT_ID);
         }
+
+        // ── Plafond des échecs SANS VERDICT (#116, S4) ──────────────────────────────
+
+        private void failsWithoutVerdict() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any()))
+                    .thenThrow(new CodeVerificationNoVerdictException());
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+        }
+
+        private static GradingFailure failures(int count) {
+            GradingFailure f = new GradingFailure();
+            f.setQuizId(4);
+            f.setUserId(3);
+            f.setNoVerdictCount(count);
+            return f;
+        }
+
+        @Test
+        @DisplayName("Sans verdict sous le plafond → pending supprimé, échec compté, raison générique")
+        void sansVerdict_sousLePlafond_supprimeEtCompte() {
+            failsWithoutVerdict();
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            ArgumentCaptor<GradingFailure> saved = ArgumentCaptor.forClass(GradingFailure.class);
+            verify(gradingFailureRepository).save(saved.capture());
+            assertThat(saved.getValue().getQuizId()).isEqualTo(4);
+            assertThat(saved.getValue().getUserId()).isEqualTo(3);
+            assertThat(saved.getValue().getNoVerdictCount()).isEqualTo(1);
+            assertThat(saved.getValue().getLastFailureAt()).isNotNull();
+            verify(attemptRepository).delete(attempt);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
+        }
+
+        @Test
+        @DisplayName("Sans verdict au plafond → tentative GARDÉE à revoir, raison « review »")
+        void sansVerdict_auPlafond_garde() {
+            failsWithoutVerdict();
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failures(2)));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(attemptRepository).save(attempt);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+            ArgumentCaptor<GradingFailure> saved = ArgumentCaptor.forClass(GradingFailure.class);
+            verify(gradingFailureRepository).save(saved.capture());
+            assertThat(saved.getValue().getNoVerdictCount()).isEqualTo(3);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, QuizService.REVIEW);
+            verifyNoInteractions(submissionTestCaseRepository);
+        }
+
+        @Test
+        @DisplayName("Plafond configurable : à 1, le premier échec sans verdict garde la tentative")
+        void sansVerdict_plafondConfigurable() {
+            service.setMaxNoVerdictFailures(1);
+            failsWithoutVerdict();
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+        }
+
+        @Test
+        @DisplayName("Sandbox INDISPONIBLE sous le plafond → supprimée, rien n'est compté")
+        void indisponible_neComptePas() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failures(2)));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verify(gradingFailureRepository, never()).save(any());
+            verify(attemptRepository).delete(attempt);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
+        }
+
+        @Test
+        @DisplayName("Plafond déjà atteint (relance de l'enseignant) : même une panne garde la tentative")
+        void plafondAtteint_toutEchecGarde() {
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failures(3)));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+            verify(gradingFailureRepository, never()).save(any());
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, QuizService.REVIEW);
+        }
+
+        @Test
+        @DisplayName("Quiz AVEC reprise, plafond atteint : une panne supprime (l'étudiant resoumet)")
+        void plafondAtteint_avecReprise_pannesSupprime() {
+            quiz.setAllowRetry(true);
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failures(3)));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            verify(attemptRepository).delete(attempt);
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, null);
+        }
+
+        @Test
+        @DisplayName("Quiz AVEC reprise : un échec SANS VERDICT au plafond garde quand même")
+        void plafondAtteint_avecReprise_sansVerdictGarde() {
+            quiz.setAllowRetry(true);
+            failsWithoutVerdict();
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failures(2)));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+        }
     }
 
     // ── getMyAttempts ───────────────────────────────────────────────────────────
@@ -606,6 +741,106 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         assertThat(first.getSubmittedAt()).isEqualTo(Instant.parse("2026-09-02T08:30:00Z"));
         assertThat(history.get(1).getEarned()).isZero();
         assertThat(history.get(1).getSubmittedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("Historique : une tentative à revoir y figure, sans note, avec son statut")
+    void getMyAttempts_tentativeARevoir() {
+        Question q = question(10, SINGLE, 2.0, 0);
+        answer(q, 1, "ok", true);
+        Quiz quiz = quiz(4, course(1), q);
+        Attempt done = attempt(80, quiz, eva, 1, "done", submission(q, choice(10, 1)));
+        Attempt review = attempt(81, quiz, eva, 2, QuizService.REVIEW, submission(q, choice(10, 1)));
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+        when(attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(4, 3))
+                .thenReturn(List.of(done, review));
+
+        List<AttemptSummaryDTO> history = service.getMyAttempts(4, EMAIL);
+
+        assertThat(history).extracting(AttemptSummaryDTO::getStatus)
+                .containsExactly("done", QuizService.REVIEW);
+        assertThat(history.get(0).getEarned()).isEqualTo(2.0);
+        // Aucun verdict n'existe : pas de note, mais le barème reste affichable.
+        assertThat(history.get(1).getEarned()).isNull();
+        assertThat(history.get(1).getMax()).isEqualTo(2.0);
+    }
+
+    // ── Tentatives à revoir (#116, S4) ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Tentatives à revoir")
+    class Review {
+
+        private Quiz quiz;
+        private Attempt review;
+
+        @BeforeEach
+        void setUp() {
+            Question q = question(10, SINGLE, 2.0, 0);
+            quiz = quiz(4, course(1), q);
+            review = attempt(81, quiz, eva, 2, QuizService.REVIEW, submission(q, choice(10, 1)));
+            review.setSubmittedAt(LocalDateTime.of(2026, 9, 2, 8, 30));
+        }
+
+        @Test
+        @DisplayName("Liste : nom de l'étudiant, date en UTC, nombre d'échecs sans verdict")
+        void liste() {
+            Attempt undated = attempt(82, quiz, user(5, "bob@test.ca"), 1, QuizService.REVIEW);
+            when(attemptRepository.findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(4, QuizService.REVIEW))
+                    .thenReturn(List.of(review, undated));
+            GradingFailure failure = new GradingFailure();
+            failure.setNoVerdictCount(3);
+            when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
+                    .thenReturn(Optional.of(failure));
+
+            assertThat(service.getAttemptsToReview(4)).containsExactly(
+                    new ReviewAttemptDTO(81, 2, "Éva Test", Instant.parse("2026-09-02T08:30:00Z"), 3),
+                    new ReviewAttemptDTO(82, 1, "Éva Test", null, 0));
+        }
+
+        @Test
+        @DisplayName("Relance : la tentative repasse en pending, part en correction, est journalisée")
+        void relance() {
+            when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
+
+            service.regradeAttempt(4, 81);
+
+            assertThat(review.getStatus()).isEqualTo("pending");
+            verify(attemptRepository).saveAndFlush(review);
+            verify(eventPublisher).publishEvent(new AttemptSubmittedEvent(81, false));
+            ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+            verify(auditLogService).record(eq("QUIZ_REGRADE"), eq("QUIZ"), eq(4), summary.capture(), any());
+            assertThat(summary.getValue()).contains("tentative 2").contains("Éva Test").contains("Quiz 4");
+        }
+
+        @Test
+        @DisplayName("Relance d'une tentative d'un AUTRE quiz ou inconnue → 404, rien ne change")
+        void relance_autreQuiz() {
+            when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
+
+            assertThatThrownBy(() -> service.regradeAttempt(5, 81))
+                    .isInstanceOf(AttemptNotFoundException.class);
+            assertThatThrownBy(() -> service.regradeAttempt(4, 99))
+                    .isInstanceOf(AttemptNotFoundException.class);
+            assertThat(review.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(eventPublisher, never()).publishEvent(any());
+        }
+
+        @Test
+        @DisplayName("Relance d'une tentative pas à revoir, ou correction déjà en cours → 409")
+        void relance_refusee() {
+            review.setStatus("done");
+            when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
+            assertThatThrownBy(() -> service.regradeAttempt(4, 81))
+                    .isInstanceOf(AttemptNotReviewableException.class);
+
+            review.setStatus(QuizService.REVIEW);
+            when(attemptRepository.saveAndFlush(review))
+                    .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
+            assertThatThrownBy(() -> service.regradeAttempt(4, 81))
+                    .isInstanceOf(AttemptNotReviewableException.class);
+            verify(eventPublisher, never()).publishEvent(any());
+        }
     }
 
     @Test

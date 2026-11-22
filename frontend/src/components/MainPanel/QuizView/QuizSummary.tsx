@@ -58,8 +58,12 @@ export function QuizSummary({
     : { good: styles.scoreGood, warn: styles.scoreWarn, bad: styles.scoreBad }[overallTone];
   const perfectCount = result.questions.filter((q) => q.max > 0 && q.earned >= q.max).length;
   // Meilleur score parmi les tentatives (affiché quand il y en a plusieurs).
+  // Une tentative à revoir (#116) n'a pas de note : elle ne compte pas dans le meilleur score.
   const bestPercent = attempts.reduce(
-    (best, a) => Math.max(best, a.max > 0 ? Math.round((a.earned / a.max) * 1000) / 10 : 0),
+    (best, a) =>
+      a.earned == null
+        ? best
+        : Math.max(best, a.max > 0 ? Math.round((a.earned / a.max) * 1000) / 10 : 0),
     0
   );
 
@@ -107,7 +111,9 @@ export function QuizSummary({
                   .join(' ')}
                 onClick={() => onSelectAttempt(a.id)}
               >
-                {t.attemptChip(a.attemptNo, a.earned, a.max)}
+                {a.earned == null
+                  ? t.attemptChipReview(a.attemptNo)
+                  : t.attemptChip(a.attemptNo, a.earned, a.max)}
               </button>
             ))}
           </div>

@@ -108,9 +108,9 @@ class DockerEvaluatorTest {
                 """);
         // Chemin INTERNE (la correction d'une soumission) : ce n'est pas une note. Avant, le cas
         // saute arrivait en passed=false et core l'enregistrait — tentative UNIQUE perdue a
-        // cause de la charge.
+        // cause de la charge. Cause « sans verdict » : core compte ces échecs (S4).
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(NoVerdictException.class);
         // Chemin PUBLIC (« Tester ») : les verdicts restent rendus, detail compris.
         List<TestResult> r = evaluator.evaluate("Go", "code", TWO_CASES, null,
                 DockerEvaluator.PUBLIC_WALL_MS);
@@ -183,14 +183,14 @@ class DockerEvaluatorTest {
         // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »
         // passed=false — une liste de verdicts VALIDE aux yeux de core, qui persistait un 0
         // sur une tentative UNIQUE. Un superviseur tué (OOM du cgroup, image cassée, collecte
-        // des logs expirée) est une panne d'INFRASTRUCTURE : SandboxException → 502 →
-        // tentative supprimée → l'étudiant resoumet. Jamais un 0.
+        // des logs expirée) n'est jamais un 0 : NoVerdictException → 502 de cause
+        // « sans_verdict », que core compte par étudiant et par quiz (S4).
         for (String stdout : new String[] {"", "   \n", "null"}) {
             when(sandbox.run(any(), anyMap(), anyLong()))
                     .thenReturn(new DockerSandbox.ContainerRun(stdout, "tué (OOM ?)", 137));
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                     .as("stdout %s doit lever, pas noter 0", "«" + stdout + "»")
-                    .isInstanceOf(SandboxException.class);
+                    .isInstanceOf(NoVerdictException.class);
         }
     }
 
@@ -200,7 +200,7 @@ class DockerEvaluatorTest {
         when(sandbox.run(any(), anyMap(), anyLong()))
                 .thenReturn(new DockerSandbox.ContainerRun("pas du json", "x".repeat(5000), 1));
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(NoVerdictException.class);
         // stderr absent : le journal reste robuste (aucune NPE).
         when(sandbox.run(any(), anyMap(), anyLong()))
                 .thenReturn(new DockerSandbox.ContainerRun("toujours pas du json", null, 1));
@@ -211,9 +211,44 @@ class DockerEvaluatorTest {
     @Test
     void supervisor_error_throws_sandbox_exception() {
         supervisorReturns("{\"v\":1,\"error\":\"fichiers du job non reçus\"}");
+        // Erreur DÉCLARÉE par le superviseur (dépôt du job raté) : panne d'infrastructure, pas
+        // une notation sans verdict — core ne la compte pas.
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
                 .hasMessageContaining("fichiers du job non reçus");
+    }
+
+    @Test
+    void supervisor_killed_by_oom_is_logged_as_an_isolation_failure() {
+        // S3 (#116) : sortie 137 ET OOMKilled, sans verdict → erreur dédiée dans le journal ; la
+        // réponse reste un 502 « sans verdict ». OOMKilled seul (un processus soumis tué, verdict
+        // rendu) ou 137 seul (mur, kill) n'en est pas un.
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DockerEvaluator.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            for (String stdout : new String[] {"", "pas du json"}) {   // muet, illisible
+            for (boolean oom : new boolean[] {false, true}) {
+                for (long exit : new long[] {1, 137}) {
+                    appender.list.clear();
+                    when(sandbox.run(any(), anyMap(), anyLong()))
+                            .thenReturn(new DockerSandbox.ContainerRun(stdout, "", exit, oom));
+                    assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                            .isInstanceOf(NoVerdictException.class);
+                    assertThat(appender.list)
+                            .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.ERROR)
+                            .as("«%s» oom=%s exit=%s", stdout, oom, exit)
+                            .hasSize(oom && exit == 137 ? 1 : 0);
+                }
+            }
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test
@@ -364,7 +399,7 @@ class DockerEvaluatorTest {
             supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
                     + "{\"index\":1,\"passed\":true}],\"events\":[]" + verdict + "}");
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
-                    .as(verdict).isInstanceOf(SandboxException.class)
+                    .as(verdict).isInstanceOf(NoVerdictException.class)
                     .hasMessageContaining("canaris");
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null,
                     DockerEvaluator.PUBLIC_WALL_MS))

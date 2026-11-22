@@ -111,18 +111,46 @@ class RunnerExecTest {
         supervisorReturns("");
         assertThatThrownBy(() -> runner.execute("python",
                 List.of(new RunnerExec.File("main.py", "x")), null, null))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(NoVerdictException.class);
 
         supervisorReturns("pas du json");
         assertThatThrownBy(() -> runner.execute("python",
                 List.of(new RunnerExec.File("main.py", "x")), null, null))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(NoVerdictException.class);
 
         supervisorReturns("{\"v\":1,\"error\":\"runtime non pris en charge : cobol\"}");
         assertThatThrownBy(() -> runner.execute("python",
                 List.of(new RunnerExec.File("main.py", "x")), null, null))
                 .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
                 .hasMessageContaining("cobol");
+    }
+
+    @Test
+    void supervisor_killed_by_oom_is_logged_in_exec_mode_too() {
+        // S3 (#116) : sortie 137 + OOMKilled sans réponse → erreur dédiée, dans les deux cas
+        // (sortie vide, sortie illisible).
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DockerEvaluator.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            for (String stdout : new String[] {"", "pas du json"}) {
+                appender.list.clear();
+                when(sandbox.run(any(), anyMap(), anyLong()))
+                        .thenReturn(new DockerSandbox.ContainerRun(stdout, "", 137, true));
+                assertThatThrownBy(() -> runner.execute("python",
+                        List.of(new RunnerExec.File("main.py", "x")), null, null))
+                        .isInstanceOf(NoVerdictException.class);
+                assertThat(appender.list)
+                        .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.ERROR)
+                        .as("«%s»", stdout).hasSize(1);
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test

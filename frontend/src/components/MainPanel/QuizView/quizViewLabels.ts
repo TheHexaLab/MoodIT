@@ -26,6 +26,12 @@ export interface QuizViewLabels {
   codeVerificationUnavailable: string;
   /** Message quand une soumission interrompue par un refresh n'a pas pu être confirmée. */
   submissionNotConfirmed: string;
+  /** Statut d'en-tête d'une tentative à revoir par l'enseignant (#116). */
+  awaitingReviewStatus: string;
+  /** Titre du message affiché à la place du résumé : tentative à revoir (#116). */
+  awaitingReviewTitle: string;
+  /** Corps de ce message. */
+  awaitingReview: string;
   /** Titre du popup d'erreur de soumission. */
   errorTitle: string;
   /** Bouton « réessayer » (erreur de chargement). */
@@ -67,6 +73,10 @@ export const defaultQuizViewLabels: QuizViewLabels = {
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:
     "Votre tentative n'a pas pu être confirmée. Vérifiez l'historique ou renvoyez-la.",
+  awaitingReviewStatus: "En attente de l'enseignant",
+  awaitingReviewTitle: 'Tentative transmise à votre enseignant',
+  awaitingReview:
+    "La correction automatique de votre code n'a pas abouti malgré plusieurs essais. Votre tentative est enregistrée et votre enseignant va relancer sa correction : vous recevrez votre résultat ici.",
   errorTitle: 'Soumission impossible',
   retry: 'Réessayer',
   empty: 'Ce quiz ne contient pas encore de question.',

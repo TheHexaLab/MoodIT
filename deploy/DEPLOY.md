@@ -131,7 +131,10 @@ dans core, elles, attendent : core retente la connexion pendant
 un `./deploy/update.sh` ou un redémarrage de l'hôte où core est prêt le premier. Au-delà de ce
 délai, chaque correction en file est abandonnée à son tour (tentative supprimée) : pour un arrêt
 plus long, attendre que la file soit vide (`SELECT count(*) FROM Attempt WHERE status =
-'pending';` rend 0) ou prévenir les enseignants.
+'pending';` rend 0) ou prévenir les enseignants. Une sandbox indisponible n'est pas comptée dans
+le plafond des échecs sans verdict (#116) : un arrêt ne fait passer aucune tentative « à revoir »,
+sauf une relance d'enseignant en cours sur un quiz sans reprise (la tentative y reste `review`,
+à relancer depuis l'éditeur de quiz).
 
 ### Mettre à jour la prod
 

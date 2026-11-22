@@ -197,6 +197,21 @@ describe('QuizView — points de progression (dots)', () => {
   });
 });
 
+describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
+  it('message d’attente à la place du résumé, sans « Revoir mes réponses »', async () => {
+    renderView({
+      quiz: makeQuiz({ allowRetry: false }),
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(screen.getByText("En attente de l'enseignant")).toBeTruthy();
+    expect(screen.queryByText('Revoir mes réponses')).toBeNull();
+    expect(screen.queryByText('Refaire le quiz')).toBeNull();
+  });
+});
+
 describe('QuizView — phase résumé & révision', () => {
   /** Passe le quiz en résumé via le grader mock (pas de onSubmitQuiz → correction locale). */
   async function reachSummary() {

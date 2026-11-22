@@ -111,7 +111,21 @@ class ExecutionControllersTest {
 
         mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"));
+                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"))
+                .andExpect(jsonPath("$.cause").value("indisponible"));
+    }
+
+    @Test
+    void container_without_verdict_gives_502_with_its_own_cause() throws Exception {
+        // Core compte ces échecs-là, et seulement eux, par étudiant et par quiz (#116, S4).
+        when(service.evaluate(any())).thenThrow(
+                new com.moodit.execution_service.sandbox.NoVerdictException("Superviseur muet (exit 137)"));
+
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "secret-interne")
+                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.detail").value("Notation sans verdict"))
+                .andExpect(jsonPath("$.cause").value("sans_verdict"));
     }
 
     @Test

@@ -349,18 +349,22 @@ public class DockerEvaluator {
         } catch (RuntimeException e) {
             log.warn("Sortie du superviseur illisible (exit {}) : {}", run.exitCode(),
                     truncate(run.stderr()));
-            throw new SandboxException("Réponse du superviseur de notation illisible");
+            logSupervisorOomKill(run);
+            throw new NoVerdictException("Réponse du superviseur de notation illisible");
         }
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode (et
         // « null » un NullNode). Sans cette garde, `results` était simplement vide, chaque cas
         // recevait « Notation incomplète » passed=false — une liste de verdicts VALIDE aux yeux
         // de core, qui persistait un 0 sur une tentative UNIQUE. Un superviseur mort sans JSON
         // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée, collecte des
-        // logs expirée) est une PANNE : 502, tentative supprimée, l'étudiant resoumet.
+        // logs expirée) n'est pas une note : 502 de cause « sans verdict ». Core supprime alors
+        // la tentative, et l'étudiant resoumet — jusqu'à un plafond par étudiant et par quiz,
+        // au-delà duquel la tentative est gardée « à revoir » par l'enseignant (#116, S4).
         if (!root.isObject()) {
             log.warn("Superviseur de notation muet (exit {}) : {}", run.exitCode(),
                     truncate(run.stderr()));
-            throw new SandboxException(
+            logSupervisorOomKill(run);
+            throw new NoVerdictException(
                     "Le superviseur de notation n'a rendu aucun verdict (exit "
                             + run.exitCode() + ")");
         }
@@ -383,13 +387,13 @@ public class DockerEvaluator {
         String canaries = root.path("canaries").asString("");
         if (!CANARY_VERDICTS.contains(canaries)) {
             log.warn("Verdict des canaris absent ou inconnu (« {} »)", truncate(canaries));
-            throw new SandboxException(
+            throw new NoVerdictException(
                     "Réponse du superviseur de notation incomplète (verdict des canaris)");
         }
         boolean canariesInconsistent = "incoherents".equals(canaries);
         if (internal && !canariesInconsistent && root.path("incomplet").asBoolean(false)) {
             log.warn("Notation compilée incomplète (cause non imputable) : tentative à reprendre");
-            throw new SandboxException(
+            throw new NoVerdictException(
                     "Notation incomplète (panne du noteur) : la tentative est à reprendre");
         }
 
@@ -435,6 +439,18 @@ public class DockerEvaluator {
             results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), passed, detail));
         }
         return results;
+    }
+
+    /**
+     * S3 (#116) : un superviseur tué par l'OOM — sortie 137 et {@code State.OOMKilled} — signale
+     * une isolation ROMPUE (il est à oom_score_adj -1000 et le code soumis ne peut plus abaisser le
+     * sien). Journalisé à part, en erreur, pour être vu et corrigé ; la réponse reste un 502.
+     */
+    static void logSupervisorOomKill(DockerSandbox.ContainerRun run) {
+        if (run.supervisorOomKilled()) {
+            log.error("Superviseur de notation TUÉ PAR L'OOM (exit 137, OOMKilled) : isolation "
+                    + "rompue, le superviseur devait rester hors d'atteinte de l'OOM");
+        }
     }
 
     private static String truncate(String value) {

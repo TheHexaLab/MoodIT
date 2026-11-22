@@ -3,6 +3,7 @@ import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfir
 import { EditorShell } from './EditorShell';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { QuizListBody } from './QuizListPopup';
+import { ReviewAttemptsBody } from './ReviewAttemptsBody';
 import { QuizFormBody } from './QuizFormPopup';
 import { QuestionFormBody } from './QuestionFormPopup';
 import { HarnessBody } from './HarnessPopup';
@@ -54,6 +55,8 @@ interface QuizEditorProps {
 
 type View =
   | { kind: 'list' }
+  // Tentatives « à revoir » d'un quiz (#116) : empilée sur la liste (chevron retour).
+  | { kind: 'review'; quizId: number }
   | { kind: 'form'; quizId: number; isNew: boolean }
   // `quizIsNew` = le QUIZ parent est-il en création (à préserver au retour au form) ;
   // `isNew` = la QUESTION est-elle en création.
@@ -185,7 +188,9 @@ export function QuizEditor({
     const i = list.findIndex((q) => q.id === quiz.id);
     if (i < 0) return [...list, quiz];
     const next = [...list];
-    next[i] = quiz;
+    // Le détail d'édition et la réponse d'enregistrement ne portent pas le compteur « à revoir »
+    // (#116), propre à la liste : on garde celui de l'entrée remplacée.
+    next[i] = { reviewAttemptCount: list[i].reviewAttemptCount, ...quiz };
     return next;
   };
   const upsertQuiz = (quiz: Quiz) => setQuizzes((prev) => upsertInList(prev, quiz));
@@ -380,6 +385,22 @@ export function QuizEditor({
     setView({ kind: 'list' });
   }
 
+  /** Une relance est partie : un « à revoir » de moins sur la pastille du quiz (#116). */
+  function markRegraded(quizId: number) {
+    setQuizzes((list) =>
+      list.map((q) =>
+        q.id === quizId
+          ? { ...q, reviewAttemptCount: Math.max(0, (q.reviewAttemptCount ?? 0) - 1) }
+          : q
+      )
+    );
+  }
+
+  /** Liste « à revoir » chargée : la pastille se recale sur ce que le serveur renvoie. */
+  function setReviewCount(quizId: number, count: number) {
+    setQuizzes((list) => list.map((q) => (q.id === quizId ? { ...q, reviewAttemptCount: count } : q)));
+  }
+
   // ─────────────────────────────────── Rendu ───────────────────────────────────
 
   const activeQuiz = view.kind !== 'list' ? quizById(view.quizId) : null;
@@ -391,7 +412,7 @@ export function QuizEditor({
     else action();
   };
   // Le retour de la vue « Tester » (prévisualisation) ne perd rien → jamais de confirmation.
-  const backLosesData = view.kind !== 'list' && view.kind !== 'test';
+  const backLosesData = view.kind !== 'list' && view.kind !== 'test' && view.kind !== 'review';
 
   // Identité de la vue affichée : sert à réinitialiser le défilement de la coquille
   // à chaque navigation (liste → quiz → question → harnais), pour ne pas hériter du
@@ -399,6 +420,8 @@ export function QuizEditor({
   const scrollResetKey =
     view.kind === 'list'
       ? 'list'
+      : view.kind === 'review'
+        ? `review-${view.quizId}`
       : view.kind === 'form'
         ? `form-${view.quizId}`
         : `${view.kind}-${view.quizId}-${view.draft.id ?? 'new'}`;
@@ -417,6 +440,15 @@ export function QuizEditor({
           scrollBody: false,
           desktopMaxVh: undefined as number | undefined,
         }
+      : view.kind === 'review'
+        ? {
+            title: t.reviewTitle,
+            subtitle: activeQuiz?.title,
+            onBack: () => setView({ kind: 'list' }),
+            width: '34rem',
+            scrollBody: true,
+            desktopMaxVh: 60,
+          }
       : view.kind === 'form'
         ? {
             title: view.isNew ? t.newQuizTitle : t.editQuizTitle,
@@ -523,9 +555,28 @@ export function QuizEditor({
             onCreate={openCreate}
             onEdit={openEdit}
             onDelete={(quiz) => setPendingDelete({ kind: 'quiz', id: quiz.id, title: quiz.title })}
+            onReview={
+              handlers.onFetchReviewAttempts && handlers.onRegradeAttempt
+                ? (quiz) => setView({ kind: 'review', quizId: quiz.id })
+                : undefined
+            }
             onReorder={reorderQuizzes}
           />
         )}
+
+        {view.kind === 'review' &&
+          handlers.onFetchReviewAttempts &&
+          handlers.onRegradeAttempt && (
+            <ReviewAttemptsBody
+              quizId={view.quizId}
+              onFetch={handlers.onFetchReviewAttempts}
+              onRegrade={handlers.onRegradeAttempt}
+              onRegraded={() => markRegraded(view.quizId)}
+              onLoaded={(count) => setReviewCount(view.quizId, count)}
+              onError={(kind) => setError(kind === 'load' ? t.reviewLoadError : t.regradeError)}
+              labels={labels?.review}
+            />
+          )}
 
         {view.kind === 'form' && activeQuiz && (
           <QuizFormBody

@@ -286,7 +286,8 @@ export interface AttemptAccepted {
 /**
  * Verdict PUSH d'une correction asynchrone (WebSocket `quiz:attempt-graded` / `-failed`), reçu par
  * l'auteur de la tentative. `ok=false` → la tentative a échoué à l'évaluation (code inévaluable) et
- * a été supprimée : l'étudiant peut renvoyer.
+ * a été supprimée : l'étudiant peut renvoyer — SAUF avec `reason` {@link REVIEW_REASON} : la
+ * correction a échoué sans verdict trop souvent, la tentative est GARDÉE et attend l'enseignant.
  */
 export interface AttemptOutcome {
   quizId: number;
@@ -295,13 +296,27 @@ export interface AttemptOutcome {
   reason?: string;
 }
 
+/** Raison d'un `quiz:attempt-failed` dont la tentative est gardée « à revoir » (#116). */
+export const REVIEW_REASON = 'review';
+
 /** Résumé d'une tentative (historique). */
 export interface AttemptSummary {
   id: number;
   attemptNo: number;
-  earned: number;
+  /** Points obtenus ; `null` pour une tentative « à revoir » (aucun verdict). */
+  earned: number | null;
   max: number;
   submittedAt?: string;
+  /**
+   * `'done'` (corrigée) ou `'review'` : la correction automatique n'a pas abouti, la tentative
+   * attend l'enseignant (#116). Absent = corrigée.
+   */
+  status?: 'done' | 'review';
+}
+
+/** La tentative attend-elle l'enseignant (correction automatique impossible) ? */
+export function isAwaitingReview(attempt: AttemptSummary | undefined | null): boolean {
+  return attempt?.status === REVIEW_REASON;
 }
 
 /** Transforme l'état de réponses en charge utile de soumission. */

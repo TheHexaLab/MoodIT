@@ -56,7 +56,8 @@ class QuizServiceEditAuthTest {
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 new ObjectMapper(), realtimePublisher, executionClient, transactionManager, eventPublisher,
-                auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(28)));
+                auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(28)),
+                org.mockito.Mockito.mock(com.moodit.core_service.repository.GradingFailureRepository.class));
     }
 
     @Test

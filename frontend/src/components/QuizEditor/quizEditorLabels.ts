@@ -3,6 +3,7 @@ import type { QuizFormLabels } from './quizFormLabels';
 import type { QuestionFormLabels } from './questionFormLabels';
 import type { HarnessLabels } from './harnessLabels';
 import type { QuestionTestLabels } from './questionTestLabels';
+import type { ReviewAttemptsLabels } from './reviewAttemptsLabels';
 
 /**
  * Libellés de l'ORCHESTRATEUR de l'éditeur de quiz (coquille `EditorShell` : titres /
@@ -18,6 +19,8 @@ export interface QuizEditorLabels {
   editQuestionTitle: string;
   harnessTitle: string;
   testTitle: string;
+  /** Titre de la vue « Tentatives à revoir » d'un quiz (#116). */
+  reviewTitle: string;
   /** Sous-titre « Question N » d'une vue question/harnais/tester. */
   questionSubtitle: (index: number) => string;
 
@@ -26,6 +29,10 @@ export interface QuizEditorLabels {
   saveError: string;
   deleteError: string;
   reorderError: string;
+  /** Chargement des tentatives à revoir impossible (#116). */
+  reviewLoadError: string;
+  /** Relance d'une correction refusée ou impossible (#116). */
+  regradeError: string;
 
   // ── Confirmations de suppression ──
   deleteQuizTitle: string;
@@ -52,12 +59,16 @@ export const defaultQuizEditorLabels: QuizEditorLabels = {
   editQuestionTitle: 'Modifier la question',
   harnessTitle: 'Harnais de test',
   testTitle: 'Tester la question',
+  reviewTitle: 'Tentatives à revoir',
   questionSubtitle: (index) => `Question ${index}`.trim(),
 
   loadError: 'Chargement du quiz impossible.',
   saveError: "L'enregistrement a échoué. Réessayez.",
   deleteError: 'La suppression a échoué.',
   reorderError: "Le réordonnancement a échoué. Vous n'avez peut-être pas les droits.",
+  reviewLoadError: 'Chargement des tentatives à revoir impossible.',
+  regradeError:
+    "La relance a échoué : la tentative n'est peut-être plus à revoir, ou une correction est déjà en cours.",
 
   deleteQuizTitle: 'Supprimer le quiz ?',
   deleteQuizBody:
@@ -84,4 +95,5 @@ export interface QuizEditorLabelsBundle {
   question?: Partial<QuestionFormLabels>;
   harness?: Partial<HarnessLabels>;
   test?: Partial<QuestionTestLabels>;
+  review?: Partial<ReviewAttemptsLabels>;
 }

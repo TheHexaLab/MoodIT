@@ -80,6 +80,7 @@ import {
   type RunCodeInput,
   type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
+import type { ReviewAttempt } from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 import type { Program as AddCourseProgram } from '../../components/AddCoursePopup/types.ts';
@@ -281,6 +282,27 @@ export async function fetchQuizAttempts(quizId: number): Promise<AttemptSummary[
   const res = await apiFetch(`/api/quizzes/${quizId}/attempts`);
   if (!res.ok) throw new Error('Échec chargement des tentatives');
   return await res.json();
+}
+
+/**
+ * Tentatives « à revoir » d'un quiz (enseignant, #116) : leur correction a échoué sans verdict
+ * trop souvent pour être resoumise.
+ */
+export async function fetchReviewAttempts(quizId: number): Promise<ReviewAttempt[]> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/review-attempts`);
+  if (!res.ok) throw new Error('Échec chargement des tentatives à revoir');
+  return await res.json();
+}
+
+/**
+ * Relance la correction d'une tentative « à revoir » (enseignant, #116) : 202, le résultat part à
+ * l'étudiant par WebSocket comme pour une soumission.
+ */
+export async function regradeAttempt(quizId: number, attemptId: number): Promise<void> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}/regrade`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Échec de la relance de la correction');
 }
 
 /** Détail corrigé d'une tentative donnée (révision d'une tentative passée). */

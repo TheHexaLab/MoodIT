@@ -22,6 +22,11 @@ interface QuizListBodyProps {
   onCreate: () => void;
   onEdit: (quiz: Quiz) => void;
   onDelete: (quiz: Quiz) => void;
+  /**
+   * Ouvre les tentatives « à revoir » d'un quiz (#116) : pastille affichée seulement quand le quiz
+   * en a (`reviewAttemptCount` > 0).
+   */
+  onReview?: (quiz: Quiz) => void;
   /** Réordonnancement (ids dans le nouvel ordre) — persisté par le parent. */
   onReorder: (quizIds: number[]) => void;
 }
@@ -56,6 +61,7 @@ export function QuizListBody({
   onCreate,
   onEdit,
   onDelete,
+  onReview,
   onReorder,
 }: QuizListBodyProps): React.ReactElement {
   const t = { ...defaultQuizListLabels, ...labels };
@@ -150,6 +156,21 @@ export function QuizListBody({
                 >
                   {quiz.isPublished ? t.published : t.draft}
                 </span>
+                {onReview && (quiz.reviewAttemptCount ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    className={[styles.badge, styles.badgeReview].join(' ')}
+                    aria-label={t.reviewAria(quiz.title, quiz.reviewAttemptCount ?? 0)}
+                    // Ni glisser-déposer ni révélation des actions de la ligne.
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReview(quiz);
+                    }}
+                  >
+                    {t.reviewBadge(quiz.reviewAttemptCount ?? 0)}
+                  </button>
+                )}
               </div>
               <span className={styles.rowSub}>
                 {t.questionsCount(quiz.questions?.length ?? quiz.questionCount ?? 0)}

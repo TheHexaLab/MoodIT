@@ -31,6 +31,8 @@ export interface QuizSummaryLabels {
   attemptsLabel: string;
   /** Puce d'une tentative (« #n · earned/max »). */
   attemptChip: (attemptNo: number, earned: number, max: number) => string;
+  /** Puce d'une tentative à revoir par l'enseignant (#116) : pas de note. */
+  attemptChipReview: (attemptNo: number) => string;
 }
 
 /** Textes par défaut (FR) du récapitulatif. */
@@ -51,4 +53,5 @@ export const defaultQuizSummaryLabels: QuizSummaryLabels = {
   bestScore: (percent) => `Meilleur score : ${formatScore(percent)} %`,
   attemptsLabel: 'Tentatives',
   attemptChip: (attemptNo, earned, max) => `#${attemptNo} · ${formatScore(earned)}/${formatScore(max)}`,
+  attemptChipReview: (attemptNo) => `#${attemptNo} · à revoir`,
 };

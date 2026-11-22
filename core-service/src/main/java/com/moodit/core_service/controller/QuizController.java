@@ -5,6 +5,7 @@ import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
+import com.moodit.core_service.dto.ReviewAttemptDTO;
 import com.moodit.core_service.service.QuizService;
 
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,30 @@ public class QuizController {
             @PathVariable Integer attemptId,
             @RequestHeader("X-User-Email") String email) {
         return ResponseEntity.ok(quizService.getAttemptResult(attemptId, email));
+    }
+
+    /**
+     * Tentatives « à revoir » du quiz, pour l'enseignant (#116, S4) : leur correction a échoué sans
+     * verdict au-delà du plafond. Autorisation par rôle assurée en amont par le permission-service
+     * (règle GET /quizzes/{quizId}/review-attempts).
+     */
+    @GetMapping("/{quizId}/review-attempts")
+    public ResponseEntity<List<ReviewAttemptDTO>> getAttemptsToReview(@PathVariable Integer quizId) {
+        return ResponseEntity.ok(quizService.getAttemptsToReview(quizId));
+    }
+
+    /**
+     * Relance la correction d'une tentative « à revoir » (#116, S4) : <b>202 Accepted</b>, le
+     * résultat part à l'étudiant par WebSocket comme pour une soumission. 404 si la tentative n'est
+     * pas de ce quiz, 409 si elle n'est pas à revoir. Autorisation par rôle assurée en amont par le
+     * permission-service (règle POST /quizzes/{quizId}/attempts/{attemptId}/regrade).
+     */
+    @PostMapping("/{quizId}/attempts/{attemptId}/regrade")
+    public ResponseEntity<Void> regradeAttempt(
+            @PathVariable Integer quizId,
+            @PathVariable Integer attemptId) {
+        quizService.regradeAttempt(quizId, attemptId);
+        return ResponseEntity.accepted().build();
     }
 
     /**

@@ -128,6 +128,27 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
     }
 
     @Test
+    @DisplayName("Vue éditeur : compteur des tentatives à revoir par quiz ; vue étudiant : absent")
+    void listQuizzes_compteurARevoir() {
+        Quiz withReview = quiz(2, course);
+        withReview.setPosition(0);
+        Quiz without = quiz(3, course);
+        without.setPosition(1);
+        course.getQuizzes().addAll(List.of(withReview, without));
+        when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+        when(attemptRepository.countByStatusPerQuiz(1, QuizService.REVIEW))
+                .thenReturn(List.<Object[]>of(new Object[] {2, 3L}));
+
+        assertThat(service.listQuizzes(1, false)).extracting(QuizDTO::getReviewAttemptCount)
+                .containsExactly(3, 0);
+        assertThat(service.listQuizzes(1, true)).extracting(QuizDTO::getReviewAttemptCount)
+                .containsOnlyNulls();
+        // Vue étudiant : la requête n'est pas faite.
+        org.mockito.Mockito.verify(attemptRepository, org.mockito.Mockito.times(1))
+                .countByStatusPerQuiz(1, QuizService.REVIEW);
+    }
+
+    @Test
     @DisplayName("Cours sans collection de quiz (null) → liste vide")
     void listQuizzes_collectionNull_vide() {
         course.setQuizzes(null);

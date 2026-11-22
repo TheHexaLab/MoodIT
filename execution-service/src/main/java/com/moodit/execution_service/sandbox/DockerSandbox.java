@@ -4,6 +4,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.WaitContainerResultCallback;
+import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.Frame;
@@ -52,8 +53,29 @@ public class DockerSandbox {
 
     private static final Logger log = LoggerFactory.getLogger(DockerSandbox.class);
 
-    /** Sortie (stdout = JSON du superviseur) et code de sortie du conteneur. */
-    public record ContainerRun(String stdout, String stderr, long exitCode) {}
+    /**
+     * Sortie (stdout = JSON du superviseur), code de sortie du conteneur, et {@code oomKilled} :
+     * l'état {@code State.OOMKilled} de Docker, lu avant la suppression. Il vaut vrai dès qu'UN
+     * processus du conteneur a été tué par l'OOM (mesuré : même quand le superviseur a rendu son
+     * JSON et que la sortie vaut 0), donc ne dit rien seul.
+     */
+    public record ContainerRun(String stdout, String stderr, long exitCode, boolean oomKilled) {
+
+        public ContainerRun(String stdout, String stderr, long exitCode) {
+            this(stdout, stderr, exitCode, false);
+        }
+
+        /**
+         * Le SUPERVISEUR lui-même a-t-il été tué par l'OOM ? Sortie 137 (SIGKILL du PID 1) ET
+         * OOMKilled : à n'interpréter qu'en l'absence de verdict. Le superviseur est à
+         * oom_score_adj -1000 et le code soumis ne peut plus abaisser le sien
+         * ({@link DockerSandbox#SUPERVISOR_OOM_SCORE_ADJ}) : ce cas signale une isolation
+         * rompue, à corriger — jamais une faute de l'étudiant.
+         */
+        public boolean supervisorOomKilled() {
+            return oomKilled && exitCode == 137;
+        }
+    }
 
     /** Étiquette posée sur tout conteneur runner : permet de retrouver les orphelins. */
     public static final String RUNNER_LABEL = "moodit.runner";
@@ -463,10 +485,33 @@ public class DockerSandbox {
             // Callbacks FERMÉS dans tous les cas : un rappel non fermé gardait sa connexion au
             // démon et son fil de lecture ouverts indéfiniment (attente expirée, journaux lents).
             Integer status;
+            long waitStarted = System.nanoTime();
             try (WaitContainerResultCallback waitCallback =
                          waitClient().waitContainerCmd(containerId).start()) {
                 status = waitCallback.awaitStatusCode(wallTimeoutMs, TimeUnit.MILLISECONDS);
+            } catch (DockerClientException e) {
+                if (e.getCause() instanceof InterruptedException) {
+                    throw e;   // arrêt du service : traité plus bas comme une interruption
+                }
+                // MUR atteint : le conteneur a tourné jusqu'au bout de son temps sans rendre de
+                // verdict. Le budget du superviseur est calculé pour l'éviter ; s'il arrive, le
+                // code soumis a pu y jouer un rôle — cause « sans verdict », comptée par core.
+                // Seulement si le mur s'est réellement écoulé : docker-java lève la même
+                // exception quand le flux d'attente se coupe (démon redémarré, connexion
+                // perdue), et ces pannes-là ne doivent rien coûter à l'étudiant.
+                if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStarted) >= wallTimeoutMs) {
+                    throw new NoVerdictException("Mur du conteneur de notation atteint ("
+                            + wallTimeoutMs + " ms) : aucun verdict", e);
+                }
+                throw new SandboxException("Attente du conteneur de notation coupée : "
+                        + e.getMessage(), e);
             }
+            // Service en cours d'ARRÊT : removeInFlight vient de supprimer ce conteneur, d'où une
+            // sortie vide qui passerait pour un superviseur muet. Panne, pas « sans verdict ».
+            if (closed) {
+                throw new SandboxException("Service en cours d'arrêt : notation interrompue");
+            }
+            boolean oomKilled = oomKilled(containerId);
 
             // Accumuler les OCTETS puis décoder UNE fois : un caractère UTF-8 scindé entre deux
             // frames deviendrait sinon « � » dans le détail d'un verdict.
@@ -501,12 +546,14 @@ public class DockerSandbox {
                 }
             }
             // Sortie TRONQUÉE : pas un verdict non plus (même règle que la lecture incomplète).
+            // Le superviseur borne ce qu'il émet : une sortie démesurée vient du conteneur.
             if (overflow.get()) {
-                throw new SandboxException("Journaux du conteneur de notation au-delà de "
+                throw new NoVerdictException("Journaux du conteneur de notation au-delà de "
                         + logCapBytes + " octets");
             }
             return new ContainerRun(stdout.toString(StandardCharsets.UTF_8),
-                    stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status);
+                    stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status,
+                    oomKilled);
         } catch (NotFoundException e) {
             throw new SandboxException("Image runner absente : " + image
                     + " — construire les images (docker/runners/build.sh)", e);
@@ -544,6 +591,20 @@ public class DockerSandbox {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * {@code State.OOMKilled} du conteneur, lu avant sa suppression (#116, S3). Un échec de lecture
+     * n'empêche pas la notation : faux, et c'est journalisé.
+     */
+    private boolean oomKilled(String containerId) {
+        try {
+            return Boolean.TRUE.equals(
+                    client().inspectContainerCmd(containerId).exec().getState().getOOMKilled());
+        } catch (RuntimeException e) {
+            log.warn("État OOMKilled du conteneur {} illisible : {}", containerId, e.getMessage());
+            return false;
         }
     }
 

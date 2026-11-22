@@ -196,8 +196,10 @@ public class RealtimeEventPublisher {
 
   /**
    * La correction ASYNCHRONE d'une tentative a ÉCHOUÉ (sandbox indisponible / code inévaluable) :
-   * la tentative a été supprimée, l'auteur peut renvoyer sans consommer sa tentative unique.
-   * Scope {@code user:<userId>}. `reason` optionnel (null → libellé générique côté front).
+   * la tentative a été supprimée, l'auteur peut renvoyer sans consommer sa tentative unique —
+   * SAUF avec la raison {@code "review"} : plafond des échecs sans verdict atteint (#116), la
+   * tentative est GARDÉE et attend l'enseignant. Scope {@code user:<userId>}. `reason` null →
+   * libellé générique côté front.
    */
   public void quizAttemptFailed(long userId, long quizId, long attemptId, String reason) {
     emit(

@@ -622,6 +622,15 @@
 .badgePoints { background: var(--bg-vote-pill); color: var(--text-muted); }
 .badgePublished { background: var(--brand-teal-surface); color: var(--brand-teal); }
 .badgeDraft { background: var(--bg-vote-pill); color: var(--text-muted); }
+/* Tentatives « à revoir » (#116) : pastille CLIQUABLE, ton d'alerte. */
+.badgeReview {
+    background: var(--shadow-danger);
+    color: var(--danger);
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+.badgeReview:hover { text-decoration: underline; }
 
 /* Bouton « + Ajouter … » en pointillé. */
 .addButton {

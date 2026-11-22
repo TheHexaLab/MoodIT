@@ -134,8 +134,11 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis),
   `kernel.msgmni=0` (aucune file de messages) et `kernel.sem` avec semmni à 0 (aucun jeu de
   sémaphores).
-- **Le superviseur n'est jamais tué par l'OOM** : sans lui, le conteneur meurt sans JSON (502,
-  tentative rejouable). Conteneur lancé à `oom_score_adj` -1000
+- **Le superviseur n'est jamais tué par l'OOM** : sans lui, le conteneur meurt sans JSON (502 de
+  cause `sans_verdict` ; core plafonne ces échecs à 3 par étudiant et par quiz, puis garde la
+  tentative « à revoir » par l'enseignant — `docker/runners/README.md`, « Mort sans verdict »). Si
+  cela arrive malgré tout (sortie 137 et `State.OOMKilled`, lu avant la suppression du conteneur),
+  c'est journalisé en erreur dédiée : l'isolation est en défaut. Conteneur lancé à `oom_score_adj` -1000
   (`DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ`) ; chaque processus lancé par le superviseur est
   remonté explicitement (`mark_oom_victim`, appliqué d'office par `run_proc` et `run_pair`) : 1000
   pour le code soumis et sa compilation, 500 pour le noteur des compilés et les compilations root.

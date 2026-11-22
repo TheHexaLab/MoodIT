@@ -436,3 +436,114 @@ describe('reloadKeepingAnswers', () => {
     expect(result.current.currentIndex).toBe(2);
   });
 });
+
+// ───────────────────────────── Tentative à revoir (#116) ─────────────────────────────
+
+describe('tentative à revoir par l\'enseignant', () => {
+  const review = (id: number, attemptNo = 1): AttemptSummary => ({
+    id, attemptNo, earned: null, max: 3, status: 'review',
+  });
+
+  it('échec de raison « review » → tentative GARDÉE : message d\'attente, aucun corrigé chargé', async () => {
+    const onFetchQuiz = vi.fn(async () => makeQuiz());
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([review(77)]);
+    const onFetchAttemptResult = vi.fn(async () => makeResult(77));
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 77 }));
+    const outcome: AttemptOutcome = { quizId: QUIZ_ID, attemptId: 77, ok: false, reason: 'review' };
+
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, onSubmitQuiz,
+        attemptOutcome: outcome, codeVerificationUnavailableMessage: 'CODE_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+
+    await waitFor(() => expect(result.current.awaitingReview).toBe(true));
+    expect(result.current.phase).toBe('summary');
+    expect(result.current.result).toBeNull();
+    expect(result.current.currentAttemptId).toBe(77);
+    // Pas l'erreur « renvoyez » : la tentative est enregistrée, elle consomme la tentative unique.
+    expect(result.current.submitError).toBeNull();
+    expect(result.current.alreadySubmitted).toBe(true);
+    expect(result.current.reconciling).toBe(false);
+    expect(onFetchAttemptResult).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+  });
+
+  it('rechargement avec une dernière tentative à revoir → message d\'attente directement', async () => {
+    const onFetchAttemptResult = vi.fn(async () => makeResult(55));
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz()),
+        onFetchAttempts: vi.fn(async () => [summary(55), review(56, 2)]),
+        onFetchAttemptResult,
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.awaitingReview).toBe(true);
+    expect(result.current.phase).toBe('summary');
+    expect(result.current.currentAttemptId).toBe(56);
+    expect(onFetchAttemptResult).not.toHaveBeenCalled();
+
+    // Une tentative corrigée choisie dans l'historique : retour au résumé normal…
+    await act(async () => { result.current.selectAttempt(55); });
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(55));
+    expect(result.current.awaitingReview).toBe(false);
+    // … et la tentative à revoir, de nouveau : message, sans requête.
+    act(() => result.current.selectAttempt(56));
+    expect(result.current.awaitingReview).toBe(true);
+    expect(result.current.result).toBeNull();
+    expect(onFetchAttemptResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('relance réussie par l’enseignant : le verdict poussé recharge et ouvre le résumé', async () => {
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56)])
+      .mockResolvedValue([summary(56)]);
+    const onFetchAttemptResult = vi.fn(async () => makeResult(56));
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz()), onFetchAttempts,
+        onFetchAttemptResult, attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.awaitingReview).toBe(true));
+
+    // Verdict d'une AUTRE tentative : ignoré.
+    outcome = { quizId: QUIZ_ID, attemptId: 99, ok: true };
+    rerender();
+    expect(onFetchAttempts).toHaveBeenCalledTimes(1);
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(56));
+    expect(result.current.awaitingReview).toBe(false);
+    expect(result.current.phase).toBe('summary');
+  });
+
+  it('quiz avec reprise : « refaire » quitte le message d\'attente', async () => {
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [review(56)]),
+      })
+    );
+    await waitFor(() => expect(result.current.awaitingReview).toBe(true));
+    expect(result.current.alreadySubmitted).toBe(false);
+
+    act(() => result.current.retry());
+
+    expect(result.current.awaitingReview).toBe(false);
+    expect(result.current.phase).toBe('taking');
+  });
+});

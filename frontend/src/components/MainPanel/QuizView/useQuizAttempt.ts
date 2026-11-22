@@ -4,6 +4,8 @@ import {
   type AttemptAnswers,
   type AttemptOutcome,
   type AttemptSummary,
+  isAwaitingReview,
+  REVIEW_REASON,
   type FetchAttemptResultHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
@@ -194,6 +196,12 @@ export interface QuizAttemptApi {
   /** Le quiz autorise-t-il une nouvelle tentative ? */
   allowRetry: boolean;
   /**
+   * La tentative affichée attend l'ENSEIGNANT : sa correction automatique a échoué sans verdict
+   * trop souvent (#116). Elle compte comme soumise, mais n'a ni note ni corrigé : la vue affiche un
+   * message à la place du résumé.
+   */
+  awaitingReview: boolean;
+  /**
    * L'étudiant a déjà consommé sa tentative unique (au moins une tentative ET reprise
    * interdite) → la soumission doit être bloquée côté UI (miroir du 409 backend).
    */
@@ -254,6 +262,7 @@ export function useQuizAttempt({
 
   const [attempts, setAttempts] = useState<AttemptSummary[]>([]);
   const [currentAttemptId, setCurrentAttemptId] = useState<number | null>(null);
+  const [awaitingReview, setAwaitingReview] = useState(false);
 
   const mountedRef = useRef(true);
   // Passe à `true` une fois le brouillon éventuel restauré (fin du premier `reload`) : évite que
@@ -295,16 +304,26 @@ export function useQuizAttempt({
       setReconciling(true);
       const refresh = fetchAttemptsRef.current;
       const deadline = Date.now() + RECONCILE_TIMEOUT_MS;
-      // Charge le résultat corrigé d'une tentative et ouvre le résumé.
+      // Charge le résultat corrigé d'une tentative et ouvre le résumé — ou, si elle attend
+      // l'enseignant (#116), le message « à revoir » : elle n'a ni note ni corrigé.
       const openSummary = async (attemptId: number) => {
         clearPending(quizId);
         clearDraft(quizId);
-        const lastResult = fetchAttemptResultRef.current
-          ? await fetchAttemptResultRef.current(quizId, attemptId)
-          : null;
         const history = refresh ? await refresh(quizId) : [];
         if (!mountedRef.current) return;
         setAttempts(history);
+        if (isAwaitingReview(history.find((a) => a.id === attemptId))) {
+          setResult(null);
+          setCurrentAttemptId(attemptId);
+          setAwaitingReview(true);
+          setPhase('summary');
+          setReconciling(false);
+          return;
+        }
+        const lastResult = fetchAttemptResultRef.current
+          ? await fetchAttemptResultRef.current(quizId, attemptId)
+          : null;
+        if (!mountedRef.current) return;
         if (lastResult) {
           setResult(lastResult);
           setCurrentAttemptId(attemptId);
@@ -318,7 +337,8 @@ export function useQuizAttempt({
           const outcome = outcomeRef.current;
           if (outcome && pending.attemptId != null && outcome.attemptId === pending.attemptId) {
             outcomeRef.current = null;
-            if (outcome.ok) {
+            if (outcome.ok || outcome.reason === REVIEW_REASON) {
+              // `review` : la tentative est GARDÉE (à revoir par l'enseignant), pas supprimée.
               await openSummary(outcome.attemptId);
             } else {
               // Correction échouée (code inévaluable) : la tentative a été SUPPRIMÉE côté serveur,
@@ -370,6 +390,7 @@ export function useQuizAttempt({
       setQuiz(fetched);
       setTouched(new Set());
       setCurrentIndex(0);
+      setAwaitingReview(false);
 
       // Une soumission était-elle en vol lors d'un refresh ? (marqueur localStorage, pas encore
       // reflété par une nouvelle tentative) → restaure les réponses et réconcilie avec le serveur.
@@ -416,6 +437,14 @@ export function useQuizAttempt({
       setAnswers(initAnswers(fetched));
       setAttempts(history);
       const last = history.length > 0 ? history[history.length - 1] : null;
+      // Dernière tentative à revoir par l'enseignant (#116) : pas de corrigé à charger.
+      if (last && isAwaitingReview(last)) {
+        setResult(null);
+        setCurrentAttemptId(last.id);
+        setAwaitingReview(true);
+        setPhase('summary');
+        return;
+      }
       // Récap de la dernière tentative si elle existe (et qu'on sait la charger).
       const lastResult =
         last && fetchAttemptResultRef.current
@@ -445,6 +474,20 @@ export function useQuizAttempt({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Tentative à revoir (#116) affichée : l'enseignant peut relancer sa correction à tout moment.
+  // Son verdict arrive par le même événement qu'une soumission, alors qu'aucune n'est en cours
+  // ici (reconcilePending ne l'attend pas) : on recharge pour afficher le résultat.
+  useEffect(() => {
+    if (
+      awaitingReview &&
+      attemptOutcome?.ok &&
+      attemptOutcome.quizId === initialQuiz.id &&
+      attemptOutcome.attemptId === currentAttemptId
+    ) {
+      void reload();
+    }
+  }, [attemptOutcome, awaitingReview, currentAttemptId, initialQuiz.id, reload]);
 
   // Persiste le brouillon de passation (réponses + touched + position) à chaque changement, tant
   // qu'on est en train de répondre. Gardé par `hydratedRef` pour ne pas écraser un brouillon stocké
@@ -558,11 +601,20 @@ export function useQuizAttempt({
     setResult(null);
     setCurrentAttemptId(null);
     setSubmitError(null);
+    setAwaitingReview(false);
     setPhase('taking');
   }, [quiz, initialQuiz.id]);
 
   /** Affiche le récap d'une tentative passée (charge son détail corrigé). */
   const selectAttempt = useCallback(async (attemptId: number) => {
+    // Tentative à revoir (#116) : aucun corrigé à charger, on affiche le message d'attente.
+    if (isAwaitingReview(attempts.find((a) => a.id === attemptId))) {
+      setResult(null);
+      setCurrentAttemptId(attemptId);
+      setAwaitingReview(true);
+      setPhase('summary');
+      return;
+    }
     const fetchAttemptResult = fetchAttemptResultRef.current;
     if (!fetchAttemptResult) return;
     setLoading(true);
@@ -572,6 +624,7 @@ export function useQuizAttempt({
       setResult(attemptResult);
       setCurrentAttemptId(attemptId);
       setCurrentIndex(0);
+      setAwaitingReview(false);
       setPhase('summary');
     } catch {
       if (!mountedRef.current) return;
@@ -579,7 +632,7 @@ export function useQuizAttempt({
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [quiz.id, loadErrorMessage]);
+  }, [quiz.id, loadErrorMessage, attempts]);
 
   const reviewQuestion = useCallback((index: number) => {
     setCurrentIndex(index);
@@ -610,6 +663,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      awaitingReview,
       alreadySubmitted,
       retry,
       selectAttempt: (attemptId: number) => void selectAttempt(attemptId),
@@ -638,6 +692,7 @@ export function useQuizAttempt({
       attempts,
       currentAttemptId,
       allowRetry,
+      awaitingReview,
       alreadySubmitted,
       retry,
       selectAttempt,

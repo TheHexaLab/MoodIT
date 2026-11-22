@@ -772,6 +772,28 @@ class PermissionServiceRulesTest {
       assertThat(allowed("/api/quizzes/12", "DELETE", null)).isFalse();
     }
 
+    // Tentatives « a revoir » (#116, S4) : gestion du quiz, jamais l'etudiant abonne.
+    @Test
+    void tentativesARevoir_enseignantDuCours_autorise() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/review-attempts", "GET", null)).isTrue();
+      assertThat(allowed("/api/quizzes/12/attempts/81/regrade", "POST", null)).isTrue();
+    }
+
+    @Test
+    void tentativesARevoir_etudiantAbonne_refuse() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      // Abonne au cours et quiz publie : la regle de passation ne doit pas s'appliquer ici.
+      org.mockito.Mockito.lenient().when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      org.mockito.Mockito.lenient().when(membershipService.isQuizPublished(12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/review-attempts", "GET", null)).isFalse();
+      assertThat(allowed("/api/quizzes/12/attempts/81/regrade", "POST", null)).isFalse();
+    }
+
     @Test
     void lireQuiz_abonne_autorise() {
       loggedIn(user(5));

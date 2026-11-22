@@ -173,7 +173,42 @@ class DockerSandboxTest {
         assertThat(run.stdout()).isEqualTo("{\"v\":1}");
         assertThat(run.stderr()).isEqualTo("journal");
         assertThat(run.exitCode()).isZero();
+        // État OOMKilled illisible (non simulé ici) : faux, sans faire échouer la notation.
+        assertThat(run.oomKilled()).isFalse();
         org.mockito.Mockito.verify(remove).exec(); // conteneur détruit, succès ou non
+    }
+
+    @Test
+    void oom_killed_state_is_read_before_removal() {
+        // S3 (#116) : State.OOMKilled est lu AVANT la suppression du conteneur. Seul, il ne dit
+        // rien (vrai dès qu'un processus quelconque a été tué) ; avec la sortie 137, il désigne
+        // le superviseur.
+        for (int exit : new int[] {0, 137, -1}) {
+            boolean oom = exit != -1;   // -1 : état lu, OOMKilled faux
+            if (exit == -1) {
+                exit = 137;
+            }
+            var create = createCmdReturning("cid");
+            var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+            var docker = dockerMock(create, remove, exit);
+            var inspect = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectContainerCmd.class);
+            var response = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectContainerResponse.class);
+            var state = org.mockito.Mockito.mock(
+                    com.github.dockerjava.api.command.InspectContainerResponse.ContainerState.class);
+            org.mockito.Mockito.when(docker.inspectContainerCmd("cid")).thenReturn(inspect);
+            org.mockito.Mockito.when(inspect.exec()).thenReturn(response);
+            org.mockito.Mockito.when(response.getState()).thenReturn(state);
+            org.mockito.Mockito.when(state.getOOMKilled()).thenReturn(oom);
+
+            DockerSandbox.ContainerRun run = new DockerSandbox(docker, 512, 64, 1.0)
+                    .run("img", Map.of("job.json", "{}"), 5000);
+
+            assertThat(run.oomKilled()).isEqualTo(oom);
+            assertThat(run.supervisorOomKilled()).isEqualTo(oom && exit == 137);
+            var order = org.mockito.Mockito.inOrder(inspect, remove);
+            order.verify(inspect).exec();
+            order.verify(remove).exec();
+        }
     }
 
     @Test
@@ -198,10 +233,43 @@ class DockerSandboxTest {
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
         DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, null), 512, 64, 1.0);
 
+        // Mur atteint (ici : mur de 0 ms, donc écoulé) : le conteneur a tourné sans verdict —
+        // cause comptée par core (S4).
         org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> sandbox.run("img", Map.of("job.json", "{}"), 1000))
-                .isInstanceOf(SandboxException.class);
-        org.mockito.Mockito.verify(remove).exec();
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 0))
+                .isInstanceOf(NoVerdictException.class)
+                .hasMessageContaining("Mur du conteneur");
+        // Même exception AVANT le mur (flux d'attente coupé : démon redémarré, connexion
+        // perdue) : panne, jamais « sans verdict ».
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 60_000))
+                .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
+                .hasMessageContaining("coupée");
+        org.mockito.Mockito.verify(remove, org.mockito.Mockito.times(2)).exec();
+    }
+
+    @Test
+    void shutdown_during_wait_is_unavailable_not_no_verdict() {
+        // removeInFlight supprime le conteneur pendant l'attente : la sortie vide passerait pour
+        // un superviseur muet, et l'arrêt du service coûterait un échec « sans verdict ».
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+        var waitCb = docker.waitContainerCmd("cid").start();
+        org.mockito.Mockito.when(waitCb.awaitStatusCode(
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> {
+                    sandbox.removeInFlight();
+                    return 137;
+                });
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
+                .hasMessageContaining("arrêt");
     }
 
     @Test
@@ -564,7 +632,7 @@ class DockerSandboxTest {
         sandbox.logCapBytes = 6;
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
-                .isInstanceOf(SandboxException.class)
+                .isInstanceOf(NoVerdictException.class)
                 .hasMessageContaining("au-delà de 6 octets");
         // Conteneur détruit dans les deux cas.
         org.mockito.Mockito.verify(remove, org.mockito.Mockito.times(2)).exec();
@@ -607,7 +675,13 @@ class DockerSandboxTest {
             org.mockito.Mockito.doNothing().when(remove).exec();
 
             release.countDown();
-            pending.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            // La notation interrompue par l'arrêt est une PANNE (indisponible), jamais un
+            // « sans verdict » compté contre l'étudiant (#116, S4).
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> pending.get(10, java.util.concurrent.TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(SandboxException.class)
+                    .cause().isNotInstanceOf(NoVerdictException.class)
+                    .hasMessageContaining("arrêt");
         } finally {
             release.countDown();
             pool.shutdownNow();

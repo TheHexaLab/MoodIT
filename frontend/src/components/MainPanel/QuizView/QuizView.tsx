@@ -176,7 +176,11 @@ const QuizView: React.FC<QuizViewProps> = ({
           </button>
         ) : (
           <span className={styles.status}>
-            {phase === 'summary' ? t.finished : t.questionStatus(currentIndex + 1, total)}
+            {attempt.awaitingReview
+              ? t.awaitingReviewStatus
+              : phase === 'summary'
+                ? t.finished
+                : t.questionStatus(currentIndex + 1, total)}
           </span>
         )}
       </header>
@@ -210,6 +214,18 @@ const QuizView: React.FC<QuizViewProps> = ({
     }
     if (total === 0) {
       return <div className={styles.centeredState}>{t.empty}</div>;
+    }
+
+    // Tentative à revoir par l'enseignant (#116) : ni note ni corrigé à montrer.
+    if (phase === 'summary' && attempt.awaitingReview) {
+      return (
+        <div className={styles.centeredState} role="status">
+          <p>
+            <strong>{t.awaitingReviewTitle}</strong>
+          </p>
+          <p>{t.awaitingReview}</p>
+        </div>
+      );
     }
 
     if (phase === 'summary' && result) {
@@ -258,13 +274,15 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (phase === 'summary') {
       return (
         <footer className={`${styles.footer} ${styles.summaryFooter}`}>
-          <button
-            type="button"
-            className={styles.navButton}
-            onClick={() => attempt.reviewQuestion(0)}
-          >
-            {t.reviewAnswers}
-          </button>
+          {!attempt.awaitingReview && (
+            <button
+              type="button"
+              className={styles.navButton}
+              onClick={() => attempt.reviewQuestion(0)}
+            >
+              {t.reviewAnswers}
+            </button>
+          )}
           {attempt.allowRetry && (
             <button type="button" className={styles.primaryButton} onClick={attempt.retry}>
               {t.retryQuiz}

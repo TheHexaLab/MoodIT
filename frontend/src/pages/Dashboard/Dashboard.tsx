@@ -96,6 +96,8 @@ const quizEditorHandlers: QuizEditorHandlers = {
   onReorderQuizzes: api.reorderQuizzes,
   onEvaluateCode: api.evaluateCode,
   onRunCode: api.runCode,
+  onFetchReviewAttempts: api.fetchReviewAttempts,
+  onRegradeAttempt: api.regradeAttempt,
 };
 
 /** Popup ouvert dans le Dashboard, avec le contexte nécessaire à son rendu. */
