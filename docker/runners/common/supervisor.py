@@ -129,6 +129,19 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+# Ligne écrite sur le stderr du superviseur JUSTE AVANT qu'il prenne en charge le code soumis
+# (#116, plafond des échecs sans verdict). execution-service la cherche quand le superviseur meurt
+# sans rendre de JSON : absente, il est mort pendant sa propre mise en place (image cassée, job
+# non reçu, version incompatible) — panne de plateforme, non comptée contre l'étudiant ;
+# présente, le code soumis a pu y jouer un rôle. Le code soumis ne peut pas l'effacer : ses
+# sorties vont dans des tubes et des fichiers, jamais sur le stderr du PID 1.
+SUBMITTED_CODE_STAGE = "moodit-supervisor: submitted-code-stage"
+
+
+def announce_submitted_code_stage():
+    log(SUBMITTED_CODE_STAGE)
+
+
 # Ouverture par root SANS suivre de lien et sans bloquer sur une FIFO. Drapeaux POSIX lus par
 # getattr : le superviseur ne tourne que sous Linux, mais ses tests unitaires tournent aussi
 # sous Windows (O_BINARY : pas de traduction des fins de ligne).
@@ -6191,6 +6204,7 @@ def exec_main(job):
     if run_cmd is None:
         print(json.dumps({"v": 1, "error": "runtime non pris en charge : " + runtime}))
         return
+    announce_submitted_code_stage()
     env = exec_env(work)
 
     stdin_path = None
@@ -6289,6 +6303,7 @@ def main():
     if language not in RUNNERS:
         print(json.dumps({"v": 1, "error": "langage non pris en charge : " + language}))
         return
+    announce_submitted_code_stage()
     if language == "go":
         # Dossiers de build ETUDIANTS, Go seulement : le compilateur du code soumis tourne sous
         # son UID. Créés pour tous les langages, ils étaient un point d'écriture de l'étudiant

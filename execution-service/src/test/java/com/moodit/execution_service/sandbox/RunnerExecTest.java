@@ -108,15 +108,23 @@ class RunnerExecTest {
     void unreadable_response_or_supervisor_error_fails_closed() {
         // Une sortie VIDE ne lève pas chez Jackson 3 (MissingNode) : sans garde, elle rendait
         // Result(null, null) → « Aucune sortie d'exécution », au lieu du 502 d'une panne.
-        supervisorReturns("");
-        assertThatThrownBy(() -> runner.execute("python",
-                List.of(new RunnerExec.File("main.py", "x")), null, null))
-                .isInstanceOf(NoVerdictException.class);
-
-        supervisorReturns("pas du json");
-        assertThatThrownBy(() -> runner.execute("python",
-                List.of(new RunnerExec.File("main.py", "x")), null, null))
-                .isInstanceOf(NoVerdictException.class);
+        // Superviseur mort APRÈS avoir pris en charge le code soumis (ligne témoin présente) :
+        // « sans verdict », compté par core. AVANT (ligne absente) : panne de plateforme.
+        for (String stdout : new String[] {"", "pas du json"}) {
+            when(sandbox.run(any(), anyMap(), anyLong())).thenReturn(
+                    new DockerSandbox.ContainerRun(stdout, DockerEvaluator.SUBMITTED_CODE_STAGE, 1));
+            assertThatThrownBy(() -> runner.execute("python",
+                    List.of(new RunnerExec.File("main.py", "x")), null, null))
+                    .as("«%s» après la ligne témoin", stdout)
+                    .isInstanceOf(NoVerdictException.class);
+            supervisorReturns(stdout);
+            assertThatThrownBy(() -> runner.execute("python",
+                    List.of(new RunnerExec.File("main.py", "x")), null, null))
+                    .as("«%s» sans la ligne témoin", stdout)
+                    .isInstanceOf(SandboxException.class)
+                    .isNotInstanceOf(NoVerdictException.class)
+                    .hasMessageContaining("avant la prise en charge du code soumis");
+        }
 
         supervisorReturns("{\"v\":1,\"error\":\"runtime non pris en charge : cobol\"}");
         assertThatThrownBy(() -> runner.execute("python",
@@ -140,7 +148,8 @@ class RunnerExecTest {
             for (String stdout : new String[] {"", "pas du json"}) {
                 appender.list.clear();
                 when(sandbox.run(any(), anyMap(), anyLong()))
-                        .thenReturn(new DockerSandbox.ContainerRun(stdout, "", 137, true));
+                        .thenReturn(new DockerSandbox.ContainerRun(stdout,
+                                DockerEvaluator.SUBMITTED_CODE_STAGE, 137, true));
                 assertThatThrownBy(() -> runner.execute("python",
                         List.of(new RunnerExec.File("main.py", "x")), null, null))
                         .isInstanceOf(NoVerdictException.class);

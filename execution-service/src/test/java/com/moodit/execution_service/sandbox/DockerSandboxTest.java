@@ -231,14 +231,46 @@ class DockerSandboxTest {
     void time_budget_exceeded_throws_sandbox_exception_and_removes_container() {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
-        DockerSandbox sandbox = new DockerSandbox(dockerMock(create, remove, null), 512, 64, 1.0);
+        var docker = dockerMock(create, remove, null);
+        var inspect = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectContainerCmd.class);
+        var response = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InspectContainerResponse.class);
+        var state = org.mockito.Mockito.mock(
+                com.github.dockerjava.api.command.InspectContainerResponse.ContainerState.class);
+        org.mockito.Mockito.when(docker.inspectContainerCmd("cid")).thenReturn(inspect);
+        org.mockito.Mockito.when(inspect.exec()).thenReturn(response);
+        org.mockito.Mockito.when(response.getState()).thenReturn(state);
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
 
-        // Mur atteint (ici : mur de 0 ms, donc écoulé) : le conteneur a tourné sans verdict —
-        // cause comptée par core (S4).
+        // Mur atteint (ici : mur de 0 ms, donc écoulé) et conteneur ENCORE en marche selon le
+        // démon : il a tourné jusqu'au mur sans verdict — cause comptée par core (S4).
+        org.mockito.Mockito.when(state.getRunning()).thenReturn(true);
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> sandbox.run("img", Map.of("job.json", "{}"), 0))
                 .isInstanceOf(NoVerdictException.class)
                 .hasMessageContaining("Mur du conteneur");
+        // État absent : rien ne prouve qu'il est arrêté, même conclusion.
+        org.mockito.Mockito.when(response.getState()).thenReturn(null);
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 0))
+                .isInstanceOf(NoVerdictException.class);
+        // Mur atteint mais conteneur ARRÊTÉ : le démon n'a jamais notifié la fin. Sa sortie est
+        // lue comme d'habitude, avec le code de sortie de l'inspection.
+        org.mockito.Mockito.when(response.getState()).thenReturn(state);
+        org.mockito.Mockito.when(state.getRunning()).thenReturn(false);
+        org.mockito.Mockito.when(state.getExitCodeLong()).thenReturn(3L);
+        DockerSandbox.ContainerRun stopped = sandbox.run("img", Map.of("job.json", "{}"), 0);
+        assertThat(stopped.stdout()).isEqualTo("{\"v\":1}");
+        assertThat(stopped.exitCode()).isEqualTo(3);
+        org.mockito.Mockito.when(state.getExitCodeLong()).thenReturn(null);
+        assertThat(sandbox.run("img", Map.of("job.json", "{}"), 0).exitCode()).isEqualTo(-1);
+        // État illisible au mur : panne du démon, jamais « sans verdict ».
+        org.mockito.Mockito.when(inspect.exec()).thenThrow(new RuntimeException("démon muet"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 0))
+                .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
+                .hasMessageContaining("inspection en échec")
+                .satisfies(e -> assertThat(e.getCause().getSuppressed()).hasSize(1));
         // Même exception AVANT le mur (flux d'attente coupé : démon redémarré, connexion
         // perdue) : panne, jamais « sans verdict ».
         org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -246,7 +278,7 @@ class DockerSandboxTest {
                 .isInstanceOf(SandboxException.class)
                 .isNotInstanceOf(NoVerdictException.class)
                 .hasMessageContaining("coupée");
-        org.mockito.Mockito.verify(remove, org.mockito.Mockito.times(2)).exec();
+        org.mockito.Mockito.verify(remove, org.mockito.Mockito.times(6)).exec();
     }
 
     @Test

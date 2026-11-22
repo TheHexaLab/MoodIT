@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import inspect
 import io
 import unittest
 import unittest.mock
@@ -3578,6 +3579,37 @@ class StudentBuildMemoTest(unittest.TestCase):
                 self.assertIn("compile_student(", source)
                 if runner is not supervisor.run_c_rpc:
                     self.assertNotIn("preexec_student_compile", source)
+
+
+class SubmittedCodeStageTest(unittest.TestCase):
+    """La ligne témoin sépare, pour execution-service, une mort du superviseur pendant sa propre
+    mise en place (panne de plateforme, non comptée) d'une mort une fois le code soumis pris en
+    charge (comptée « sans verdict »). Elle doit donc partir AVANT tout traitement du code soumis,
+    et APRÈS les seules sorties d'erreur de plateforme."""
+
+    def test_the_stage_line_goes_to_stderr_flushed(self):
+        err = io.StringIO()
+        with unittest.mock.patch.object(supervisor.sys, "stderr", err):
+            supervisor.announce_submitted_code_stage()
+        self.assertEqual(err.getvalue(), supervisor.SUBMITTED_CODE_STAGE + "\n")
+
+    def assert_announced_between(self, function, platform_error, first_submitted_code_step):
+        source = inspect.getsource(function)
+        announce = source.index("announce_submitted_code_stage()")
+        self.assertEqual(source.count("announce_submitted_code_stage()"), 1)
+        self.assertLess(source.index(platform_error), announce)
+        self.assertLess(announce, source.index(first_submitted_code_step))
+
+    def test_grading_mode_announces_after_setup_and_before_the_cases(self):
+        self.assert_announced_between(supervisor.main, "langage non pris en charge",
+                                      "substitute_placeholders(")
+        source = inspect.getsource(supervisor.main)
+        self.assertLess(source.index("announce_submitted_code_stage()"),
+                        source.index("reset_go_student_dirs("))
+
+    def test_exec_mode_announces_after_setup_and_before_running_anything(self):
+        self.assert_announced_between(supervisor.exec_main, "runtime non pris en charge",
+                                      "exec_env(")
 
 
 if __name__ == "__main__":

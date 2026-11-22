@@ -3,6 +3,7 @@ package com.moodit.execution_service.sandbox;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.WaitContainerResultCallback;
 import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.exception.NotFoundException;
@@ -499,12 +500,20 @@ public class DockerSandbox {
                 // Seulement si le mur s'est réellement écoulé : docker-java lève la même
                 // exception quand le flux d'attente se coupe (démon redémarré, connexion
                 // perdue), et ces pannes-là ne doivent rien coûter à l'étudiant.
-                if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStarted) >= wallTimeoutMs) {
+                if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStarted) < wallTimeoutMs) {
+                    throw new SandboxException("Attente du conteneur de notation coupée : "
+                            + e.getMessage(), e);
+                }
+                // Mur écoulé : le démon le confirme-t-il ? Un démon bloqué peut garder le flux
+                // d'attente ouvert sans jamais notifier la fin d'un conteneur qui a rendu son
+                // verdict depuis longtemps. Arrêté, on lit sa sortie comme d'habitude ;
+                // inspection en échec, c'est le démon qui est en panne (« indisponible ») ; encore
+                // en marche, ou état absent (rien ne prouve l'arrêt), il a tourné jusqu'au mur.
+                status = exitCodeIfStopped(containerId, e);
+                if (status == null) {
                     throw new NoVerdictException("Mur du conteneur de notation atteint ("
                             + wallTimeoutMs + " ms) : aucun verdict", e);
                 }
-                throw new SandboxException("Attente du conteneur de notation coupée : "
-                        + e.getMessage(), e);
             }
             // Service en cours d'ARRÊT : removeInFlight vient de supprimer ce conteneur, d'où une
             // sortie vide qui passerait pour un superviseur muet. Panne, pas « sans verdict ».
@@ -592,6 +601,31 @@ public class DockerSandbox {
                 }
             }
         }
+    }
+
+    /**
+     * Code de sortie d'un conteneur déjà ARRÊTÉ, {@code null} s'il tourne encore. Appelé quand
+     * l'attente expire au mur. Une inspection en échec est une panne du démon :
+     * {@link SandboxException} (cause « indisponible »), jamais un échec compté contre l'étudiant.
+     * Un état absent, ou sans indicateur de marche, vaut « encore en marche » : rien ne prouve
+     * l'arrêt, et conclure à tort à l'arrêt ouvrirait un essai non compté.
+     */
+    private Integer exitCodeIfStopped(String containerId, RuntimeException waitFailure) {
+        InspectContainerResponse.ContainerState state;
+        try {
+            state = client().inspectContainerCmd(containerId).exec().getState();
+        } catch (RuntimeException e) {
+            e.addSuppressed(waitFailure);
+            throw new SandboxException("Conteneur de notation au mur, inspection en échec : "
+                    + e.getMessage(), e);
+        }
+        if (state == null || !Boolean.FALSE.equals(state.getRunning())) {
+            return null;
+        }
+        log.warn("Attente du conteneur {} expirée au mur alors qu'il était arrêté : démon muet",
+                containerId);
+        Long exitCode = state.getExitCodeLong();
+        return exitCode == null ? -1 : exitCode.intValue();
     }
 
     /**

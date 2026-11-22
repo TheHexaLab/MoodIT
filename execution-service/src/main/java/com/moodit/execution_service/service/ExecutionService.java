@@ -8,6 +8,7 @@ import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 
 import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.NoVerdictException;
 import com.moodit.execution_service.sandbox.RunnerExec;
 import com.moodit.execution_service.sandbox.SandboxException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -226,11 +227,18 @@ public class ExecutionService {
                     // essai de plus. Mais un seul harnais interrompu ne suffit pas a mettre
                     // toute l'attente sur le compte de l'etudiant : quand la file a coute plus
                     // que ses propres interruptions, c'est bien la charge qui a fait deborder.
+                    // Cause « sans verdict » (NoVerdictException), comptee par core (#116, S4) :
+                    // le code soumis peut s'arreter juste sous le temps limite a chaque harnais
+                    // (aucune interruption) et laisser la file faire le reste. Non compte, ce 502
+                    // offrait un nouvel essai a volonte sur une question a tentative unique. Un
+                    // etudiant honnete pris dans la meme charge est compte lui aussi ; au plafond,
+                    // sa tentative est gardee « a revoir » et l'enseignant la relance — jamais une
+                    // fausse note.
                     long waitNs = WAIT_NS.get()[0];
                     long workNs = (System.nanoTime() - startNs) - waitNs;
                     if (limiter.isInternal() && workNs < budgetNs
                             && waitNs > INTERRUPTED_NS.get()[0]) {
-                        throw new SandboxException("Notation incomplète (charge du serveur) : "
+                        throw new NoVerdictException("Notation incomplète (charge du serveur) : "
                                 + "la tentative est à reprendre");
                     }
                 }

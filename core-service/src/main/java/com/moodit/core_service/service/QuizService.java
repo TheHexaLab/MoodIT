@@ -416,6 +416,7 @@ public class QuizService {
 
         // Avant toute écriture : une réponse mal formée est refusée (400) sans consommer la tentative.
         requireValidOrderings(quiz, byQuestion);
+        requireBoundedCode(quiz, byQuestion);
 
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
@@ -841,12 +842,20 @@ public class QuizService {
                 .toList();
     }
 
-    /** Résultat corrigé d'UNE tentative donnée (révision), restreint à son propriétaire. */
+    /**
+     * Résultat corrigé d'UNE tentative donnée (révision), restreint à son propriétaire, et
+     * seulement une fois CORRIGÉE ({@code "done"}) : le résultat porte le corrigé des questions
+     * sans code (bonnes options, ordre attendu). Lu pendant la correction ({@code "pending"}), il
+     * le livrait avant la note ; et si la correction échouait ensuite, la tentative était supprimée
+     * et l'étudiant resoumettait avec les bonnes réponses (#116). Une tentative « à revoir » n'a
+     * pas de corrigé non plus. 404 dans les deux cas, comme une tentative inconnue.
+     */
     @Transactional(readOnly = true)
     public QuizResultDTO getAttemptResult(Integer attemptId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
         Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
+                .filter(a -> "done".equals(a.getStatus()))
                 .orElseThrow(AttemptNotFoundException::new);
         return maskItemIds(computeAttemptResult(attempt));
     }
@@ -1114,6 +1123,31 @@ public class QuizService {
             if (!isPermutationOrEmpty(q, answer.getOrderedItemIds())) {
                 throw new InvalidQuizException("Question " + index
                         + " : l'ordre soumis doit contenir chaque élément exactement une fois.");
+            }
+        }
+    }
+
+    /**
+     * Taille maximale d'un code soumis, en caractères — miroir de la borne d'execution-service
+     * ({@code EvaluateRequest.code}, {@code @Size(max = 100_000)}).
+     */
+    static final int MAX_CODE_CHARS = 100_000;
+
+    /**
+     * Un code soumis plus long que ce qu'execution-service accepte est refusé ICI (400, tentative
+     * non consommée). Accepté puis transmis, il recevait un 400 du service d'exécution : la
+     * tentative était supprimée sans compter comme un échec sans verdict, un nouvel essai à
+     * volonté sur une question à tentative unique (#116). Toutes les questions sont bornées,
+     * pas seulement celles à harnais : la colonne qui stocke la réponse n'a pas de limite.
+     */
+    private void requireBoundedCode(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        int index = 0;
+        for (Question q : sortedQuestions(quiz)) {
+            index++;
+            SubmittedAnswerDTO answer = byQuestion.get(q.getId());
+            if (answer != null && answer.getCode() != null && answer.getCode().length() > MAX_CODE_CHARS) {
+                throw new InvalidQuizException("Question " + index + " : le code soumis dépasse "
+                        + MAX_CODE_CHARS + " caractères.");
             }
         }
     }

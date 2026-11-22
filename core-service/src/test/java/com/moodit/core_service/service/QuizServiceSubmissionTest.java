@@ -117,6 +117,37 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
 
+        @Test
+        @DisplayName("Code soumis au-delà de la borne d'execution-service → refusé (400), tentative non consommée")
+        void codeTropLong_refuse() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            SubmittedAnswerDTO tooLong = SubmittedAnswerDTO.builder().questionId(11)
+                    .code("x".repeat(QuizService.MAX_CODE_CHARS + 1)).build();
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(tooLong), EMAIL))
+                    .isInstanceOf(com.moodit.core_service.exception.InvalidQuizException.class)
+                    .hasMessage("Question 2 : le code soumis dépasse 100000 caractères.");
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Code soumis pile à la borne (100 000 caractères) → accepté")
+        void codeALaBorne_accepte() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> {
+                Attempt a = inv.getArgument(0);
+                a.setId(56);
+                return a;
+            });
+            SubmittedAnswerDTO atLimit = SubmittedAnswerDTO.builder().questionId(11)
+                    .code("x".repeat(QuizService.MAX_CODE_CHARS)).build();
+
+            assertThat(service.submitQuiz(4, body(atLimit), EMAIL)).isEqualTo(56);
+        }
+
         /** Quiz à une remise en ordre (éléments 100, 101, 102) pour les cas d'ordre soumis. */
         private Quiz orderingQuiz() {
             Question ordering = question(30, ORDERING, 3.0, 0);

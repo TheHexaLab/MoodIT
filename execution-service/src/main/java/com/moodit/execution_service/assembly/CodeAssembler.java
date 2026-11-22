@@ -924,6 +924,11 @@ public class CodeAssembler {
             return statements;
         }
         StringBuilder current = new StringBuilder();
+        // Le segment porte-t-il du SQL réel (hors blancs et commentaires) ? Tenu PENDANT le
+        // découpage, qui connaît déjà les bornes des commentaires : une regex appliquée après
+        // coup relançait un balayage jusqu'à la fin à chaque « /* » non fermé — quadratique, et
+        // le dump de la phase 1 (jusqu'à 512 000 caractères) est du contenu étudiant (#116).
+        boolean hasCode = false;
         int i = 0;
         int n = sql.length();
         while (i < n) {
@@ -933,8 +938,9 @@ public class CodeAssembler {
                 int eol = sql.indexOf('\n', i);
                 int lineEnd = eol < 0 ? n : eol;
                 if (isShellTerminatorLine(sql.substring(i, lineEnd))) {
-                    addStatement(statements, current);
+                    addStatement(statements, current, hasCode);
                     current.setLength(0);
+                    hasCode = false;
                     i = eol < 0 ? n : eol + 1;
                     continue;
                 }
@@ -953,22 +959,26 @@ public class CodeAssembler {
                 int close = closeQuote(sql, i, c);
                 int end = close < 0 ? n : close; // non fermé : on prend jusqu'au bout
                 current.append(sql, i, end);
+                hasCode = true;
                 i = end;
             } else if (c == '[') { // identifiant crocheté SQLite (pas d'échappement)
                 int end = sql.indexOf(']', i + 1);
                 end = end < 0 ? n : end + 1;
                 current.append(sql, i, end);
+                hasCode = true;
                 i = end;
             } else if (c == ';') { // fin d'instruction
-                addStatement(statements, current);
+                addStatement(statements, current, hasCode);
                 current.setLength(0);
+                hasCode = false;
                 i++;
             } else {
                 current.append(c);
+                hasCode |= !Character.isWhitespace(c);
                 i++;
             }
         }
-        addStatement(statements, current);
+        addStatement(statements, current, hasCode);
         return statements;
     }
 
@@ -1043,14 +1053,9 @@ public class CodeAssembler {
     }
 
     /** Ajoute le segment s'il porte du SQL réel (ni blanc ni commentaires seuls). */
-    private static void addStatement(List<String> statements, StringBuilder segment) {
-        String stmt = segment.toString().strip();
-        if (stmt.isEmpty()) {
-            return;
-        }
-        String code = stmt.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("--[^\\n]*", " ").strip();
-        if (!code.isEmpty()) {
-            statements.add(stmt);
+    private static void addStatement(List<String> statements, StringBuilder segment, boolean hasCode) {
+        if (hasCode) {
+            statements.add(segment.toString().strip());
         }
     }
 

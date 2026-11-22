@@ -381,6 +381,31 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void splitSqlStatements_segments_de_blancs_ou_de_commentaires_seuls_sont_ignores() {
+        assertThat(CodeAssembler.splitSqlStatements(" /* a */ ; -- b\n ;\t\n; SELECT 1 ; /* fin"))
+                .containsExactly("SELECT 1");
+        // Le « /* » d'un commentaire de ligne n'ouvre rien : ce qui suit le saut de ligne est
+        // du SQL, comme pour SQLite (le découpage et le test « porte du SQL » lisent pareil).
+        assertThat(CodeAssembler.splitSqlStatements("-- x /*\n y */"))
+                .containsExactly("-- x /*\n y */");
+        // Un littéral ou un identifiant seul est du SQL, même s'il contient des commentaires.
+        assertThat(CodeAssembler.splitSqlStatements("'/* a */'; [-- b]"))
+                .containsExactly("'/* a */'", "[-- b]");
+    }
+
+    @Test
+    void splitSqlStatements_reste_lineaire_sur_un_litteral_plein_de_commentaires_ouverts() {
+        // Dump de phase 1 (contenu étudiant, jusqu'à 512 000 caractères) : une valeur faite de
+        // « /* » répétés. L'ancien test « porte du SQL » (regex) relançait un balayage jusqu'à la
+        // fin à chaque « /* » : plusieurs minutes de CPU sur le fil de la requête.
+        String dump = "INSERT INTO t VALUES('" + "/* ".repeat(170_000) + "');";
+        java.util.List<String> statements = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(2), () -> CodeAssembler.splitSqlStatements(dump));
+        assertThat(statements).hasSize(1);
+        assertThat(statements.get(0)).startsWith("INSERT INTO t VALUES('/* ").endsWith("')");
+    }
+
+    @Test
     void splitSqlStatements_commentaire_de_ligne_final_sans_saut_de_ligne() {
         assertThat(CodeAssembler.splitSqlStatements("SELECT 1; -- fin ; pas une instruction"))
                 .containsExactly("SELECT 1");

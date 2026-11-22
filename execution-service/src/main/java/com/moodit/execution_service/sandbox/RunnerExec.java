@@ -127,16 +127,15 @@ public class RunnerExec {
         try {
             root = MAPPER.readTree(run.stdout());
         } catch (RuntimeException e) {
-            DockerEvaluator.logSupervisorOomKill(run);
-            throw new NoVerdictException("Réponse du runner illisible (exit " + run.exitCode() + ")");
+            throw DockerEvaluator.deadSupervisor(run,
+                    "Réponse du runner illisible (exit " + run.exitCode() + ")");
         }
         // Jackson 3 rend un MissingNode sur une sortie vide, sans lever : un runner mort sans
         // JSON donnait Result(null, null) → « Aucune sortie d'exécution », au lieu du 502
         // d'une panne d'infrastructure.
         if (!root.isObject()) {
-            DockerEvaluator.logSupervisorOomKill(run);
-            throw new NoVerdictException("Le runner n'a rendu aucune réponse (exit "
-                    + run.exitCode() + ")");
+            throw DockerEvaluator.deadSupervisor(run,
+                    "Le runner n'a rendu aucune réponse (exit " + run.exitCode() + ")");
         }
         if (root.has("error")) {
             throw new SandboxException("Runner : " + root.get("error").asString());

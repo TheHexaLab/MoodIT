@@ -349,24 +349,19 @@ public class DockerEvaluator {
         } catch (RuntimeException e) {
             log.warn("Sortie du superviseur illisible (exit {}) : {}", run.exitCode(),
                     truncate(run.stderr()));
-            logSupervisorOomKill(run);
-            throw new NoVerdictException("Réponse du superviseur de notation illisible");
+            throw deadSupervisor(run, "Réponse du superviseur de notation illisible");
         }
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode (et
         // « null » un NullNode). Sans cette garde, `results` était simplement vide, chaque cas
         // recevait « Notation incomplète » passed=false — une liste de verdicts VALIDE aux yeux
         // de core, qui persistait un 0 sur une tentative UNIQUE. Un superviseur mort sans JSON
         // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée, collecte des
-        // logs expirée) n'est pas une note : 502 de cause « sans verdict ». Core supprime alors
-        // la tentative, et l'étudiant resoumet — jusqu'à un plafond par étudiant et par quiz,
-        // au-delà duquel la tentative est gardée « à revoir » par l'enseignant (#116, S4).
+        // logs expirée) n'est pas une note : 502 (cf. deadSupervisor pour sa cause).
         if (!root.isObject()) {
             log.warn("Superviseur de notation muet (exit {}) : {}", run.exitCode(),
                     truncate(run.stderr()));
-            logSupervisorOomKill(run);
-            throw new NoVerdictException(
-                    "Le superviseur de notation n'a rendu aucun verdict (exit "
-                            + run.exitCode() + ")");
+            throw deadSupervisor(run, "Le superviseur de notation n'a rendu aucun verdict (exit "
+                    + run.exitCode() + ")");
         }
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
@@ -384,10 +379,14 @@ public class DockerEvaluator {
         // peut relire. Absent ou inconnu (superviseur régressé, sortie d'un autre format), rien
         // ne dit que les canaris ont été jugés : c'est une panne (502), jamais une note —
         // sans cette garde, les « réussi » d'une telle sortie étaient acceptés tels quels.
+        // Panne de PLATEFORME (cause « indisponible », non comptée contre l'étudiant) : le
+        // superviseur émet toujours ce champ avec ses verdicts, dans le même print ; s'il manque
+        // dans un JSON valide, c'est une image runner d'une autre version que le service
+        // (build.sh non relancé après un déploiement), pas le code soumis.
         String canaries = root.path("canaries").asString("");
         if (!CANARY_VERDICTS.contains(canaries)) {
             log.warn("Verdict des canaris absent ou inconnu (« {} »)", truncate(canaries));
-            throw new NoVerdictException(
+            throw new SandboxException(
                     "Réponse du superviseur de notation incomplète (verdict des canaris)");
         }
         boolean canariesInconsistent = "incoherents".equals(canaries);
@@ -439,6 +438,30 @@ public class DockerEvaluator {
             results.add(new TestResult(testCase.name(), testCase.effectiveWeight(), passed, detail));
         }
         return results;
+    }
+
+    /**
+     * Ligne témoin que le superviseur écrit sur SON stderr juste avant de prendre en charge le
+     * code soumis (miroir de {@code SUBMITTED_CODE_STAGE} dans {@code supervisor.py}).
+     */
+    static final String SUBMITTED_CODE_STAGE = "moodit-supervisor: submitted-code-stage";
+
+    /**
+     * Exception d'un superviseur mort sans verdict (sortie vide ou illisible), dans les deux
+     * modes. Cause « sans verdict », comptée par core contre l'étudiant (#116, S4), seulement si
+     * le superviseur avait pris en charge le code soumis : sa ligne témoin est alors dans son
+     * stderr, et le code soumis a pu provoquer la mort. Sans elle, il est mort pendant sa propre
+     * mise en place (image cassée, job non reçu, version incompatible), avant qu'aucun code
+     * soumis ne tourne : panne de plateforme, cause « indisponible ». Le code soumis ne peut
+     * pas effacer la ligne : ses sorties vont dans des tubes et des fichiers, jamais sur le
+     * stderr du superviseur.
+     */
+    static SandboxException deadSupervisor(DockerSandbox.ContainerRun run, String message) {
+        logSupervisorOomKill(run);
+        if (run.stderr() == null || !run.stderr().contains(SUBMITTED_CODE_STAGE)) {
+            return new SandboxException(message + " — avant la prise en charge du code soumis");
+        }
+        return new NoVerdictException(message);
     }
 
     /**

@@ -192,10 +192,30 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   est à -1000 et le code soumis ne peut plus l'atteindre, c'est donc l'isolation qui est en
   défaut. La réponse reste un 502 — jamais une note.
 - **S4 — plafond.** Le 502 porte sa cause (`cause` du ProblemDetail) : `sans_verdict` quand le
-  conteneur a tourné sans rendre de verdict (superviseur muet ou illisible, verdict des canaris
-  absent, notation incomplète, mur réellement écoulé, sortie démesurée — `NoVerdictException`),
-  `indisponible` sinon (démon injoignable ou flux d'attente coupé avant le mur, image absente,
-  service en arrêt — y compris un conteneur supprimé par l'arrêt pendant la notation). Core compte les
+  conteneur a tourné sans rendre de verdict une fois le code soumis pris en charge
+  (`NoVerdictException`) — superviseur muet ou illisible APRÈS sa ligne témoin, notation
+  compilée incomplète, mur réellement écoulé avec un conteneur encore en marche, sortie
+  démesurée, et budget global d'une correction interprétée/SQL épuisé par l'attente d'une place
+  alors que le travail seul tenait (un code qui s'arrête juste sous le temps limite à chaque
+  harnais pouvait sinon laisser la file transformer chaque essai en suppression non comptée ; un
+  étudiant honnête pris dans la même charge est compté lui aussi, sans jamais de fausse note) ;
+  `indisponible` sinon : démon injoignable, flux d'attente coupé avant le mur,
+  inspection du conteneur en échec au mur, image absente, service en arrêt (y compris un conteneur
+  supprimé par l'arrêt pendant la notation), verdict des canaris absent d'un JSON valide (image
+  d'une autre version que le service), superviseur mort AVANT sa ligne témoin. Cette ligne
+  (`SUBMITTED_CODE_STAGE`, `moodit-supervisor: submitted-code-stage`) est écrite sur le stderr du
+  superviseur juste avant qu'il prenne en charge le code soumis, après ses seules erreurs de
+  plateforme (job non reçu, langage ou runtime inconnu) : sans elle, une image cassée envoyait
+  toute une classe « à revoir » au troisième essai. Le code soumis ne peut pas l'effacer : ses
+  sorties vont dans des tubes et des fichiers, jamais sur le stderr du PID 1. Au mur, le démon est
+  interrogé avant de conclure : un conteneur déjà arrêté (démon qui n'a jamais notifié la fin) est
+  lu normalement ; un état absent ou sans indicateur de marche compte comme « encore en marche »
+  (rien ne prouve qu'il est arrêté). Deux fermetures côté core empêchent le code soumis de provoquer un échec non
+  compté : un code de plus de 100 000 caractères (la borne d'execution-service) est refusé à la
+  soumission (400, tentative non consommée) au lieu de recevoir un 400 à la correction ; et le
+  résultat d'une tentative n'est lisible qu'une fois corrigée (`done`) — il porte le corrigé des
+  questions sans code, que l'étudiant lisait pendant la correction pour resoumettre après un
+  échec. Core compte les
   `sans_verdict` par étudiant et par quiz (table `Grading_Failure`, migration V6). En deçà de
   `QUIZ_MAX_NO_VERDICT_FAILURES` (3), la tentative est supprimée et l'étudiant resoumet, comme
   avant ; au-delà, elle est GARDÉE en statut `review` : elle consomme la tentative unique, sans
@@ -219,6 +239,20 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   quiz) ; un 502 « sans verdict » ne lui rend la main que trois fois (voir « Mort sans verdict :
   journal et plafond » ci-dessus). Aucune correction n'est perdue (elles attendent dans la file de core),
   elles peuvent être retardées.
+- **Attente d'une place au-delà de `EXEC_INTERNAL_QUEUE_WAIT_MS` (429)** : tentative supprimée,
+  non comptée. Pour un compilé, elle a lieu avant tout conteneur ; pour un interprété ou du SQL,
+  qui prend une place PAR harnais, elle peut tomber entre deux harnais, après que le code soumis
+  a déjà tourné. Elle dépend de la charge des corrections, que le code soumis ne règle pas, mais
+  un étudiant qui a des soumissions en cours sur plusieurs quiz tient une place par quiz en
+  cours, et il n'y a que deux places internes en prod : c'est le reste ouvert ci-dessus (aucune
+  borne par utilisateur), rien ne permet d'y lier une donnée cachée.
+- **La règle « à revoir » est réévaluée à chaque échec**, depuis le compte, le plafond configuré
+  et la reprise du quiz. Une tentative que l'enseignant relance sur un quiz AVEC reprise, et
+  dont la relance tombe sur une panne `indisponible`, est donc supprimée (l'étudiant peut
+  resoumettre) ; et après un plafond RELEVÉ dans la configuration, une tentative déjà à revoir,
+  relancée puis tombée sur une panne, est supprimée tant que son compte reste sous le nouveau
+  plafond : l'étudiant retrouve une tentative. Assumé : garder une marque de relance
+  demanderait une colonne de plus pour ces deux cas limites.
 - **Mémoire noyau non comptée** : les objets que le code soumis peut créer sous le profil de
   Docker ont été balayés (tableau ci-dessus) ; ceux qui restent permis sont bornés par les rlimits
   et rendus à la mort. Un objet non compté qui aurait échappé au balayage retomberait sur l'OOM

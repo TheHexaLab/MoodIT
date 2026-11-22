@@ -129,8 +129,10 @@ class ExecutionServiceTest {
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 2)));
 
+        // Compté par core (S4, F4) : sinon un code qui s'arrête juste sous le temps limite
+        // laissait la file transformer chaque essai en suppression non comptée.
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(req)))
-                .isInstanceOf(com.moodit.execution_service.sandbox.SandboxException.class);
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class);
         other.join();
     }
 
@@ -229,7 +231,7 @@ class ExecutionServiceTest {
         Thread other = holdSlot(limiter, 900);
 
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
-                .isInstanceOf(SandboxException.class)
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class)
                 .hasMessageContaining("charge du serveur");
         other.join();
     }
@@ -245,7 +247,7 @@ class ExecutionServiceTest {
         Thread other = holdSlot(limiter, 600);
 
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class);
         other.join();
     }
 

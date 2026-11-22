@@ -186,8 +186,8 @@ class DockerEvaluatorTest {
         // des logs expirée) n'est jamais un 0 : NoVerdictException → 502 de cause
         // « sans_verdict », que core compte par étudiant et par quiz (S4).
         for (String stdout : new String[] {"", "   \n", "null"}) {
-            when(sandbox.run(any(), anyMap(), anyLong()))
-                    .thenReturn(new DockerSandbox.ContainerRun(stdout, "tué (OOM ?)", 137));
+            when(sandbox.run(any(), anyMap(), anyLong())).thenReturn(new DockerSandbox.ContainerRun(
+                    stdout, DockerEvaluator.SUBMITTED_CODE_STAGE + " tué (OOM ?)", 137));
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                     .as("stdout %s doit lever, pas noter 0", "«" + stdout + "»")
                     .isInstanceOf(NoVerdictException.class);
@@ -195,17 +195,38 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void supervisor_dead_before_the_submitted_code_is_a_platform_failure() {
+        // Sans sa ligne témoin, le superviseur est mort pendant sa propre mise en place (image
+        // cassée, job non reçu) : aucun code soumis n'a tourné. Panne « indisponible », jamais
+        // comptée contre l'étudiant — sinon une image cassée envoyait toute une classe « à
+        // revoir » au troisième essai. Même règle pour une sortie illisible.
+        for (String stdout : new String[] {"", "pas du json"}) {
+            for (String stderr : new String[] {"", "Traceback: ImportError", null}) {
+                when(sandbox.run(any(), anyMap(), anyLong()))
+                        .thenReturn(new DockerSandbox.ContainerRun(stdout, stderr, 1));
+                assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                        .as("«%s» / «%s»", stdout, stderr)
+                        .isInstanceOf(SandboxException.class)
+                        .isNotInstanceOf(NoVerdictException.class)
+                        .hasMessageContaining("avant la prise en charge du code soumis");
+            }
+        }
+    }
+
+    @Test
     void unreadable_json_throws_sandbox_exception() {
         // stderr volumineux : tronqué dans le journal, jamais dans l'exception.
         when(sandbox.run(any(), anyMap(), anyLong()))
-                .thenReturn(new DockerSandbox.ContainerRun("pas du json", "x".repeat(5000), 1));
+                .thenReturn(new DockerSandbox.ContainerRun("pas du json",
+                        DockerEvaluator.SUBMITTED_CODE_STAGE + "x".repeat(5000), 1));
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(NoVerdictException.class);
         // stderr absent : le journal reste robuste (aucune NPE).
         when(sandbox.run(any(), anyMap(), anyLong()))
                 .thenReturn(new DockerSandbox.ContainerRun("toujours pas du json", null, 1));
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
-                .isInstanceOf(SandboxException.class);
+                .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class);
     }
 
     @Test
@@ -236,7 +257,8 @@ class DockerEvaluatorTest {
                 for (long exit : new long[] {1, 137}) {
                     appender.list.clear();
                     when(sandbox.run(any(), anyMap(), anyLong()))
-                            .thenReturn(new DockerSandbox.ContainerRun(stdout, "", exit, oom));
+                            .thenReturn(new DockerSandbox.ContainerRun(stdout,
+                                    DockerEvaluator.SUBMITTED_CODE_STAGE, exit, oom));
                     assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                             .isInstanceOf(NoVerdictException.class);
                     assertThat(appender.list)
@@ -393,13 +415,16 @@ class DockerEvaluatorTest {
     void missing_or_unknown_canary_verdict_is_a_failure_not_a_grade() {
         // Revue #246 : seul « incoherents » était relu. Un superviseur régressé qui omettait le
         // champ (ou rendait une valeur inconnue) voyait ses « réussi » acceptés, sans que rien
-        // n'atteste que les canaris avaient été jugés. Panne (502), sur les deux chemins.
+        // n'atteste que les canaris avaient été jugés. Panne (502), sur les deux chemins. Panne
+        // de PLATEFORME, non comptée contre l'étudiant : le superviseur émet toujours ce champ
+        // avec ses verdicts, son absence vient d'une image d'une autre version que le service.
         for (String verdict : List.of("", ",\"canaries\":\"OK\"", ",\"canaries\":null",
                 ",\"canaries\":true")) {
             supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
                     + "{\"index\":1,\"passed\":true}],\"events\":[]" + verdict + "}");
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
-                    .as(verdict).isInstanceOf(NoVerdictException.class)
+                    .as(verdict).isInstanceOf(SandboxException.class)
+                    .isNotInstanceOf(NoVerdictException.class)
                     .hasMessageContaining("canaris");
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null,
                     DockerEvaluator.PUBLIC_WALL_MS))
