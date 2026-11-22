@@ -303,6 +303,56 @@ class HarnessProjectsTest {
     }
 
     @Test
+    void comments_and_literals_become_spaces_char_for_char() {
+        // Remplacement EXACT : chaque caractère effacé devient une espace et les sauts de ligne
+        // restent, pour que les positions (et la profondeur des accolades) gardent leur sens.
+        String[][] cases = {
+            {"a // x\nb", "a     \nb"},
+            {"a//", "a  "},
+            {"a /* x\ny */ b", "a     \n     b"},
+            {"a /*", "a   "},                                      // bloc non fermé
+            {"x = \"\"\"\nab\n\"\"\";", "x =    \n  \n   ;"},       // bloc de texte
+            {"a \"x\\\"y\" b", "a        b"},                       // guillemet échappé
+            {"\"\\", "  "},                                         // \ en fin de source
+            {"a \"bc", "a    "},                                    // chaîne non fermée
+            {"c = '}';", "c =    ;"},                               // caractère
+            {"\"a\nb\"", "  \n  "},                                 // saut de ligne dans un littéral
+            {"x\"\"", "x  "},                                       // chaîne vide en fin de source
+            {"a/", "a/"},                                           // / seule en fin de source
+            {"a / b * c", "a / b * c"},
+        };
+        for (String[] c : cases) {
+            assertThat(HarnessProjects.withoutCommentsOrLiterals(c[0])).as(c[0]).isEqualTo(c[1]);
+        }
+    }
+
+    @Test
+    void stray_closing_brace_does_not_hide_the_top_level_type() {
+        // Une accolade fermante orpheline avant la déclaration ne fait pas descendre la
+        // profondeur sous zéro : la classe qui suit reste de premier niveau.
+        assertThat(HarnessProjects.javaTypeName("}\npublic class Solution { }")).isEqualTo("Solution");
+    }
+
+    @Test
+    void build_lists_cases_then_canaries_with_their_code() {
+        HarnessProjects.Project project = HarnessProjects.build("C", "int f(void) { return 1; }",
+                List.of(new TestCaseInput("a", "return f() == 1;", 1),
+                        new TestCaseInput("b", null, 1)), 1000, 5000L);
+        assertThat(project.files().get("job.json")).contains("\"cases\":[{\"index\":0,\"name\":\"a\"},"
+                + "{\"index\":1,\"name\":\"b\"},{\"index\":2,\"canary\":\"pass\"},"
+                + "{\"index\":3,\"canary\":\"fail\"}]");
+        // Le code soumis est déposé dans CHAQUE cas, canaris compris ; un harnais absent est vide.
+        for (int i = 0; i < 4; i++) {
+            assertThat(project.files()).containsEntry("cases/" + i + "/src/solution.c",
+                    "int f(void) { return 1; }");
+        }
+        assertThat(project.files().get("cases/1/src/harnais_rpc.c")).endsWith("__MOODIT_HARNAIS__\n");
+        // Code soumis absent : fichier vide, jamais « null ».
+        assertThat(HarnessProjects.build("C", null, List.of(new TestCaseInput("a", "h", 1)), 1000, 5000L)
+                .files()).containsEntry("cases/0/src/solution.c", "");
+    }
+
+    @Test
     void commented_class_does_not_mislead_file_name() {
         // Un étudiant qui garde une ancienne version en commentaire voyait le fichier déposé
         // nommé d'après la classe COMMENTÉE : javac refusait alors sa vraie classe publique
