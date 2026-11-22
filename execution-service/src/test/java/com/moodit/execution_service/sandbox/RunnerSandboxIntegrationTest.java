@@ -244,6 +244,184 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
+    void out_of_memory_never_kills_the_supervisor() {
+        require("C");
+        // Le superviseur (PID 1) est à -1000, et chaque processus qu'il lance à 1000, sans retour
+        // possible (CAP_SYS_RESOURCE relève le plancher, cf. mark_oom_victim). Avant : le code
+        // soumis ramenait son oom_score_adj au niveau du PID 1, puis tenait de la mémoire noyau
+        // HORS de son RSS (memfd jamais projeté) ; l'OOM du cgroup tuait alors le plus lourd,
+        // le superviseur — conteneur mort sans JSON (sortie 137 mesurée), donc une
+        // SandboxException ici, 502 et tentative rejouable en prod. Conteneur à 512 Mo ; la
+        // sonde demande 2 Go.
+        DockerEvaluator small = new DockerEvaluator(
+                new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
+                System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
+        String probe = """
+                #define _GNU_SOURCE
+                #include <dirent.h>
+                #include <fcntl.h>
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <string.h>
+                #include <sys/mman.h>
+                #include <unistd.h>
+
+                /* Le plus bas oom_score_adj que le noyau accepte ; 1000 si aucun. */
+                static int abaisser(void) {
+                    static const char *valeurs[] = {"-1000", "-500", "0", "500", "999"};
+                    for (unsigned i = 0; i < 5; i++) {
+                        int fd = open("/proc/self/oom_score_adj", O_WRONLY);
+                        if (fd < 0) { return 1000; }
+                        int ok = write(fd, valeurs[i], strlen(valeurs[i])) > 0;
+                        close(fd);
+                        if (ok) { return atoi(valeurs[i]); }
+                    }
+                    return 1000;
+                }
+
+                /* memfd JAMAIS projeté : compté dans le cgroup, absent du RSS. 31 Mo par
+                   fichier (RLIMIT_FSIZE vaut aussi pour un memfd). Rend les Mo écrits. */
+                static long remplir(long mo) {
+                    static char bloc[1 << 20];
+                    memset(bloc, 1, sizeof bloc);
+                    long ecrits = 0;
+                    while (ecrits < mo) {
+                        int fd = memfd_create("m", 0);
+                        if (fd < 0) { return ecrits; }
+                        for (int k = 0; k < 31 && ecrits < mo; k++, ecrits++) {
+                            if (write(fd, bloc, sizeof bloc) != (long) sizeof bloc) { return ecrits; }
+                        }
+                    }
+                    return ecrits;
+                }
+
+                static int lire_adj(const char *chemin) {
+                    char b[16] = {0};
+                    int fd = open(chemin, O_RDONLY);
+                    if (fd < 0) { return 99999; }
+                    int lu = read(fd, b, sizeof b - 1);
+                    close(fd);
+                    return lu > 0 ? atoi(b) : 99999;
+                }
+
+                /* Le noteur (UID + 1, lancé à côté) passe APRÈS le code soumis : 500 contre
+                   1000. Cherché dans /proc (oom_score_adj est lisible par tous). */
+                static int noteur_second(void) {
+                    char chemin[300], ligne[256];
+                    int trouve = 0;
+                    DIR *d = opendir("/proc");
+                    struct dirent *e;
+                    while (d && !trouve && (e = readdir(d))) {
+                        snprintf(chemin, sizeof chemin, "/proc/%s/status", e->d_name);
+                        FILE *f = fopen(chemin, "r");
+                        if (!f) { continue; }
+                        unsigned uid = 0;
+                        while (fgets(ligne, sizeof ligne, f)) {
+                            if (sscanf(ligne, "Uid: %u", &uid) == 1) { break; }
+                        }
+                        fclose(f);
+                        if (uid == getuid() + 1) {
+                            snprintf(chemin, sizeof chemin, "/proc/%s/oom_score_adj", e->d_name);
+                            trouve = lire_adj(chemin) == 500 ? 1 : -1;
+                        }
+                    }
+                    if (d) { closedir(d); }
+                    return trouve == 1;
+                }
+
+                int abaisse(int n) { return abaisser() < 1000 ? n * 2 : 0; }
+                int memoire(int n) { abaisser(); remplir(2048); return n * 2; }
+                int memoire_temoin(int n) { return remplir(64) == 64 ? n * 2 : 0; }
+                /* Ordre des victimes, lu sur le vrai conteneur : superviseur jamais tué (-1000,
+                   sans quoi une victime lente à mourir le laissait choisir), noteur ensuite. */
+                int ordre(int n) {
+                    return lire_adj("/proc/1/oom_score_adj") == -1000
+                            && lire_adj("/proc/self/oom_score_adj") == 1000 && noteur_second()
+                            ? n * 2 : 0;
+                }
+                int temoin(int n) { return n * 2; }
+                """;
+        List<TestResult> r = small.evaluate("C", probe, List.of(
+                new TestCaseInput("abaissement", "return abaisse(5) == 10;", 1),
+                new TestCaseInput("mémoire hors RSS", "return memoire(5) == 10;", 1),
+                new TestCaseInput("témoin memfd", "return memoire_temoin(5) == 10;", 1),
+                new TestCaseInput("témoin", "return temoin(5) == 10;", 1),
+                new TestCaseInput("ordre des victimes", "return ordre(5) == 10;", 1)), null);
+        assertThat(r.get(0).passed())
+                .withFailMessage("le code soumis ne doit plus pouvoir abaisser son "
+                        + "oom_score_adj : %s", r.get(0))
+                .isFalse();
+        assertThat(r.get(1).passed()).isFalse();
+        // TÉMOINS : le chemin memfd fonctionne sous la limite (la sonde tourne vraiment), et le
+        // conteneur a survécu à l'OOM — c'est le code soumis qui a été tué.
+        assertThat(r.get(2).passed()).withFailMessage("témoin memfd : %s", r.get(2)).isTrue();
+        assertThat(r.get(3).passed()).withFailMessage("témoin : %s", r.get(3)).isTrue();
+        // Superviseur à -1000, code soumis à 1000, noteur à 500 : sans le -1000, une victime
+        // lente à rendre sa mémoire (tables de pages) laissait l'OOM passer au superviseur — 2
+        // courses sur 6 mesurées, trop aléatoire pour un test ; l'état, lui, se lit.
+        assertThat(r.get(4).passed()).withFailMessage("ordre des victimes : %s", r.get(4)).isTrue();
+    }
+
+    @Test
+    void record_locks_are_refused_to_student_code() {
+        require("C");
+        // Un verrou fcntl est de la mémoire noyau que le cgroup ne compte PAS : 4 millions,
+        // posés en 16 s, ajoutaient 872 Mo à l'HÔTE et rien au conteneur — de quoi faire
+        // tomber le VPS de prod dans l'OOM global, qui tue alors le code soumis d'un AUTRE
+        // étudiant. Le superviseur les refuse (ENOLCK) aux processus de l'UID étudiant par un
+        // filtre seccomp ; flock() reste permis.
+        String probe = """
+                #define _GNU_SOURCE
+                #include <fcntl.h>
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <sys/file.h>
+                #include <unistd.h>
+
+                static int fichier(void) {
+                    char chemin[512];
+                    snprintf(chemin, sizeof chemin, "%s/verrou", getenv("TMPDIR"));
+                    return open(chemin, O_RDWR | O_CREAT, 0600);
+                }
+
+                /* Réussit si le verrou a été POSÉ : le filtre est rompu. */
+                static int poser(int commande) {
+                    struct flock fl = {.l_type = F_WRLCK, .l_whence = SEEK_SET, .l_len = 1};
+                    int fd = fichier();
+                    return fd >= 0 && fcntl(fd, commande, &fl) == 0;
+                }
+
+                int posix(int n) { return poser(F_SETLK) ? n * 2 : 0; }
+                int ofd(int n) { return poser(F_OFD_SETLK) ? n * 2 : 0; }
+
+                /* TÉMOIN : flock et F_GETLK, eux, restent permis — la sonde ouvre bien un
+                   fichier et fcntl répond ; seule la pose d'un verrou d'enregistrement échoue. */
+                int temoin(int n) {
+                    struct flock q = {.l_type = F_WRLCK, .l_whence = SEEK_SET, .l_len = 1};
+                    int fd = fichier();
+                    return fd >= 0 && flock(fd, LOCK_EX) == 0 && fcntl(fd, F_GETLK, &q) == 0
+                            ? n * 2 : 0;
+                }
+
+                /* UID étudiant tiré dans une plage large (≥ 2^24) : deux conteneurs simultanés
+                   ne partagent plus leurs limites par UID que dans ~10^-8 des cas. */
+                int uid(int n) { return getuid() >= (1u << 24) ? n * 2 : 0; }
+                """;
+        List<TestResult> r = evaluator.evaluate("C", probe, List.of(
+                new TestCaseInput("F_SETLK", "return posix(5) == 10;", 1),
+                new TestCaseInput("F_OFD_SETLK", "return ofd(5) == 10;", 1),
+                new TestCaseInput("témoin", "return temoin(5) == 10;", 1),
+                new TestCaseInput("UID", "return uid(5) == 10;", 1)), null);
+        assertThat(r.get(0).passed()).withFailMessage("F_SETLK doit être refusé : %s", r.get(0))
+                .isFalse();
+        assertThat(r.get(1).passed()).withFailMessage("F_OFD_SETLK doit être refusé : %s", r.get(1))
+                .isFalse();
+        assertThat(r.get(2).passed()).withFailMessage("témoin : %s", r.get(2)).isTrue();
+        assertThat(r.get(3).passed()).withFailMessage("UID dans la plage large : %s", r.get(3))
+                .isTrue();
+    }
+
+    @Test
     void execution_from_tmp_refused_for_student_code() {
         require("Go");
         // /tmp est monté noexec : un binaire déposé par l'UID étudiant ne peut pas être exécuté

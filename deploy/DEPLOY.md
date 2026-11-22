@@ -454,10 +454,14 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   donc l'hôte entier à portée. Il faut l'une de ces deux mesures :
   - un intermédiaire qui **valide le corps** de chaque création et refuse tout ce qui s'écarte de
     ce que `DockerSandbox` demande : image `moodit-runner-*` seulement, `NetworkMode=none`, ni
-    `Privileged`, ni `Binds`/`Mounts`/`Devices`, capacités limitées à la liste du sandbox,
-    `no-new-privileges` présent ;
+    `Privileged`, ni `Binds`/`Mounts`/`Devices`, capacités limitées à la liste du sandbox (dont
+    `SYS_RESOURCE`), `OomScoreAdj` à -1000, `no-new-privileges` présent ;
   - ou un **démon Docker rootless dédié** aux runners, dont le socket seul est monté : une
-    évasion n'y donne que l'utilisateur non privilégié de ce démon.
+    évasion n'y donne que l'utilisateur non privilégié de ce démon. **Attention** : un démon
+    rootless ne peut pas poser l'`oom_score_adj` négatif du superviseur
+    (`DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ`), et chaque notation répondrait 502 ; ce choix
+    demande de revoir d'abord la protection du superviseur contre l'OOM
+    (`docker/runners/README.md`, « Conteneur mort sans verdict »).
 
   En complément, faire tourner `execution-service` sous un utilisateur non root (`USER` dans son
   `Dockerfile`, `group_add` sur le GID du socket de l'hôte dans le compose) : ce GID dépend de

@@ -65,6 +65,9 @@ STUDENT_NAME = "student"
 # conteneurs quand l'UID est le même).
 STUDENT_UID = 1300
 STUDENT_GID = 1300
+# Plage du tirage (bornes [début, fin[) : fin − 1 est le dernier UID étudiant, et le noteur prend
+# UID + 1 — d'où le « − 2 », qui garde les deux sous 2³¹ (aucun outil ne les lit signés).
+STUDENT_UID_RANGE = (1 << 24, (1 << 31) - 2)
 READY_WAIT_S = 30
 COMPILE_TIMEOUT_S = 90
 LIST_TIMEOUT_S = 5              # inventaire `--list` : s'ajoute au pire cas, donc borné court
@@ -191,9 +194,15 @@ def randomize_student_uid():
 
     Le nom (`student`) ne change pas : les Dockerfiles restent valides.
     Si /etc/passwd n'est pas réinscriptible, on garde l'UID de l'image (durcissement au mieux)
-    et on le signale dans les logs."""
+    et on le signale dans les logs.
+
+    Plage LARGE (STUDENT_UID_RANGE) : tirés parmi 40 000 valeurs, deux conteneurs simultanés
+    partageaient un UID (étudiant ou noteur, qui vaut UID + 1) environ 4 fois sur 10 000 avec
+    trois places — et toutes les limites par UID de l'hôte avec lui (RLIMIT_NPROC, mesuré : le
+    second conteneur ne pouvait même plus lancer bash). Parmi deux milliards, c'est de l'ordre
+    de 10⁻⁸. La plage commence au-dessus des sous-UID usuels (/etc/subuid, 100000 + 65536 × n)."""
     global STUDENT_UID, STUDENT_GID
-    uid = random.SystemRandom().randrange(20000, 60000)
+    uid = random.SystemRandom().randrange(*STUDENT_UID_RANGE)
     # TOUT OU RIEN : les deux contenus sont calculés AVANT la moindre écriture. Écrire
     # /etc/passwd puis échouer sur /etc/group laisserait le système et STUDENT_UID
     # désaccordés — l'étudiant ne pourrait plus écrire dans son work/, TOUS les cas
@@ -233,24 +242,170 @@ def randomize_student_uid():
     STUDENT_GID = uid
 
 
-def mark_oom_victim():
-    """Désigne le processus courant comme PREMIÈRE victime de l'OOM du cgroup. Testée (POSIX).
+# oom_score_adj des processus lancés par le superviseur (lui-même à -1000, cf. mark_oom_victim).
+# Le CODE SOUMIS (exécution et compilation) est la PREMIÈRE victime ; le noteur des compilés et
+# les processus root de preexec_compile (compilations du noteur, sonde des noms réservés, javap,
+# compilation du serveur Java) passent après lui. En mode exec, le noteur assemblé tourne sous
+# l'UID étudiant (demote_student) : même valeur, même filtre que le code soumis. Pourquoi deux
+# niveaux : un noteur JVM pèse plus que de petits processus soumis, et à égalité c'est lui que
+# l'OOM tuait — le cas échouait quand même, mais au lieu du processus fautif. Il reste tuable
+# avant le superviseur.
+OOM_ADJ_SUBMITTED = 1000
+OOM_ADJ_TRUSTED = 500
 
-    Le superviseur est le PID 1 du conteneur : si l'OOM le choisit (il vise la tâche la plus
-    lourde, et de petits processus soumis qui remplissent les tmpfs pèsent chacun moins que
-    lui), le conteneur meurt sans JSON — panne, 502, tentative supprimée et rejouable à
-    volonté. Avec ce réglage, c'est le code soumis qui est tué, et le verdict reste imputable.
 
-    AVANT setuid : après, /proc/self appartient à root et l'écriture est refusée. Monter la
-    valeur ne demande aucune capacité ; elle est héritée par les descendants. LIMITE ASSUMÉE :
-    sans CAP_SYS_RESOURCE (que le conteneur n'a pas), le plancher n'est pas relevé, et un code
-    qui le sait peut redescendre sa propre valeur — le réglage couvre le dépassement de
-    mémoire ordinaire, pas un contournement délibéré. Au mieux : sans /proc, rien ne change."""
+def mark_oom_victim(score=OOM_ADJ_SUBMITTED):
+    """Fait du processus courant une victime de l'OOM AVANT le superviseur, DÉFINITIVEMENT.
+    Testée (POSIX).
+
+    Le superviseur est le PID 1 du conteneur : si l'OOM le tue, le conteneur meurt sans JSON —
+    panne, 502, tentative supprimée et rejouable à volonté. Il est donc lancé à -1000, « jamais
+    tué » (DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ), et CHAQUE processus qu'il lance — code
+    soumis, noteur, compilations, javap/nm, aide de kill_student_uid — passe par ici, et
+    run_proc/run_pair l'appliquent d'office (oom_victim_first). Un enfant oublié hériterait de
+    -1000 : intuable, il bloquerait l'OOM du cgroup au lieu d'être tué.
+
+    IRRÉVERSIBLE : écrite par root qui DÉTIENT CAP_SYS_RESOURCE (DockerSandbox l'accorde au
+    conteneur pour cette seule raison), la valeur relève aussi le plancher du processus
+    (oom_score_adj_min) — hérité au fork, il interdit à tout descendant de la redescendre (EACCES
+    dès 999, mesuré). Sans cette capacité, le code soumis pouvait la ramener à celle du PID 1, et
+    tout objet noyau tenu par un petit processus vivant (tampons de sockets, memfd non projeté,
+    VMA, epoll…) faisait tuer le superviseur. Le code soumis, lui, n'a aucune capacité : setuid
+    les efface, no-new-privileges l'empêche d'en regagner.
+
+    AVANT setuid : après, /proc/self appartient à root et l'écriture est refusée. Au mieux : sans
+    /proc, rien ne change."""
     try:
         with open("/proc/self/oom_score_adj", "w") as f:
-            f.write("1000")
+            f.write(str(score))
     except OSError:
         pass
+
+
+def oom_victim_first(preexec):
+    """preexec_fn de TOUT lancement (run_proc, run_pair) : victime de l'OOM d'abord, puis le
+    preexec propre au processus, qui peut abaisser à OOM_ADJ_TRUSTED (root détient
+    CAP_SYS_RESOURCE). Un lancement futur sans preexec, ou avec un preexec qui oublie
+    mark_oom_victim, ne peut donc plus garder le -1000 du superviseur."""
+    def launch():
+        mark_oom_victim()
+        if preexec is not None:
+            preexec()
+    return launch
+
+
+# ── Verrous d'enregistrement POSIX refusés au code soumis ────────────────────────────────────
+# Un verrou fcntl (F_SETLK…) est un objet noyau de ~216 octets que le cgroup NE COMPTE PAS
+# (comptage retiré du noyau en 2021, revert 3754707bcc3e ; vérifié sur 6.6) : 4 millions de
+# verrous posés en 16 s par le code soumis ajoutaient 872 Mo de mémoire noyau à l'HÔTE et 0 au
+# conteneur. Un seul « Exécuter » de 60 s suffisait à pousser le VPS de prod (8 Go, ~1 Go de
+# marge) dans l'OOM GLOBAL, qui tue alors le processus le plus lourd parmi les candidats à 1000 —
+# souvent le code soumis d'un AUTRE étudiant, dont la note devient fausse. Aucune limite du
+# noyau ne borne leur nombre (RLIMIT_LOCKS n'est plus appliquée) : on les refuse (ENOLCK) aux
+# processus de l'UID étudiant par un filtre seccomp, qui s'ajoute au profil de Docker. flock()
+# — un verrou par fichier ouvert, donc borné par RLIMIT_NOFILE × RLIMIT_NPROC — reste permis :
+# c'est lui que les chaînes de compilation utilisent (cache de go build, mesuré).
+LOCK_DENY_ERRNO = 37                       # ENOLCK
+LOCK_COMMANDS = (6, 7, 37, 38)             # F_SETLK, F_SETLKW, F_OFD_SETLK, F_OFD_SETLKW
+LOCK_COMMANDS_32 = (13, 14)                # F_SETLK64, F_SETLKW64 (ABI 32 bits)
+# (AUDIT_ARCH_*, numéros de fcntl/fcntl64, ABI 32 bits ?) ; x32 = numéro x86_64 | 0x40000000.
+LOCK_FILTER_ARCHES = ((0xC000003E, (72, 0x40000000 | 72), False),     # x86_64 (+ x32)
+                      (0xC00000B7, (25,), False),                     # aarch64
+                      (0x40000003, (55, 221), True),                  # i386 sur x86_64
+                      (0x40000028, (55, 221), True))                  # arm 32 bits sur aarch64
+_BPF_LD_W_ABS, _BPF_JEQ_K, _BPF_RET_K = 0x20, 0x15, 0x06
+SECCOMP_RET_ALLOW, SECCOMP_RET_ERRNO = 0x7FFF0000, 0x00050000
+
+
+def lock_filter_program():
+    """Programme BPF du filtre des verrous : liste de (code, jt, jf, k). FONCTION PURE (testée).
+
+    seccomp_data : nr à l'octet 0, arch à 4, args[1] (la commande de fcntl) à 24 — mot de poids
+    faible en petit-boutiste, celui que le noyau lit (`unsigned int cmd`) : un 6 + 2³² est donc vu
+    comme 6. Une architecture inconnue passe : le filtre ne remplace pas le profil de Docker,
+    il s'y ajoute. Tous les sauts sont en avant, comme BPF l'exige."""
+    prog, labels, jumps = [], {}, []
+
+    def emit(code, k, target=None):
+        if target is not None:
+            jumps.append((len(prog), target))
+        prog.append([code, 0, 0, k])
+
+    emit(_BPF_LD_W_ABS, 4)
+    for arch, _, _ in LOCK_FILTER_ARCHES:
+        emit(_BPF_JEQ_K, arch, "arch%x" % arch)
+    emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
+    for arch, numbers, abi32 in LOCK_FILTER_ARCHES:
+        labels["arch%x" % arch] = len(prog)
+        emit(_BPF_LD_W_ABS, 0)
+        for number in numbers:
+            emit(_BPF_JEQ_K, number, "cmd32" if abi32 else "cmd")
+        emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
+    labels["cmd32"] = len(prog)
+    emit(_BPF_LD_W_ABS, 24)
+    for command in LOCK_COMMANDS_32:
+        emit(_BPF_JEQ_K, command, "deny")
+    labels["cmd"] = len(prog)
+    emit(_BPF_LD_W_ABS, 24)
+    for command in LOCK_COMMANDS:
+        emit(_BPF_JEQ_K, command, "deny")
+    emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
+    labels["deny"] = len(prog)
+    emit(_BPF_RET_K, SECCOMP_RET_ERRNO | LOCK_DENY_ERRNO)
+    for at, target in jumps:
+        prog[at][1] = labels[target] - at - 1
+    return [tuple(instruction) for instruction in prog]
+
+
+def _prepare_lock_filter():
+    """Objets ctypes du filtre, construits UNE fois dans le superviseur : le preexec_fn (après
+    fork) n'a plus que deux appels à faire. None hors Linux (tests unitaires sous Windows)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import ctypes
+
+        class SockFilter(ctypes.Structure):
+            _fields_ = [("code", ctypes.c_ushort), ("jt", ctypes.c_ubyte),
+                        ("jf", ctypes.c_ubyte), ("k", ctypes.c_uint)]
+
+        class SockFprog(ctypes.Structure):
+            _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.POINTER(SockFilter))]
+
+        program = lock_filter_program()
+        instructions = (SockFilter * len(program))(*(SockFilter(*i) for i in program))
+        fprog = SockFprog(len(program), instructions)
+        prctl = ctypes.CDLL("libc.so.6", use_errno=True).prctl
+        prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong,
+                          ctypes.c_ulong]
+        prctl.restype = ctypes.c_int
+        # Les instructions sont gardées avec la structure : fprog ne fait que les pointer.
+        return prctl, ctypes.addressof(fprog), (fprog, instructions)
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+_LOCK_FILTER = _prepare_lock_filter()
+PR_SET_NO_NEW_PRIVS, PR_SET_SECCOMP, SECCOMP_MODE_FILTER = 38, 22, 2
+
+
+def deny_record_locks():
+    """preexec_fn (fin) des processus de l'UID étudiant : pose le filtre des verrous.
+
+    FAIL-CLOSED : un filtre qui ne se pose pas ne laisse pas tourner le processus sans lui — il
+    meurt (127) avant exec, avec un message sur sa sortie d'erreur. Pas d'exception : levée dans
+    un preexec_fn, elle deviendrait une SubprocessError, que run_proc ne rattrape pas — un 502,
+    donc un essai de plus, au lieu d'un cas en échec."""
+    ok = _LOCK_FILTER is not None
+    if ok:
+        prctl, fprog_address, _ = _LOCK_FILTER
+        ok = (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
+              and prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, fprog_address, 0, 0) == 0)
+    if not ok:
+        try:
+            os.write(2, b"superviseur: filtre seccomp des verrous non pose\n")
+        finally:
+            os._exit(127)
 
 
 def demote_student():
@@ -263,6 +418,7 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
+    deny_record_locks()
 
 
 def canary_reserve_seconds(budget_s, timeout_s):
@@ -438,6 +594,7 @@ def kill_student_uid():
     pid = os.fork()
     if pid == 0:
         try:
+            mark_oom_victim()   # fils du PID 1 (-1000) : cf. mark_oom_victim
             os.setgroups([])
             os.setgid(STUDENT_GID)
             os.setuid(STUDENT_UID)
@@ -546,10 +703,12 @@ def preexec_student_compile():
     compris, deja sur disque a cote. Sous l'UID etudiant, ces inclusions recoivent EACCES
     comme n'importe quelle autre lecture : la garantie ne depend plus d'une liste d'idiomes
     d'inclusion a connaitre, mais des droits."""
+    mark_oom_victim()
     os.setsid()
     os.setgroups([])
     os.setgid(STUDENT_GID)
     os.setuid(STUDENT_UID)
+    deny_record_locks()
 
 
 def student_build_env(build_dir):
@@ -648,7 +807,11 @@ def preexec_compile():
     la borne FSIZE des processus étudiants.
 
     umask 077 : le compilateur cree le binaire du NOTEUR (harnais et nonce) ; avec l'umask par
-    defaut, il naissait en 0755 et restait lisible de tous jusqu'au chmod 0500."""
+    defaut, il naissait en 0755 et restait lisible de tous jusqu'au chmod 0500.
+
+    Victime de l'OOM après le code soumis (mark_oom_victim, OOM_ADJ_TRUSTED) : un compilateur
+    qui hériterait du -1000 du superviseur serait intuable."""
+    mark_oom_victim(OOM_ADJ_TRUSTED)
     os.setsid()
     os.umask(0o077)
 
@@ -761,7 +924,8 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
     try:
         out, err = open_output(out_path), open_output(err_path)
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, stdin=stdin, preexec_fn=preexec)
+                                stderr=subprocess.PIPE, stdin=stdin,
+                                preexec_fn=oom_victim_first(preexec))
         if stdin is not subprocess.DEVNULL:
             stdin.close()
         pumps = [threading.Thread(target=drain_pipe,
@@ -2652,6 +2816,10 @@ C_READ = {"int": "atoi", "long": "atol", "double": "atof"}
 CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
 
 
+RAW_STRING_RUST = re.compile(r'r(#*)"')
+RAW_STRING_CPP = re.compile(r'R"\(')
+
+
 def code_depths(source):
     """Profondeur d'accolades à chaque position, HORS chaînes et commentaires. PURE (testée).
 
@@ -2705,8 +2873,13 @@ def code_depths(source):
             depths[i + 1] = level
             i += 2
             continue
-        raw = re.match(r'r(#*)"', src_text[i:]) or re.match(r'R"\(', src_text[i:])
-        if raw and (c in "rR"):
+        # Motif ancré à la POSITION (match(texte, i)) et tenté sur `r`/`R` seulement : la version
+        # précédente découpait src_text[i:] à CHAQUE caractère, soit une copie du reste du
+        # fichier par position — quadratique, 6 s pour 100 000 caractères de code soumis (12 s
+        # sur une entrée hostile), refaites à chaque cas de la question.
+        raw = (RAW_STRING_RUST.match(src_text, i) if c == "r"
+               else RAW_STRING_CPP.match(src_text, i) if c == "R" else None)
+        if raw:
             if c == "r":
                 hashes = raw.group(1)
                 closed = '"' + hashes
@@ -4911,7 +5084,10 @@ def grader_uid():
 
 
 def demote_grader():
-    """preexec_fn du processus NOTEUR : son propre UID, son propre groupe de processus."""
+    """preexec_fn du processus NOTEUR des compilés : son propre UID, son propre groupe de
+    processus. Victime de l'OOM APRÈS le code soumis (OOM_ADJ_TRUSTED), jamais intuable : le
+    -1000 hérité du superviseur aurait bloqué l'OOM du cgroup."""
+    mark_oom_victim(OOM_ADJ_TRUSTED)
     os.setsid()
     os.setgroups([])
     os.setgid(grader_uid())
@@ -4935,10 +5111,10 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
     try:
         g_err, s_err = open_output(g_err_path), open_output(s_err_path)
         grader_proc = subprocess.Popen(grader_cmd, cwd=cwd, env=g_env, stdin=rep_r, stdout=req_w,
-                                       stderr=g_err, preexec_fn=demote_grader)
+                                       stderr=g_err, preexec_fn=oom_victim_first(demote_grader))
         procs.append(grader_proc)
         student_side = subprocess.Popen(student_cmd, cwd=cwd, env=s_env, stdin=req_r, stdout=rep_w,
-                                    stderr=s_err, preexec_fn=demote_student)
+                                    stderr=s_err, preexec_fn=oom_victim_first(demote_student))
         procs.append(student_side)
         for fd in (req_r, req_w, rep_r, rep_w):
             os.close(fd)            # le parent lâche les quatre extrémités : EOF se propage

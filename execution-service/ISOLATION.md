@@ -126,13 +126,32 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   la mémoire noyau que la taille du tmpfs ne compte pas) — les
   images verrouillent leurs répertoires monde-inscriptibles (`/var/tmp`, `/go`, cargo…), le disque
   de l'hôte est donc hors d'atteinte du code étudiant — toutes les capacités retirées sauf le
-  minimum du superviseur (chown/droits, setuid étudiant, kill), `no-new-privileges`,
+  minimum du superviseur (chown/droits, setuid étudiant, kill, et `SYS_RESOURCE` pour l'ordre
+  des victimes de l'OOM — voir plus bas), `no-new-privileges`,
   UID étudiant dédié ; détails dans `docker/runners/README.md` et `deploy/DEPLOY.md`.
   L'IPC System V, comptée dans la mémoire mais hors de ces tmpfs, est fermée par trois réglages du
   conteneur (`DockerSandbox.IPC_SYSCTLS`) : `kernel.shm_rmid_forced=1` (un segment de mémoire
   partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis),
   `kernel.msgmni=0` (aucune file de messages) et `kernel.sem` avec semmni à 0 (aucun jeu de
   sémaphores).
+- **Le superviseur n'est jamais tué par l'OOM** : sans lui, le conteneur meurt sans JSON (502,
+  tentative rejouable). Conteneur lancé à `oom_score_adj` -1000
+  (`DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ`) ; chaque processus lancé par le superviseur est
+  remonté explicitement (`mark_oom_victim`, appliqué d'office par `run_proc` et `run_pair`) : 1000
+  pour le code soumis et sa compilation, 500 pour le noteur des compilés et les compilations root.
+  En mode exec, le noteur assemblé tourne sous l'UID étudiant, à 1000 comme le code soumis. La capacité `SYS_RESOURCE`, accordée au conteneur pour cette
+  seule raison, rend la valeur irréversible : le code soumis ne peut plus la redescendre au niveau
+  du superviseur, ce qui lui permettait, avec de la mémoire noyau tenue hors de son RSS (memfd,
+  tampons de sockets, VMA), de faire tuer le PID 1 (sortie 137 mesurée). Le code soumis n'a aucune
+  capacité. Requiert Docker rootful.
+- **Verrous d'enregistrement POSIX refusés au code soumis** (filtre seccomp posé par le
+  superviseur, `deny_record_locks`) : le cgroup ne les compte pas, et 4 millions de verrous en
+  16 s ajoutaient 872 Mo de mémoire noyau à l'hôte. `flock()` reste permis. Coût : SQLite sur
+  fichier (« database is locked » ; `:memory:` fonctionne) et `FileChannel.lock()` en Java.
+- **UID étudiant tiré entre 2²⁴ et 2³¹ − 2** : les limites par UID du noyau sont communes à l'hôte,
+  et deux conteneurs simultanés ne doivent pas partager le leur.
+  Mesures, vecteur par vecteur, et restes ouverts : `docker/runners/README.md`, « Conteneur mort
+  sans verdict ».
 - **Journaux relus par le service** : au plus 16 Mo par flux (`DockerSandbox.LOG_CAP_BYTES`) ;
   au-delà, la sortie n'est pas un verdict (502).
 - **Arrêt du service** : les conteneurs en vol sont supprimés dès la fermeture du contexte

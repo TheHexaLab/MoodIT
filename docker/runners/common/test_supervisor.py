@@ -3170,5 +3170,178 @@ class Review246ExtractionTest(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "1000")
 
 
+def run_bpf(program, arch, nr, arg1):
+    """Interprète le sous-ensemble BPF du filtre des verrous (ld abs, jeq k, ret k)."""
+    data = {0: nr & 0xFFFFFFFF, 4: arch, 24: arg1 & 0xFFFFFFFF}
+    acc, pc = 0, 0
+    while True:
+        code, jt, jf, k = program[pc]
+        if code == 0x20:
+            acc = data[k]
+            pc += 1
+        elif code == 0x15:
+            pc += 1 + (jt if acc == k else jf)
+        elif code == 0x06:
+            return k
+        else:
+            raise AssertionError("instruction inattendue %r" % (program[pc],))
+
+
+class OomAndLockIsolationTest(unittest.TestCase):
+    """Le superviseur (PID 1) est à -1000 : CHAQUE processus qu'il lance doit remonter son
+    oom_score_adj, sans quoi il hériterait d'un -1000 intuable ; et les processus de l'UID
+    étudiant ne posent aucun verrou d'enregistrement (mémoire noyau que le cgroup ne compte pas)."""
+
+    def launch_calls(self, preexec):
+        """Appels de mark_oom_victim / deny_record_locks faits par un preexec_fn, sans rien
+        changer au processus de test (setuid, setsid… et rlimits remplacés)."""
+        marks, locks = [], []
+        # create=True : setsid, setuid… n'existent pas sous Windows, où ces tests tournent aussi.
+        with unittest.mock.patch.multiple(
+                supervisor.os, create=True, setsid=unittest.mock.DEFAULT,
+                setgroups=unittest.mock.DEFAULT,
+                setgid=unittest.mock.DEFAULT, setuid=unittest.mock.DEFAULT,
+                umask=unittest.mock.DEFAULT), \
+                unittest.mock.patch.object(supervisor, "resource", unittest.mock.Mock()), \
+                unittest.mock.patch.object(supervisor, "mark_oom_victim",
+                                           lambda *a: marks.append(a)), \
+                unittest.mock.patch.object(supervisor, "deny_record_locks",
+                                           lambda: locks.append(True)):
+            preexec()
+        return marks, locks
+
+    def test_every_launch_raises_its_oom_score(self):
+        # Le code soumis (exécution, compilation) est la PREMIÈRE victime ; le noteur et les
+        # compilations root passent après lui. Aucun ne garde le -1000 du superviseur.
+        self.assertEqual(self.launch_calls(supervisor.demote_student)[0], [()])
+        self.assertEqual(self.launch_calls(supervisor.preexec_student_compile)[0], [()])
+        self.assertEqual(self.launch_calls(supervisor.demote_grader)[0],
+                         [(supervisor.OOM_ADJ_TRUSTED,)])
+        self.assertEqual(self.launch_calls(supervisor.preexec_compile)[0],
+                         [(supervisor.OOM_ADJ_TRUSTED,)])
+        self.assertEqual(supervisor.OOM_ADJ_SUBMITTED, 1000)
+        self.assertGreater(supervisor.OOM_ADJ_SUBMITTED, supervisor.OOM_ADJ_TRUSTED)
+        self.assertGreater(supervisor.OOM_ADJ_TRUSTED, 0)
+
+    def test_launch_wrapper_raises_first_then_lets_the_preexec_choose(self):
+        calls = []
+        with unittest.mock.patch.object(supervisor, "mark_oom_victim",
+                                        lambda *a: calls.append(("mark",) + a)):
+            supervisor.oom_victim_first(None)()
+            supervisor.oom_victim_first(lambda: calls.append(("preexec",)))()
+        self.assertEqual(calls, [("mark",), ("mark",), ("preexec",)])
+
+    @unittest.skipUnless(os.name == "posix", "O_NOFOLLOW : POSIX ; couvert en CI")
+    def test_run_proc_and_run_pair_always_wrap_their_preexec(self):
+        # Garde contre un lancement FUTUR : même sans preexec, le processus quitte le -1000.
+        captured = []
+
+        def fake_popen(*args, **kwargs):
+            captured.append(kwargs["preexec_fn"])
+            raise OSError("lancement simulé")
+
+        marks = []
+        with tempfile.TemporaryDirectory() as d,                 unittest.mock.patch.object(supervisor.subprocess, "Popen", fake_popen),                 unittest.mock.patch.object(supervisor, "event", lambda *a, **k: None),                 unittest.mock.patch.object(supervisor, "EXIT_STATE", supervisor.ExitState()),                 unittest.mock.patch.object(supervisor, "demote_grader", lambda: None),                 unittest.mock.patch.object(supervisor, "demote_student", lambda: None):
+            supervisor.run_proc(["true"], d, {}, 1, os.path.join(d, "o"), os.path.join(d, "e"),
+                                None)
+            supervisor.run_pair(["g"], ["s"], d, {}, {}, 1, os.path.join(d, "ge"),
+                                os.path.join(d, "se"))
+        self.assertEqual(len(captured), 2)
+        with unittest.mock.patch.object(supervisor, "mark_oom_victim",
+                                        lambda *a: marks.append(a)):
+            for preexec in captured:
+                preexec()
+        self.assertEqual(marks, [(), ()])
+
+    def test_only_student_uid_processes_get_the_lock_filter(self):
+        self.assertEqual(self.launch_calls(supervisor.demote_student)[1], [True])
+        self.assertEqual(self.launch_calls(supervisor.preexec_student_compile)[1], [True])
+        self.assertEqual(self.launch_calls(supervisor.demote_grader)[1], [])
+        self.assertEqual(self.launch_calls(supervisor.preexec_compile)[1], [])
+
+    @unittest.skipUnless(os.path.exists("/proc/self/oom_score_adj"), "Linux ; couvert en CI")
+    def test_trusted_processes_are_second_victims(self):
+        r = subprocess.run(["cat", "/proc/self/oom_score_adj"], capture_output=True, text=True,
+                           preexec_fn=lambda: supervisor.mark_oom_victim(
+                               supervisor.OOM_ADJ_TRUSTED))
+        self.assertEqual(r.stdout.strip(), "500")
+
+    def test_lock_filter_denies_record_locks_on_every_abi(self):
+        program = supervisor.lock_filter_program()
+        deny = supervisor.SECCOMP_RET_ERRNO | 37
+        allow = supervisor.SECCOMP_RET_ALLOW
+        for at, (code, jt, jf, k) in enumerate(program):
+            # BPF n'accepte que des sauts EN AVANT et dans le programme.
+            self.assertLess(at + 1 + max(jt, jf), len(program) + (1 if code == 0x06 else 0))
+        x86_64, aarch64, i386, arm = 0xC000003E, 0xC00000B7, 0x40000003, 0x40000028
+        cases = [
+            (x86_64, 72, 6, deny), (x86_64, 72, 7, deny), (x86_64, 72, 37, deny),
+            (x86_64, 72, 38, deny),
+            (x86_64, 72, 6 + (1 << 32), deny),        # le noyau lit le mot de poids faible
+            (x86_64, 0x40000000 | 72, 6, deny),       # x32
+            (x86_64, 72, 5, allow), (x86_64, 72, 36, allow), (x86_64, 72, 3, allow),
+            (x86_64, 73, 6, allow),                   # flock : permis
+            (x86_64, 0, 6, allow),                    # autre appel, même argument
+            (x86_64, 72, 13, allow),                  # F_SETLK64 n'existe pas en 64 bits
+            (aarch64, 25, 6, deny), (aarch64, 25, 38, deny), (aarch64, 72, 6, allow),
+            (i386, 221, 13, deny), (i386, 221, 14, deny), (i386, 55, 6, deny),
+            (i386, 221, 37, deny), (i386, 221, 3, allow),
+            (arm, 221, 13, deny), (arm, 55, 7, deny), (arm, 25, 6, allow),
+            (0x12345678, 72, 6, allow),               # architecture inconnue : Docker décide
+        ]
+        for arch, nr, cmd, expected in cases:
+            self.assertEqual(run_bpf(program, arch, nr, cmd), expected, (hex(arch), nr, cmd))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "seccomp : Linux ; couvert en CI")
+    def test_lock_filter_really_refuses_record_locks(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "verrou")
+            pid = os.fork()
+            if pid == 0:   # pragma: no cover — processus fils
+                status = 1
+                try:
+                    supervisor.deny_record_locks()
+                    fd = os.open(target, os.O_RDWR | os.O_CREAT, 0o600)
+                    try:
+                        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        status = 2          # verrou posé : le filtre ne tient pas
+                    except OSError as e:
+                        if e.errno == 37:
+                            fcntl.flock(fd, fcntl.LOCK_EX)   # flock reste permis
+                            status = 0
+                finally:
+                    os._exit(status)
+            _, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+
+    def test_code_depths_is_linear(self):
+        # Chaque `r` tentait une chaîne brute sur une COPIE du reste du texte : quadratique, 6 s
+        # pour 100 000 caractères de code soumis, refaites à chaque cas. Mesuré par un RAPPORT
+        # (indépendant de la vitesse de la machine) : quatre fois plus de texte coûte environ
+        # quatre fois plus en linéaire, seize en quadratique.
+        def cost(size):
+            text = "r" * size + "{" + "R" * size
+            best = float("inf")
+            for _ in range(3):
+                started = time.perf_counter()
+                supervisor.code_depths(text)
+                best = min(best, time.perf_counter() - started)
+            return best
+        ratio = cost(200_000) / cost(50_000)
+        self.assertLess(ratio, 8, "code_depths n'est plus linéaire (rapport %.1f)" % ratio)
+        depths = supervisor.code_depths("r" * 50_000 + "{" + "R" * 50_000)
+        self.assertEqual((depths[49_999], depths[50_000], depths[-1]), (0, 0, 1))
+        # L'accolade DANS la chaîne brute ne compte pas ; celle d'après, si.
+        self.assertEqual(supervisor.code_depths('r#"{"# {x}'), [0] * 8 + [1, 0])
+        self.assertEqual(supervisor.code_depths('R"({)" {x}'), [0] * 8 + [1, 0])
+
+    def test_student_uid_range_keeps_both_uids_under_2_31(self):
+        low, high = supervisor.STUDENT_UID_RANGE
+        self.assertGreaterEqual(low, 1 << 24)          # au-dessus des sous-UID usuels
+        self.assertLess(high - 1 + 1, 1 << 31)          # dernier UID étudiant + 1 (noteur)
+        self.assertGreater(high - low, 10 ** 9)         # collision entre conteneurs ~ 10⁻⁸
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

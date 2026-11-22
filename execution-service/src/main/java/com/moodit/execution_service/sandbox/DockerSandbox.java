@@ -116,6 +116,27 @@ public class DockerSandbox {
     static final int SHM_INODES = 1_024;
 
     /**
+     * {@code oom_score_adj} du conteneur, donc du superviseur (PID 1) : -1000, « jamais tué par
+     * l'OOM ».
+     *
+     * <p>Si l'OOM du cgroup tue le PID 1, le conteneur meurt sans JSON : 502, tentative supprimée
+     * et rejouable à volonté sur une question à tentative unique. Le superviseur remonte chaque
+     * processus qu'il lance, irréversiblement — 1000 pour le code soumis, 500 pour le noteur des
+     * compilés et les compilations root (cf. {@code mark_oom_victim} dans supervisor.py et la
+     * capacité SYS_RESOURCE plus bas) : ce sont eux que l'OOM tue d'abord.
+     * Mais une victime qui ne rend pas sa mémoire assez vite (tables de pages d'un processus
+     * soumis, que le moissonneur de l'OOM ne libère pas) laisse l'OOM passer à la suivante : à
+     * -500, le superviseur y passait encore (2 courses sur 6, sortie 137, sonde mmap sous
+     * 512 Mo) ; à -1000, aucune sur 6 — l'allocation attend que la victime ait fini de mourir.
+     *
+     * <p>Contrepartie : une mémoire qui ne serait JAMAIS rendue (objet qui survit à son créateur)
+     * bloquerait l'OOM au lieu de tuer le conteneur, jusqu'au mur. Ces objets sont bornés
+     * ailleurs (tmpfs en taille et en inodes, IPC System V fermée) : ensemble, ils tiennent sous la
+     * mémoire du conteneur, ce que vérifie {@code RunnerSandboxIntegrationTest}.
+     */
+    static final int SUPERVISOR_OOM_SCORE_ADJ = -1000;
+
+    /**
      * Plafond de CHAQUE flux des journaux relus (stdout = JSON du superviseur, stderr). Le
      * superviseur borne déjà ses sorties bien en dessous ; ce plafond empêche qu'une régression
      * de son côté ne devienne un épuisement du tas du service, qui lit ces journaux en mémoire.
@@ -384,9 +405,25 @@ public class DockerSandbox {
                     // n'entre plus dans aucun processus ni fichier accessible à l'étudiant : il
                     // n'y a rien à surveiller, et le conteneur perd donc le droit de tracer quoi
                     // que ce soit.
+                    //
+                    // SYS_RESOURCE : seule façon de rendre IRRÉVERSIBLE le oom_score_adj à 1000
+                    // posé sur chaque processus lancé (le noyau ne relève le plancher
+                    // oom_score_adj_min que si l'écrivain détient cette capacité). Sans elle, le
+                    // code soumis redescendait sa valeur au niveau du PID 1 et faisait tuer le
+                    // superviseur par tout objet noyau tenu à faible RSS (sortie 137 mesurée :
+                    // tampons de sockets, memfd, VMA). Coût : seuls les processus ROOT la
+                    // détiennent — le superviseur et ce qu'il lance par preexec_compile :
+                    // compilations du noteur, sonde des noms réservés, javap, et la compilation
+                    // du serveur Java (classes du code soumis sur le classpath), tous déjà root
+                    // avec DAC_OVERRIDE et SETUID. Elle ne lève aucune limite de cgroup. Le
+                    // code soumis n'en
+                    // reçoit aucune : setuid efface ses capacités, no-new-privileges l'empêche
+                    // d'en regagner (CapEff à 0, mesuré).
                     .withCapDrop(Capability.ALL)
                     .withCapAdd(Capability.CHOWN, Capability.FOWNER, Capability.DAC_OVERRIDE,
-                            Capability.SETUID, Capability.SETGID, Capability.KILL)
+                            Capability.SETUID, Capability.SETGID, Capability.KILL,
+                            Capability.SYS_RESOURCE)
+                    .withOomScoreAdj(SUPERVISOR_OOM_SCORE_ADJ)
                     .withSecurityOpts(List.of("no-new-privileges"))
                     // Le verdict est lu par `docker logs` : pilote json-file IMPOSÉ, sans
                     // rotation (le conteneur est supprimé juste après). Hérité du démon, un
