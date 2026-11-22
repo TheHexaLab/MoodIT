@@ -184,6 +184,80 @@ class QuizServiceSubmitIT {
     assertThat(count("SELECT count(*) FROM submission_test_case WHERE passed = TRUE")).isEqualTo(1L);
   }
 
+  @Test
+  @DisplayName("Plafond (#116, S4) : 3 échecs sans verdict → tentative gardée à revoir, relance → notée, compte remis à zéro")
+  void noVerdictCap_keepsAttemptForReview_thenRegradeGrades() {
+    when(executionClient.evaluate(any(), any(), any(), any()))
+        .thenThrow(new com.moodit.core_service.exception.CodeVerificationNoVerdictException());
+    // Les données de départ doivent être committées : chaque correction tourne dans ses propres
+    // transactions, comme en prod.
+    TestTransaction.flagForCommit();
+    TestTransaction.end();
+    committed = true;
+
+    Integer attemptId = null;
+    for (int failure = 1; failure <= 3; failure++) {
+      TestTransaction.start();
+      attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+      TestTransaction.flagForCommit();
+      TestTransaction.end();
+
+      quizService.gradeAttempt(attemptId);
+
+      TestTransaction.start();
+      assertThat(count("SELECT no_verdict_count FROM grading_failure")).isEqualTo(failure);
+      // En deçà du plafond, la tentative est supprimée ; au plafond, elle est GARDÉE.
+      assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(failure < 3 ? 0L : 1L);
+      TestTransaction.end();
+    }
+    Integer reviewId = attemptId;
+
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'review'")).isEqualTo(1L);
+    // L'étudiant la voit dans son historique, sans note ni corrigé ; et sa tentative unique est
+    // consommée.
+    assertThat(quizService.getMyAttempts(quizId, USER_EMAIL))
+        .singleElement()
+        .satisfies(a -> {
+          assertThat(a.getStatus()).isEqualTo(QuizService.REVIEW);
+          assertThat(a.getEarned()).isNull();
+        });
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.getAttemptResult(reviewId, USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.AttemptNotFoundException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.AlreadySubmittedException.class);
+    // L'enseignant la retrouve, avec le compte des échecs.
+    assertThat(quizService.getAttemptsToReview(quizId))
+        .singleElement()
+        .satisfies(r -> {
+          assertThat(r.attemptId()).isEqualTo(reviewId);
+          assertThat(r.noVerdictFailures()).isEqualTo(3);
+          assertThat(r.studentName()).isEqualTo("Éva Test");
+        });
+    TestTransaction.end();
+
+    // Relance par l'enseignant, puis correction qui aboutit.
+    // doReturn : un when(...) rappellerait la méthode, encore stubbée pour lever.
+    org.mockito.Mockito.doReturn(List.of(true))
+        .when(executionClient).evaluate(any(), any(), any(), any());
+    quizService.regradeAttempt(quizId, reviewId);
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'pending'")).isEqualTo(1L);
+    assertThat(count("SELECT count(*) FROM audit_log WHERE action = 'QUIZ_REGRADE'")).isEqualTo(1L);
+    TestTransaction.end();
+
+    quizService.gradeAttempt(reviewId);
+
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'done'")).isEqualTo(1L);
+    assertThat(count("SELECT count(*) FROM grading_failure")).isZero();
+    assertThat(quizService.getAttemptResult(reviewId, USER_EMAIL).getEarned()).isEqualTo(10.0);
+    assertThat(quizService.getAttemptsToReview(quizId)).isEmpty();
+    TestTransaction.end();
+  }
+
   /** Purge les données committées (base H2 partagée par les tests de la classe). */
   @AfterEach
   void purgeCommitted() {
@@ -193,7 +267,7 @@ class QuizServiceSubmitIT {
     if (!TestTransaction.isActive()) {
       TestTransaction.start();
     }
-    for (String table : List.of("submission_test_case", "submission", "attempt", "test_case",
+    for (String table : List.of("audit_log", "grading_failure", "submission_test_case", "submission", "attempt", "test_case",
         "question", "quiz", "language", "q_type", "user_", "course")) {
       em.getEntityManager().createNativeQuery("DELETE FROM " + table).executeUpdate();
     }
