@@ -410,7 +410,11 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
     (timeout, `SIGKILL`), panne d'environnement (`OSError` : disque, processus) ;
   - **502, tentative supprimée, l'étudiant resoumet** quand elle ne l'est pas : budget épuisé
     surtout par l'ATTENTE d'une place (surcharge — le temps d'attente est mesuré et retiré du
-    travail), ou erreur de logique du superviseur (« notation incomplète »). Des canaris
+    travail), ou erreur de logique du superviseur (« notation incomplète »). Ces deux 502 sont
+    « indisponible » et ne comptent pas dans le plafond `QUIZ_MAX_NO_VERDICT_FAILURES` ; seul un
+    runner mort sans verdict (muet ou illisible) y compte, et au troisième la tentative est
+    gardée « à revoir » au lieu d'être supprimée (`docker/runners/README.md`, « Mort sans
+    verdict : journal et plafond »). Des canaris
     incohérents (falsification) l'emportent toujours : jamais de 502 dans ce cas. Cette variable est lue par execution-service **et**
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
   la changer pour un seul des deux ferait abandonner des corrections encore en cours.

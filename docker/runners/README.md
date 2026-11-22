@@ -68,10 +68,11 @@ est pédagogique (varier les cas).
 
 ## Conteneur mort sans verdict
 
-Si le conteneur meurt sans imprimer son JSON, `DockerEvaluator` lève une `SandboxException` : 502,
-la tentative est supprimée et l'étudiant resoumet — à volonté, sur une question à tentative
-unique. Aucune note n'est falsifiée ; le défaut est le rejeu. Trois réglages ferment cette classe
-pour ce que le code soumis peut provoquer.
+Si le conteneur meurt sans imprimer son JSON, `DockerEvaluator` lève une `NoVerdictException` :
+502, la tentative est supprimée et l'étudiant resoumet. Aucune note n'est falsifiée ; le défaut
+était le rejeu, à volonté sur une question à tentative unique. Il est désormais plafonné (voir
+« Mort sans verdict : journal et plafond » plus bas), et trois réglages ferment cette classe pour
+ce que le code soumis peut provoquer.
 
 - **Le superviseur n'est jamais la victime de l'OOM.** Le conteneur est lancé à `oom_score_adj`
   -1000 (`DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ`), et le superviseur remonte EXPLICITEMENT chaque
@@ -216,7 +217,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   artefact de plus de 64 Mo ou de 256 fichiers n'est pas gardé : sa compilation est refaite à
   chaque cas. Le nombre de soumissions d'un étudiant est borné par la tentative unique (une par
   quiz) ; un 502 « sans verdict » ne lui rend la main que trois fois (voir « Mort sans verdict :
-  plafond » ci-dessous). Aucune correction n'est perdue (elles attendent dans la file de core),
+  journal et plafond » ci-dessus). Aucune correction n'est perdue (elles attendent dans la file de core),
   elles peuvent être retardées.
 - **Mémoire noyau non comptée** : les objets que le code soumis peut créer sous le profil de
   Docker ont été balayés (tableau ci-dessus) ; ceux qui restent permis sont bornés par les rlimits
