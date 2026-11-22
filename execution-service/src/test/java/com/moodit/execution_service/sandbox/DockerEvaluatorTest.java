@@ -50,6 +50,42 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void routine_compilation_replays_are_not_warnings() {
+        // La compilation rejouée d'un cas à l'autre est émise à CHAQUE job compilé : en WARN,
+        // elle noyait les vrais signaux (espace saturé, erreur du superviseur).
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DockerEvaluator.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        ch.qos.logback.classic.Level saved = logger.getLevel();
+        logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        logger.addAppender(appender);
+        try {
+            supervisorReturns("""
+                    {"v":1,"results":[
+                      {"index":0,"passed":true,"ms":1},{"index":1,"passed":false,"ms":1}
+                    ],"events":[{"type":"compilation_rejouee","case":1},
+                                {"type":"echec_compilation_rejoue","case":3},
+                                {"type":"espace_sature","case":1,"detail":"plein"}],
+                     "canaries":"ok"}
+                    """);
+            List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
+            assertThat(results).extracting(TestResult::passed).containsExactly(true, false);
+            assertThat(appender.list)
+                    .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
+                    .extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .singleElement().asString().contains("espace_sature");
+            assertThat(appender.list)
+                    .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.DEBUG)
+                    .hasSize(2);
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(saved);
+        }
+    }
+
+    @Test
     void case_without_verdict_fails_closed() {
         supervisorReturns("""
                 {"v":1,"results":[{"index":0,"passed":true,"ms":1}],"events":[],"canaries":"ok"}

@@ -3171,7 +3171,7 @@ class Review246ExtractionTest(unittest.TestCase):
 
 
 def run_bpf(program, arch, nr, arg1):
-    """Interprète le sous-ensemble BPF du filtre des verrous (ld abs, jeq k, ret k)."""
+    """Interprète le sous-ensemble BPF du filtre étudiant (ld abs, jeq k, ret k)."""
     data = {0: nr & 0xFFFFFFFF, 4: arch, 24: arg1 & 0xFFFFFFFF}
     acc, pc = 0, 0
     while True:
@@ -3193,7 +3193,7 @@ class OomAndLockIsolationTest(unittest.TestCase):
     étudiant ne posent aucun verrou d'enregistrement (mémoire noyau que le cgroup ne compte pas)."""
 
     def launch_calls(self, preexec):
-        """Appels de mark_oom_victim / deny_record_locks faits par un preexec_fn, sans rien
+        """Appels de mark_oom_victim / install_student_filter faits par un preexec_fn, sans rien
         changer au processus de test (setuid, setsid… et rlimits remplacés)."""
         marks, locks = [], []
         # create=True : setsid, setuid… n'existent pas sous Windows, où ces tests tournent aussi.
@@ -3205,7 +3205,7 @@ class OomAndLockIsolationTest(unittest.TestCase):
                 unittest.mock.patch.object(supervisor, "resource", unittest.mock.Mock()), \
                 unittest.mock.patch.object(supervisor, "mark_oom_victim",
                                            lambda *a: marks.append(a)), \
-                unittest.mock.patch.object(supervisor, "deny_record_locks",
+                unittest.mock.patch.object(supervisor, "install_student_filter",
                                            lambda: locks.append(True)):
             preexec()
         return marks, locks
@@ -3266,9 +3266,10 @@ class OomAndLockIsolationTest(unittest.TestCase):
                                supervisor.OOM_ADJ_TRUSTED))
         self.assertEqual(r.stdout.strip(), "500")
 
-    def test_lock_filter_denies_record_locks_on_every_abi(self):
-        program = supervisor.lock_filter_program()
+    def test_student_filter_denies_record_locks_and_aio_on_every_abi(self):
+        program = supervisor.student_filter_program()
         deny = supervisor.SECCOMP_RET_ERRNO | 37
+        nosys = supervisor.SECCOMP_RET_ERRNO | 38
         allow = supervisor.SECCOMP_RET_ALLOW
         for at, (code, jt, jf, k) in enumerate(program):
             # BPF n'accepte que des sauts EN AVANT et dans le programme.
@@ -3288,12 +3289,17 @@ class OomAndLockIsolationTest(unittest.TestCase):
             (i386, 221, 37, deny), (i386, 221, 3, allow),
             (arm, 221, 13, deny), (arm, 55, 7, deny), (arm, 25, 6, allow),
             (0x12345678, 72, 6, allow),               # architecture inconnue : Docker décide
+            # io_setup : refusé quel que soit l'argument, sur chaque ABI.
+            (x86_64, 206, 0, nosys), (x86_64, 0x40000000 | 543, 0, nosys),
+            (aarch64, 0, 0, nosys), (i386, 245, 0, nosys), (arm, 243, 0, nosys),
+            (x86_64, 207, 0, allow), (x86_64, 209, 0, allow),   # io_destroy, io_submit : sans contexte
+            (aarch64, 1, 0, allow), (i386, 243, 0, allow),       # 243 n'est io_setup qu'en arm
         ]
         for arch, nr, cmd, expected in cases:
             self.assertEqual(run_bpf(program, arch, nr, cmd), expected, (hex(arch), nr, cmd))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "seccomp : Linux ; couvert en CI")
-    def test_lock_filter_really_refuses_record_locks(self):
+    def test_student_filter_really_refuses_record_locks_and_aio(self):
         import fcntl
         with tempfile.TemporaryDirectory() as d:
             target = os.path.join(d, "verrou")
@@ -3301,7 +3307,7 @@ class OomAndLockIsolationTest(unittest.TestCase):
             if pid == 0:   # pragma: no cover — processus fils
                 status = 1
                 try:
-                    supervisor.deny_record_locks()
+                    supervisor.install_student_filter()
                     fd = os.open(target, os.O_RDWR | os.O_CREAT, 0o600)
                     try:
                         fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -3310,6 +3316,15 @@ class OomAndLockIsolationTest(unittest.TestCase):
                         if e.errno == 37:
                             fcntl.flock(fd, fcntl.LOCK_EX)   # flock reste permis
                             status = 0
+                    # io_setup (206 sur x86_64, 0 sur aarch64) : ENOSYS.
+                    import ctypes
+                    import platform
+                    libc = ctypes.CDLL(None, use_errno=True)
+                    context = ctypes.c_ulong(0)
+                    number = {"x86_64": 206, "aarch64": 0}.get(platform.machine())
+                    if number is not None and status == 0:
+                        refused = libc.syscall(number, 1, ctypes.byref(context)) == -1
+                        status = 0 if refused and ctypes.get_errno() == 38 else 3
                 finally:
                     os._exit(status)
             _, status = os.waitpid(pid, 0)
@@ -3341,6 +3356,228 @@ class OomAndLockIsolationTest(unittest.TestCase):
         self.assertGreaterEqual(low, 1 << 24)          # au-dessus des sous-UID usuels
         self.assertLess(high - 1 + 1, 1 << 31)          # dernier UID étudiant + 1 (noteur)
         self.assertGreater(high - low, 10 ** 9)         # collision entre conteneurs ~ 10⁻⁸
+
+
+
+class StudentBuildMemoTest(unittest.TestCase):
+    """La compilation du code soumis n'est faite qu'UNE fois par job (capacité)."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.saved_state = supervisor.EXIT_STATE
+        supervisor.STUDENT_BUILDS.clear()
+        supervisor.EVENTS.clear()
+        # Artefacts gardés sous le dossier du test ; chown remplacé (non-root, ou Windows).
+        self.owners = []
+        record = lambda target, uid, gid: self.owners.append((uid, gid))
+        self.patches = [
+            unittest.mock.patch.object(supervisor, "STUDENT_BUILD_CACHE",
+                                       os.path.join(self.root, "etu_compilations")),
+            unittest.mock.patch.object(supervisor.os, "fchown", record, create=True),
+            unittest.mock.patch.object(supervisor.os, "chown", record, create=True),
+            unittest.mock.patch.object(supervisor.os, "fchmod", lambda fd, mode: None,
+                                       create=True)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self.patches):
+            p.stop()
+        supervisor.EXIT_STATE = self.saved_state
+        supervisor.STUDENT_BUILDS.clear()
+        supervisor.EVENTS.clear()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def reset(self):
+        supervisor.STUDENT_BUILDS.clear()
+        supervisor.EVENTS.clear()
+        shutil.rmtree(os.path.join(self.root, "cases"), ignore_errors=True)
+        shutil.rmtree(supervisor.STUDENT_BUILD_CACHE, ignore_errors=True)
+
+    def case(self, index, source="fn doubler() {}"):
+        """Dossier d'un cas avec sa source étudiante ; rend (dossier, source, sorties)."""
+        case_dir = os.path.join(self.root, "cases", str(index))
+        os.makedirs(os.path.join(case_dir, "etu_build", "classes"), exist_ok=True)
+        path = os.path.join(case_dir, "etu_build", "etu.rs")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source)
+        supervisor.EXIT_STATE = supervisor.ExitState(index)
+        return case_dir, path, (os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"))
+
+    @staticmethod
+    def artifact(case_dir, as_dir=False):
+        return os.path.join(case_dir, "etu_build", "classes" if as_dir else "etu_bin")
+
+    def compile(self, case_dir, path, outputs, as_dir=False):
+        cmd = ["rustc", path, "-o", self.artifact(case_dir, as_dir)]
+        env = {"HOME": os.path.join(case_dir, "etu_build", "home"), "LANG": "C.UTF-8"}
+        return supervisor.compile_student(cmd, os.path.join(case_dir, "etu_build"), env,
+                                          case_dir, [path], *outputs,
+                                          self.artifact(case_dir, as_dir))
+
+    def fake_run(self, result, err_text="erreur: inconnue", lost=False, products=None):
+        """run_proc simulé. `products` : {chemin relatif à l'artefact: octets} écrits si réussite
+        (clé "" = l'artefact est un fichier)."""
+        calls = []
+
+        def run(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
+            calls.append(cmd)
+            with open(err_path, "w", encoding="utf-8") as f:
+                f.write(err_text)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("sortie standard")
+            for rel, data in (products or {}).items():
+                target = os.path.join(cmd[-1], rel) if rel else cmd[-1]
+                with open(target, "wb") as f:
+                    f.write(data)
+            if lost:
+                supervisor.EXIT_STATE.lost = True
+            return result
+        return calls, run
+
+    def test_key_ignores_the_case_directory_only(self):
+        first, path_1, _ = self.case(1)
+        second, path_2, _ = self.case(10)
+        third, path_3, _ = self.case(2, "fn doubler() { autre }")
+
+        def key(case_dir, path, cmd_extra=(), cwd=None):
+            return supervisor.student_build_key(
+                ["rustc", path] + list(cmd_extra), cwd or os.path.join(case_dir, "etu_build"),
+                {"HOME": os.path.join(case_dir, "home")}, [path], case_dir)
+        self.assertEqual(key(first, path_1), key(second, path_2))     # /cases/1 vs /cases/10
+        # Dossier de travail = le dossier du cas lui-même (javac) : neutralisé aussi.
+        self.assertEqual(key(first, path_1, cwd=first), key(second, path_2, cwd=second))
+        self.assertNotEqual(key(first, path_1), key(third, path_3))   # autres octets
+        self.assertNotEqual(key(first, path_1), key(first, path_1, ["-O"]))
+
+    def test_compiler_failure_is_replayed_from_the_second_case(self):
+        calls, run = self.fake_run((1, False))
+        with unittest.mock.patch.object(supervisor, "run_proc", run):
+            self.assertEqual(self.compile(*self.case(1)), (1, False))
+            second = self.case(2)
+            self.assertEqual(self.compile(*second), (1, False))
+        self.assertEqual(len(calls), 1)                               # une seule compilation
+        self.assertEqual(supervisor.read_capped(second[2][1]), "erreur: inconnue")
+        self.assertEqual(supervisor.read_capped(second[2][0]), "sortie standard")
+        self.assertFalse(supervisor.EXIT_STATE.expired or supervisor.EXIT_STATE.killed_by_signal)
+        self.assertEqual([e["type"] for e in supervisor.EVENTS], ["echec_compilation_rejoue"])
+
+    def test_inconclusive_failure_is_replayed_once_seen_twice(self):
+        # Délai dépassé ou compilateur tué : peut venir de l'hôte (machine chargée, cache Go
+        # froid). Le 2e cas recompile ; le 3e rejoue, avec la même cause non concluante.
+        for result, killed in (((None, True), False), ((-9, False), True)):
+            with self.subTest(result=result):
+                self.reset()
+                calls, run = self.fake_run(result)
+                with unittest.mock.patch.object(supervisor, "run_proc", run):
+                    for index in (1, 2, 3):
+                        self.assertEqual(self.compile(*self.case(index)), result)
+                self.assertEqual(len(calls), 2)
+                state = supervisor.EXIT_STATE                          # celle du 3e cas
+                self.assertEqual(state.expired, result[1])
+                self.assertEqual(state.killed_by_signal, killed)
+                self.assertEqual([e["type"] for e in supervisor.EVENTS],
+                                 ["echec_compilation_rejoue"])
+
+    def test_success_is_replayed_by_copying_the_artifact(self):
+        for as_dir, products in ((False, {"": b"\x7fELF binaire"}),
+                                 (True, {"Solution.class": b"\xca\xfe1",
+                                         "Solution$Rect.class": b"\xca\xfe2"})):
+            with self.subTest(as_dir=as_dir):
+                self.reset()
+                self.owners.clear()
+                calls, run = self.fake_run((0, False), err_text="avertissement", products=products)
+                with unittest.mock.patch.object(supervisor, "run_proc", run):
+                    self.assertEqual(self.compile(*self.case(1), as_dir=as_dir), (0, False))
+                    second = self.case(2)
+                    self.assertEqual(self.compile(*second, as_dir=as_dir), (0, False))
+                self.assertEqual(len(calls), 1)
+                for rel, data in products.items():
+                    target = self.artifact(second[0], as_dir)
+                    with open(os.path.join(target, rel) if rel else target, "rb") as f:
+                        self.assertEqual(f.read(), data)
+                # Rendu à l'étudiant, comme s'il venait de compiler.
+                self.assertEqual(set(self.owners),
+                                 {(supervisor.STUDENT_UID, supervisor.STUDENT_GID)})
+                self.assertEqual(len(self.owners), len(products))
+                self.assertEqual(supervisor.read_capped(second[2][1]), "avertissement")
+                self.assertEqual([e["type"] for e in supervisor.EVENTS], ["compilation_rejouee"])
+
+    def test_oversized_artifact_lost_output_and_new_source_compile_again(self):
+        big = {"": b"x" * 64}
+        for label, kwargs, source_2 in (
+                ("trop gros", {"result": (0, False), "products": big}, None),
+                ("sortie perdue", {"result": (1, False), "lost": True}, None),
+                ("autre source", {"result": (1, False)}, "fn doubler() { 2 }")):
+            with self.subTest(label), unittest.mock.patch.object(
+                    supervisor, "STUDENT_ARTIFACT_CAP", 32):
+                self.reset()
+                calls, run = self.fake_run(**kwargs)
+                with unittest.mock.patch.object(supervisor, "run_proc", run):
+                    self.compile(*self.case(1))
+                    self.compile(*(self.case(2, source_2) if source_2 else self.case(2)))
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(supervisor.EVENTS, [])
+
+    def test_artifact_with_too_many_files_is_not_kept(self):
+        target = os.path.join(self.root, "classes")
+        os.makedirs(target)
+        for index in range(3):
+            with open(os.path.join(target, "C%d.class" % index), "wb") as f:
+                f.write(b"c")
+        with unittest.mock.patch.object(supervisor, "STUDENT_ARTIFACT_MAX_FILES", 3):
+            self.assertEqual(len(supervisor.artifact_files(target)), 3)
+        with unittest.mock.patch.object(supervisor, "STUDENT_ARTIFACT_MAX_FILES", 2):
+            self.assertIsNone(supervisor.artifact_files(target))
+
+    def test_failure_after_a_known_success_keeps_the_success(self):
+        # La restauration échoue (tmpfs plein), la recompilation aussi : pour des entrées
+        # identiques, c'est l'environnement — les cas suivants rejouent toujours la réussite.
+        outcomes = [(0, False), (1, False)]
+        calls = []
+
+        def run(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=None):
+            calls.append(cmd)
+            for path in (out_path, err_path):
+                open(path, "w").close()
+            result = outcomes[min(len(calls), len(outcomes)) - 1]
+            if result == (0, False):
+                with open(cmd[-1], "wb") as f:
+                    f.write(b"binaire")
+            return result
+        restores = iter([False, True])
+        with unittest.mock.patch.object(supervisor, "run_proc", run):
+            self.compile(*self.case(1))
+            with unittest.mock.patch.object(supervisor, "restore_artifact",
+                                            lambda artifact, path: next(restores)):
+                self.assertEqual(self.compile(*self.case(2)), (1, False))   # restauration ratée
+                self.assertEqual(self.compile(*self.case(3)), (0, False))   # réussite rejouée
+        self.assertEqual(len(calls), 2)
+
+    @unittest.skipUnless(os.name == "posix", "liens symboliques : POSIX")
+    def test_artifact_with_a_link_is_not_kept(self):
+        target = os.path.join(self.root, "classes")
+        os.makedirs(target)
+        with open(os.path.join(target, "A.class"), "wb") as f:
+            f.write(b"a")
+        self.assertEqual(supervisor.artifact_files(target), ["A.class"])
+        os.symlink("/etc/passwd", os.path.join(target, "B.class"))
+        self.assertIsNone(supervisor.artifact_files(target))
+        os.symlink("/etc/passwd", os.path.join(self.root, "lien"))
+        self.assertIsNone(supervisor.artifact_files(os.path.join(self.root, "lien")))
+
+    def test_every_compiled_runner_builds_student_code_through_the_memo(self):
+        # Garde de structure (le cas d'intégration le prouve langage par langage) : un runner
+        # qui lancerait la compilation étudiante directement par run_proc échapperait au rejeu.
+        # En C/C++, preexec_student_compile ne sert plus qu'à nm, sur le binaire déjà compilé.
+        import inspect
+        for runner in (supervisor.run_java_rpc, supervisor.run_csharp_rpc, supervisor.run_rust_rpc,
+                       supervisor.run_c_rpc, supervisor.run_go_rpc):
+            with self.subTest(runner=runner.__name__):
+                source = inspect.getsource(runner)
+                self.assertIn("compile_student(", source)
+                if runner is not supervisor.run_c_rpc:
+                    self.assertNotIn("preexec_student_compile", source)
 
 
 if __name__ == "__main__":

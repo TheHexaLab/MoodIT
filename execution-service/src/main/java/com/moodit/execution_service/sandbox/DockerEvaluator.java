@@ -61,6 +61,12 @@ public class DockerEvaluator {
     /** Verdicts des canaris que le superviseur sait rendre (cf. canary_verdict, supervisor.py). */
     private static final java.util.Set<String> CANARY_VERDICTS =
             java.util.Set.of("ok", "aucun", "indetermines", "incoherents");
+    /**
+     * Événements du FONCTIONNEMENT NORMAL du superviseur (compilation du code soumis faite une
+     * fois par job, puis rejouée) : journalisés en DEBUG, pour ne pas noyer les vrais signaux.
+     */
+    static final java.util.Set<String> ROUTINE_EVENTS =
+            java.util.Set.of("compilation_rejouee", "echec_compilation_rejoue");
     /** Marge laissée au superviseur pour clore et imprimer son JSON avant le mur. */
     private static final long CLOSING_MARGIN_MS = 20_000;
 
@@ -396,17 +402,22 @@ public class DockerEvaluator {
             byIndex.put(result.path("index").asInt(-1), result);
         }
 
-        // Événements du superviseur : JOURNALISÉS, et rien de plus. Ils portent tous sur
-        // l'INFRASTRUCTURE (espace_sature, budget_depasse, erreur_superviseur) ou sur la chaîne
-        // de notation elle-même (canari_incoherent) ; le verdict du cas, lui, vient du
-        // superviseur, et une incohérence de canaris est traitée plus bas pour TOUS les cas.
-        // Il n'y a plus d'événement qui accuse un cas en particulier : les lectures tracées,
-        // les jetons manquants et les rapports incohérents appartenaient au format framework,
-        // retiré de #116.
+        // Événements du superviseur : JOURNALISÉS, et rien de plus. Ils portent sur
+        // l'INFRASTRUCTURE (espace_sature, budget_depasse, erreur_superviseur), sur la chaîne
+        // de notation elle-même (canari_incoherent) ou, en DEBUG, sur son fonctionnement normal
+        // (compilation du code soumis rejouée d'un cas à l'autre : un par cas, à chaque job) ;
+        // le verdict du cas, lui, vient du superviseur, et une incohérence de canaris est
+        // traitée plus bas pour TOUS les cas. Il n'y a plus d'événement qui accuse un cas en
+        // particulier : les lectures tracées, les jetons manquants et les rapports incohérents
+        // appartenaient au format framework, retiré de #116.
         for (JsonNode event : root.path("events")) {
+            String type = event.path("type").asString("");
+            if (ROUTINE_EVENTS.contains(type)) {
+                log.debug("Notation compilée — {} (cas {})", type, event.path("case").asInt(-1));
+                continue;
+            }
             log.warn("Notation compilée — événement {} (cas {}) : {}",
-                    event.path("type").asString(""), event.path("case").asInt(-1),
-                    event.path("detail").asString(""));
+                    type, event.path("case").asInt(-1), event.path("detail").asString(""));
         }
 
         List<TestResult> results = new ArrayList<>();

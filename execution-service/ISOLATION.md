@@ -145,9 +145,16 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   tampons de sockets, VMA), de faire tuer le PID 1 (sortie 137 mesurée). Le code soumis n'a aucune
   capacité. Requiert Docker rootful.
 - **Verrous d'enregistrement POSIX refusés au code soumis** (filtre seccomp posé par le
-  superviseur, `deny_record_locks`) : le cgroup ne les compte pas, et 4 millions de verrous en
+  superviseur, `install_student_filter`) : le cgroup ne les compte pas, et 4 millions de verrous en
   16 s ajoutaient 872 Mo de mémoire noyau à l'hôte. `flock()` reste permis. Coût : SQLite sur
-  fichier (« database is locked » ; `:memory:` fonctionne) et `FileChannel.lock()` en Java.
+  fichier (« database is locked » ; `:memory:` fonctionne) et `FileChannel.lock()` en Java. Le
+  même filtre refuse `io_setup` (ENOSYS) : la limite de l'AIO noyau, `fs.aio-max-nr`, est globale
+  à l'hôte, et le code soumis la vidait en une seconde.
+- **La compilation du code soumis n'est faite qu'une fois par job** (`compile_student`) : le
+  programme étudiant est le même à chaque cas (en C#, tant que les harnais nomment la même
+  classe). Son échec est rejoué aux suivants (un délai dépassé ou une mort par signal, une fois
+  constaté deux fois) ; sa réussite, en recopiant le binaire gardé par root. Une boucle
+  d'évaluation constante en Rust tenait une place 451 s pour trois cas ; 183 s désormais.
 - **UID étudiant tiré entre 2²⁴ et 2³¹ − 2** : les limites par UID du noyau sont communes à l'hôte,
   et deux conteneurs simultanés ne doivent pas partager le leur.
   Mesures, vecteur par vecteur, et restes ouverts : `docker/runners/README.md`, « Conteneur mort

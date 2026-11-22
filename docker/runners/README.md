@@ -56,7 +56,7 @@ refusé avec un diagnostic plutôt que noté par un chemin contournable.
 | **CVE des images elles-mêmes** | Les dix images sont scannées par Trivy (`security.yml`, job `trivy-runners`), résultats CRITICAL remontés dans Code scanning. Bases épinglées par digest, téléchargements vérifiés par SHA-256 | **NON bloquant pour ces images**, contrairement aux sept images de service : au crible CRITICAL corrigeables, sept d'entre elles sont à zéro, mais `go` en compte une quarantaine, `c` (gcc) 205 et `rust` 208 — toutes venant des images officielles de chaînes de compilation, qu'une PR ne peut pas corriger. Bloquer dessus arrêterait le dépôt sur de l'amont ; réduire ces chiffres (bases plus minces pour c/go/rust) se décide à froid. Le job ne tourne pas sur les PR : dix constructions d'images par proposition pour un résultat informatif |
 | **Pas de fuite réseau** | `--network none` | — |
 | **Notation bornée dans le temps** | budget GLOBAL transmis au superviseur (mur du conteneur moins une marge, plafonné à **15 min**) : au-delà il CLÔT et renvoie les verdicts obtenus, les cas restants comptant « non exécuté » (`budget_depasse`) — le conteneur n'est plus tué au mur, ce qui perdait tout le travail et supprimait la tentative | une question à beaucoup de cas dont les compilations sont réellement lentes peut donc être notée partiellement ; le budget par cas (90 s de compilation) est très pessimiste par rapport au réel (quelques secondes) |
-| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, comptés dans la mémoire et **dérivés de `SANDBOX_MEMORY_MB`** (60 % / 6 % / 2 %, planchers 256 / 32 / 16 Mo — `DockerSandbox.boxSizeMb/tmpSizeMb/shmSizeMb` ; en dur, ils pouvaient dépasser la mémoire allouée au conteneur), bornés aussi en **nombre de fichiers** (`nr_inodes` : 32 768 / 4 096 / 1 024 — la taille ne borne que les octets, et des centaines de milliers de fichiers vides épuisaient la mémoire noyau du conteneur ; besoin réel mesuré : moins de 2 000 sur `/box` en Go, moins de 70 ailleurs) (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile sur le processus ÉTUDIANT ; fichiers et nofile sur le NOTEUR — `demote_student`/`demote_grader` ; l'UID étudiant est **tiré au sort par conteneur**, entre 2²⁴ et 2³¹ − 2 (`STUDENT_UID_RANGE`), sans quoi RLIMIT_NPROC — compté par UID réel sur l'hôte — aurait été un budget COMMUN : un étudiant qui fork en boucle faisait échouer la notation d'un autre ; tiré parmi 40 000 valeurs, deux conteneurs simultanés partageaient encore un UID environ 4 fois sur 10 000) + **ordre des victimes de l'OOM** (superviseur à -1000, code soumis à 1000 sans retour possible, noteur des compilés à 500 — section suivante) + **verrous d'enregistrement POSIX refusés** au code soumis (filtre seccomp, section suivante) + temps limite par cas (prof, max 60 s) + budget mural du conteneur + **IPC System V fermée** : un segment de mémoire partagée (`shmget`) est compté dans la mémoire du conteneur mais vit hors des tmpfs et survit à son créateur — jamais détruit, il finissait par faire tuer le superviseur par l'OOM (conteneur mort sans verdict, tentative rejouable). `kernel.shm_rmid_forced=1` le détruit dès qu'il n'est plus attaché ; `kernel.msgmni=0` interdit les files de messages et `kernel.sem` (semmni à 0) les jeux de sémaphores, qui ont le même défaut — un jeu de 32 000 sémaphores pèse environ 2 Mio et survit lui aussi (`DockerSandbox.IPC_SYSCTLS`, vérifié par `RunnerSandboxIntegrationTest`) | un code soumis qui dépasse la mémoire est tué et son cas échoue ; il ne peut plus faire tomber le conteneur — ni par l'IPC System V, ni par de la mémoire noyau tenue hors de son RSS (mesures dans la section suivante). Les files de messages POSIX sont bornées par RLIMIT_MSGQUEUE (0,7 Mo mesurés). Les bombes de compilation occupent une place jusqu'à 90 s **par cas** (voir « Restes ouverts ») |
+| **Pas d'épuisement de ressources** | mémoire/PID/CPU du conteneur + écritures étudiantes **confinées aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, comptés dans la mémoire et **dérivés de `SANDBOX_MEMORY_MB`** (60 % / 6 % / 2 %, planchers 256 / 32 / 16 Mo — `DockerSandbox.boxSizeMb/tmpSizeMb/shmSizeMb` ; en dur, ils pouvaient dépasser la mémoire allouée au conteneur), bornés aussi en **nombre de fichiers** (`nr_inodes` : 32 768 / 4 096 / 1 024 — la taille ne borne que les octets, et des centaines de milliers de fichiers vides épuisaient la mémoire noyau du conteneur ; besoin réel mesuré : moins de 2 000 sur `/box` en Go, moins de 70 ailleurs) (répertoires monde-inscriptibles des images verrouillés → le disque de l'hôte est hors d'atteinte du code étudiant) + rlimits (fichiers, nproc, nofile sur le processus ÉTUDIANT ; fichiers et nofile sur le NOTEUR — `demote_student`/`demote_grader` ; l'UID étudiant est **tiré au sort par conteneur**, entre 2²⁴ et 2³¹ − 2 (`STUDENT_UID_RANGE`), sans quoi RLIMIT_NPROC — compté par UID réel sur l'hôte — aurait été un budget COMMUN : un étudiant qui fork en boucle faisait échouer la notation d'un autre ; tiré parmi 40 000 valeurs, deux conteneurs simultanés partageaient encore un UID environ 4 fois sur 10 000) + **ordre des victimes de l'OOM** (superviseur à -1000, code soumis à 1000 sans retour possible, noteur des compilés à 500 — section suivante) + **verrous d'enregistrement POSIX et AIO noyau refusés** au code soumis (filtre seccomp, section suivante) + temps limite par cas (prof, max 60 s) + budget mural du conteneur + **IPC System V fermée** : un segment de mémoire partagée (`shmget`) est compté dans la mémoire du conteneur mais vit hors des tmpfs et survit à son créateur — jamais détruit, il finissait par faire tuer le superviseur par l'OOM (conteneur mort sans verdict, tentative rejouable). `kernel.shm_rmid_forced=1` le détruit dès qu'il n'est plus attaché ; `kernel.msgmni=0` interdit les files de messages et `kernel.sem` (semmni à 0) les jeux de sémaphores, qui ont le même défaut — un jeu de 32 000 sémaphores pèse environ 2 Mio et survit lui aussi (`DockerSandbox.IPC_SYSCTLS`, vérifié par `RunnerSandboxIntegrationTest`) | un code soumis qui dépasse la mémoire est tué et son cas échoue ; il ne peut plus faire tomber le conteneur — ni par l'IPC System V, ni par de la mémoire noyau tenue hors de son RSS (mesures dans la section suivante). Les files de messages POSIX sont bornées par RLIMIT_MSGQUEUE (0,7 Mo mesurés). La compilation du code soumis (bombe, boucle d'évaluation constante, compilation lente) n'est faite qu'une fois par job, puis rejouée aux cas suivants |
 | **Isolation entre cas** | dossier par cas, groupe de processus tué au timeout, et **balayage des survivants UID étudiant après CHAQUE phase** — compilation, inventaire, notation — et pas seulement entre deux cas (un `fork` + `setsid` échappe au kill de groupe ; balayer tôt libère aussi les tubes de sortie, qu'un descendant survivant tenait ouverts, ce qui coûtait sinon dix secondes d'attente par phase) | pendant UN cas, les processus étudiants du même cas partagent l'UID (ptrace entre eux possible selon le `ptrace_scope` de l'hôte) — sans portée inter-cas grâce au balayage |
 | **Interprétés, SQL et vues — mode exec** (Python, JavaScript, TypeScript, PHP, Bash, SQL, JSON, HTML, JSX/TSX) | Noteur et code soumis dans **deux processus** (RPC, identifiant imprévisible par appel), nonce émis par le noteur seul. Le noteur **Python** est lancé en mode isolé (`python3 -I`) : son dossier, que le code soumis peut écrire, n'entre pas dans `sys.path`, donc un `import numpy` du harnais ne charge jamais un module déposé par le code soumis. Seuls les symboles soumis que le **harnais nomme** reçoivent un mandataire dans le noteur ; parmi eux, un nom qui **masque un outil du harnais** est refusé avec un message clair (une fonction d'aide `max` ou `test` que le harnais n'appelle pas n'est donc ni mandatée ni refusée — même règle pour les compilés : Java, Go, C et C++) : fonction intégrée de Python (`bool`, `abs`, `len`…), global de JavaScript (`Number`, `parseInt`…) ou variable du module (`require`…), commande de bash ou du `PATH` (`test`, `expr`, `grep`… — vérifié par `type -t` dans l'image). Le verdict Python appelle la vraie `bool`, et un mandataire Bash rend le **statut** de l'appel réel. SQL : chaque instruction de la réponse est enfermée dans sa vue — coupée sur `;` **et** sur les lignes `go` et `/`, que `sqlite3` traite comme un `;` ; `sqlite3 -safe` (ni `.shell`, ni `.read`, ni `ATTACH`, ni `readfile`) ; programme livré **par stdin** depuis un fichier root `0600`, illisible même par la table virtuelle `fsdir`, que `-safe` laisse passer | **garantie plus faible que celle des compilés** : il n'y a pas de second UID en mode exec, noteur et code soumis tournent sous le **même UID**. Un code soumis déterminé peut donc, selon la politique `ptrace` de l'hôte et ce que `/proc` expose d'un voisin du même UID, tenter de lire la mémoire du noteur. Ces langages conviennent aux exercices et aux quiz formatifs ; pour une évaluation à fort enjeu, préférer un des six langages compilés, seuls à porter la propriété « verdict non falsifiable ». Les falsifications corrigées pendant la revue de #246 (`bool` en Python, ligne `go` en SQL, `test` en Bash) ne demandaient **ni ptrace ni lecture de mémoire** : un nouveau répartiteur doit refuser tout nom qui masque un outil du harnais |
 | **Socket Docker de l'hôte** | `execution-service` monte `/var/run/docker.sock` pour lancer les conteneurs runner | accès **root-équivalent à l'hôte**. `execution-service` est routé depuis Internet (`/exec/**` via le gateway) et analyse le code soumis, les harnais et la sortie des conteneurs : un défaut d'exécution de code dans ce service vaudrait l'hôte entier (Postgres et Caddy compris), là où l'ancien Piston restait confiné à son conteneur. Durcissement prévu : un proxy de socket restreint (cf. `deploy/DEPLOY.md`) |
@@ -79,7 +79,7 @@ pour ce que le code soumis peut provoquer.
   1000 pour le code soumis et sa compilation, 500 pour le noteur des compilés et les processus
   root de `preexec_compile` — un noteur JVM pèse plus que de petits processus soumis, et à
   égalité c'est lui que l'OOM tuait. En mode exec, le noteur assemblé tourne sous l'UID étudiant :
-  il partage avec le code soumis la valeur 1000 et le filtre des verrous. Un enfant oublié
+  il partage avec le code soumis la valeur 1000 et le filtre seccomp étudiant. Un enfant oublié
   hériterait de -1000 et serait intuable : vérifié sur les dix images par un échantillonneur de
   `/proc` pendant 18 jobs réels, aucun processus exécuté n'y reste (seule la fenêtre de quelques
   microsecondes entre `fork` et `preexec_fn`, sans `exec`).
@@ -100,14 +100,14 @@ pour ce que le code soumis peut provoquer.
   créateur sont bornés (tmpfs en taille et en inodes, IPC System V fermée) et tiennent sous la
   mémoire du conteneur : mesuré ci-dessous à 512, 1024 et 1536 Mo. **Docker rootful requis** :
   un démon rootless refuserait un `oom_score_adj` négatif, et chaque notation répondrait 502.
-- **Verrous d'enregistrement refusés au code soumis.** Un verrou `fcntl` est de la mémoire noyau
+- **Verrous d'enregistrement et AIO noyau refusés au code soumis.** Un verrou `fcntl` est de la mémoire noyau
   que le cgroup NE COMPTE PAS (comptage retiré du noyau en 2021, revert 3754707bcc3e ; vérifié sur
   6.6) : 4 millions de verrous posés en 16 s ajoutaient 872 Mo à l'HÔTE et 0 au conteneur. Le VPS
   de prod (8 Go, ~1 Go de marge) tombait dans l'OOM global en un « Exécuter » de 60 s, et l'OOM
   global tue le plus lourd des processus à 1000 — souvent le code soumis d'un AUTRE étudiant, dont
   la note devient fausse. Aucune limite du noyau n'en borne le nombre : un filtre seccomp posé par
   le superviseur sur les processus de l'UID étudiant (exécution et compilation,
-  `deny_record_locks`) refuse `F_SETLK`, `F_SETLKW`, `F_OFD_SETLK`, `F_OFD_SETLKW` et, en 32
+  `install_student_filter`) refuse `F_SETLK`, `F_SETLKW`, `F_OFD_SETLK`, `F_OFD_SETLKW` et, en 32
   bits, `F_SETLK64`/`F_SETLKW64`, avec ENOLCK. Il s'ajoute au profil de Docker et couvre x86_64,
   x32, i386 (`int 0x80`), aarch64 et arm — les trois premiers mesurés, aarch64 et arm vérifiés
   par simulation du programme BPF seulement (pas d'hôte ARM). S'il ne se pose pas, le processus
@@ -115,7 +115,29 @@ pour ce que le code soumis peut provoquer.
   ouvert, borné par RLIMIT_NOFILE × RLIMIT_NPROC, et c'est lui que `go build` utilise. **Coût
   pour le code soumis** (mesuré) : SQLite sur FICHIER répond « database is locked » (`:memory:`
   et `?nolock=1` fonctionnent ; le runtime SQL de la plateforme est en mémoire), et
-  `FileChannel.lock()` lève `IOException: No locks available` en Java.
+  `FileChannel.lock()` lève `IOException: No locks available` en Java. Le même filtre refuse
+  `io_setup` avec ENOSYS (la réponse d'un noyau sans AIO) : la limite de l'AIO noyau,
+  `fs.aio-max-nr`, est **globale à l'hôte**, et 128 contextes de 512 événements, pris en une
+  seconde par le code soumis, la vidaient pour tous les conteneurs. Aucun langage des images ne
+  s'en sert.
+- **Compilation du code soumis faite une fois par job.** Le programme étudiant ne dépend que du
+  code soumis : il est identique d'un cas à l'autre, canaris compris (sauf en C#, où le serveur
+  porte la classe que le harnais nomme : deux harnais qui nomment deux classes recompilent). Son
+  résultat est mémorisé par empreinte de ses entrées (commande, environnement, octets des
+  sources, chemin du cas neutralisé — `compile_student`) et rejoué aux cas suivants :
+  - **réussite** : l'artefact (binaire, ou dossier de classes en Java) est copié par root hors
+    du chantier de l'étudiant juste après la compilation — aucun de ses processus n'est vivant à
+    ce moment — puis recopié dans le chantier de chaque cas suivant, sans suivre de lien. Au-delà
+    de 64 Mo (`STUDENT_ARTIFACT_CAP`, taille apparente : la copie remplit les trous d'un fichier
+    creux) ou de 256 fichiers (`STUDENT_ARTIFACT_MAX_FILES` : le cache garde ses inodes tout le
+    job, sur un `/box` borné à 32 768), il n'est pas gardé et chaque cas recompile ; un échec qui
+    suit une réussite déjà constatée (restauration impossible faute de place) ne la remplace pas ;
+  - **échec du compilateur** : même code de sortie et mêmes messages, rejoués dès le cas suivant ;
+  - **échec non concluant** (délai dépassé, compilateur tué par signal) : il peut venir de
+    l'hôte — machine chargée, cache de Go encore froid à la première compilation — et n'est
+    rejoué qu'une fois constaté **deux** fois ; il garde alors sa cause non concluante (même
+    traitement des canaris).
+  Rien n'est mémorisé quand une sortie a été perdue (tmpfs saturé : la cause est l'espace).
 - **UID étudiant tiré entre 2²⁴ et 2³¹ − 2.** Les limites par UID du noyau (RLIMIT_NPROC,
   RLIMIT_SIGPENDING, pages de tubes, instances inotify…) sont communes à l'hôte entier : deux
   conteneurs au même UID les partagent (mesuré : le second ne pouvait même plus lancer bash).
@@ -141,6 +163,9 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | fils jusqu'à RLIMIT_NPROC | +4 Mo | réglage existant |
 | minuteries POSIX, signaux en attente | +21 Mo (RLIMIT_SIGPENDING) | réglage existant |
 | verrous `fcntl` par plages | non comptés : 4 M verrous en 16 s = +872 Mo d'hôte, +0 conteneur | fermé (filtre seccomp) |
+| flock, baux (`F_SETLEASE`), eventfd, timerfd, signalfd, au maximum des descripteurs (126 processus × 248) | 31 248 objets : +9 à +16 Mo d'hôte non comptés, +22 à +29 Mo au conteneur, rendus à la mort | réglage existant (RLIMIT_NOFILE × RLIMIT_NPROC) |
+| AIO noyau (`io_setup`) | limite **globale** `fs.aio-max-nr` : 128 contextes de 512 la vidaient (EAGAIN ensuite, pour tout l'hôte) ; après : ENOSYS | fermé (filtre seccomp) |
+| sockets AF_ALG (tampons d'émission non comptés), fanotify, perf_event_open | EPERM | réglage existant (profil seccomp de Docker) |
 | liens physiques sur tmpfs | comptés par `nr_inodes` : 32 754 puis ENOSPC, +14 Mo | réglage existant |
 | liens symboliques (cible de 4 000 o) | 32 755 puis ENOSPC, +167 Mo, dans la taille du tmpfs | réglage existant |
 | attributs étendus `user.*` | 511 × 64 Kio puis ENOSPC (imputés sur l'espace d'inodes, 32 Mo pour `/box`), +64 Mo | réglage existant |
@@ -150,20 +175,28 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | exceptions du superviseur sur le code soumis | fuzz de la chaîne réelle de chaque langage (2 400 entrées de 100 Ko) : aucune exception ; Rust jusqu'à 12 s par cas (`code_depths` quadratique, 6 s pour 100 000 caractères) → linéaire, 0,07 s pour 200 000 | corrigé |
 | sortie qui casse le JSON (octets nuls, UTF-8 invalide, substituts, U+2028) | JSON rendu dans les deux modes (`read_capped` décode avec remplacement) | conception |
 | 127 processus en boucle, zombies, bombe de fork | notes justes, canaris `ok`, ≤ 2 s par cas | réglage existant |
-| bombes de compilation (préprocesseur et templates C++, macro et `static` géant Rust) | compilateur tué par l'OOM, 5 à 75 s pour 3 cas ; `static char[1 Gio]` C : binaire creux, réussit | réglage existant |
-| boucle d'évaluation constante Rust | 90 s de compilation **par cas** : 451 s de place pour 3 cas + 2 canaris | ouvert (capacité) |
+| bombes de compilation (3 cas + 2 canaris, 1024 Mo) | compilateur tué par l'OOM ; avant → après : templates C++ 75 → 21 s et préprocesseur C++ 14 → 5 s (le pilote de gcc sort en 1 : rejoué dès le 2e cas), macro Rust 27 → 12 s et `static` géant Rust 5 → 3 s (rustc tué par signal : rejoué une fois constaté deux fois) ; `static char[1 Gio]` C : gcc élimine le tableau (binaire de 15 Ko), réussit, binaire rejoué, canaris `ok` | corrigé (compilation rejouée) |
+| boucle d'évaluation constante Rust | 90 s de compilation **par cas** : 451 s de place pour 3 cas + 2 canaris → 183 s (délai dépassé : rejoué une fois constaté deux fois) | corrigé (compilation rejouée) |
+| compilation lente qui RÉUSSIT juste avant le délai | refaite à chaque cas ; après : une fois par job, binaire recopié | corrigé (compilation rejouée) |
+| code soumis à des milliers de fonctions (100 Ko) : bouchons du noteur recompilés à chaque cas (ils portent le nonce) | 3 cas + 2 canaris : C 34 s, C++ 43 s, Go 60 s, Java 28 s, C# 8 s, tous notés ; Rust 2 730 fonctions : compilateur tué à 1 Go, échec noté | borné (≤ une solution lente honnête) |
 | fichiers de l'image inscriptibles | `/tmp` seulement, masqué par le tmpfs ; à l'exécution, `/box` (dossiers de l'étudiant) et `/tmp` | réglage existant |
 
 ### Restes ouverts
 
-- **Capacité, pas de verdict perdu** : une compilation qui tourne jusqu'à son délai (90 s) est
-  refaite à chaque cas, et le chemin interne n'a **aucune borne par utilisateur** (3 fils de
-  correction de code dans core, partagés). Une soumission tient donc une place jusqu'à ~11 min, et
-  trois suffisent à retarder toutes les corrections compilées. Aucune n'est perdue (elles
-  attendent dans la file de core), mais elles sont retardées.
-- **Mémoire noyau non comptée autre que les verrous** : seuls les objets énumérés ci-dessus ont été
-  mesurés. Un autre objet non compté retomberait sur l'OOM global de l'hôte, qui tue d'abord un
-  processus à 1000 — pas forcément celui du fautif.
+- **Pas de borne par utilisateur sur le chemin interne** (3 fils de correction de code dans core,
+  partagés). Au pire, une soumission tient une place le temps d'une compilation étudiante jusqu'à
+  90 s (deux fois si elle expire), puis, par cas, de la compilation du noteur (bouchons gonflés :
+  jusqu'à ~12 s par cas mesurés) et de l'exécution jusqu'au temps limite du prof — ce dernier
+  terme est aussi celui d'une solution honnête qui boucle —, sous le plafond de 15 min. Un
+  artefact de plus de 64 Mo ou de 256 fichiers n'est pas gardé : sa compilation est refaite à
+  chaque cas. Le nombre de soumissions d'un étudiant est borné par la tentative unique (une par
+  quiz) ; seul un 502 l'autorise à recommencer — voir S3/S4 dans la PR. Aucune correction n'est perdue (elles
+  attendent dans la file de core), elles peuvent être retardées.
+- **Mémoire noyau non comptée** : les objets que le code soumis peut créer sous le profil de
+  Docker ont été balayés (tableau ci-dessus) ; ceux qui restent permis sont bornés par les rlimits
+  et rendus à la mort. Un objet non compté qui aurait échappé au balayage retomberait sur l'OOM
+  global de l'hôte. Mesures faites sur le noyau 6.6 de Docker Desktop (x86_64), pas sur le noyau
+  de prod ni sur ARM (filtre vérifié par simulation du programme BPF seulement).
 
 ## Protocole
 
@@ -212,7 +245,8 @@ d'après les signatures réellement présentes dans le code soumis.
   réponse par langage, objets par poignée, forge refusée, harnais inatteignable) et
   `RunnerSandboxIntegrationTest` (**isolation du conteneur** : réseau coupé, `/tmp` non
   exécutable, IPC System V, inodes, OOM qui ne tue jamais le superviseur et ordre des victimes,
-  verrous d'enregistrement refusés, plage d'UID, boucle infinie, budgets, poids). En CI (`SANDBOX_REQUIRED=true`), une précondition
+  verrous d'enregistrement et AIO noyau refusés, plage d'UID, compilation faite une fois par job
+  dans les six langages — échec rejoué, binaire juste recopié —, boucle infinie, budgets, poids). En CI (`SANDBOX_REQUIRED=true`), une précondition
   manquante FAIT ÉCHOUER le job.
 - Dev local : démon Docker requis (Windows : named pipe, détecté automatiquement par
   `DockerSandbox`). Sans démon ni images, les tests s'ignorent et l'évaluation compilée répond 502

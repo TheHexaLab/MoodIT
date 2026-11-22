@@ -3,6 +3,8 @@ package com.moodit.execution_service.sandbox;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 
@@ -363,19 +365,24 @@ class RunnerSandboxIntegrationTest {
     }
 
     @Test
-    void record_locks_are_refused_to_student_code() {
+    void record_locks_and_kernel_aio_are_refused_to_student_code() {
         require("C");
         // Un verrou fcntl est de la mémoire noyau que le cgroup ne compte PAS : 4 millions,
         // posés en 16 s, ajoutaient 872 Mo à l'HÔTE et rien au conteneur — de quoi faire
         // tomber le VPS de prod dans l'OOM global, qui tue alors le code soumis d'un AUTRE
         // étudiant. Le superviseur les refuse (ENOLCK) aux processus de l'UID étudiant par un
-        // filtre seccomp ; flock() reste permis.
+        // filtre seccomp ; flock() reste permis. Le même filtre refuse io_setup (ENOSYS) : la
+        // limite de l'AIO noyau, fs.aio-max-nr, est GLOBALE — 128 contextes la vidaient pour
+        // tous les conteneurs de l'hôte.
         String probe = """
                 #define _GNU_SOURCE
+                #include <errno.h>
                 #include <fcntl.h>
+                #include <linux/aio_abi.h>
                 #include <stdio.h>
                 #include <stdlib.h>
                 #include <sys/file.h>
+                #include <sys/syscall.h>
                 #include <unistd.h>
 
                 static int fichier(void) {
@@ -394,6 +401,12 @@ class RunnerSandboxIntegrationTest {
                 int posix(int n) { return poser(F_SETLK) ? n * 2 : 0; }
                 int ofd(int n) { return poser(F_OFD_SETLK) ? n * 2 : 0; }
 
+                /* Réussit si l'AIO noyau a répondu autre chose que ENOSYS. */
+                int aio(int n) {
+                    aio_context_t contexte = 0;
+                    return syscall(SYS_io_setup, 1, &contexte) == 0 || errno != ENOSYS ? n * 2 : 0;
+                }
+
                 /* TÉMOIN : flock et F_GETLK, eux, restent permis — la sonde ouvre bien un
                    fichier et fcntl répond ; seule la pose d'un verrou d'enregistrement échoue. */
                 int temoin(int n) {
@@ -411,7 +424,8 @@ class RunnerSandboxIntegrationTest {
                 new TestCaseInput("F_SETLK", "return posix(5) == 10;", 1),
                 new TestCaseInput("F_OFD_SETLK", "return ofd(5) == 10;", 1),
                 new TestCaseInput("témoin", "return temoin(5) == 10;", 1),
-                new TestCaseInput("UID", "return uid(5) == 10;", 1)), null);
+                new TestCaseInput("UID", "return uid(5) == 10;", 1),
+                new TestCaseInput("io_setup", "return aio(5) == 10;", 1)), null);
         assertThat(r.get(0).passed()).withFailMessage("F_SETLK doit être refusé : %s", r.get(0))
                 .isFalse();
         assertThat(r.get(1).passed()).withFailMessage("F_OFD_SETLK doit être refusé : %s", r.get(1))
@@ -419,6 +433,76 @@ class RunnerSandboxIntegrationTest {
         assertThat(r.get(2).passed()).withFailMessage("témoin : %s", r.get(2)).isTrue();
         assertThat(r.get(3).passed()).withFailMessage("UID dans la plage large : %s", r.get(3))
                 .isTrue();
+        assertThat(r.get(4).passed()).withFailMessage("io_setup doit être refusé : %s", r.get(4))
+                .isFalse();
+    }
+
+    @Test
+    void student_compilation_is_done_once_per_job() {
+        // Le programme étudiant ne dépend que du code soumis : il était pourtant recompilé à
+        // CHAQUE cas, canaris compris. Une boucle d'évaluation constante en Rust (90 s, le
+        // délai de compilation) tenait ainsi une place 451 s pour trois cas, sans rien changer
+        // au verdict. Le superviseur compile une fois et rejoue : l'échec tel quel, la réussite
+        // en recopiant le binaire (le dossier de classes en Java) dans le chantier du cas.
+        // Erreur dans le CORPS : la fonction reste extractible, l'échec vient bien du compilateur.
+        record Probe(String language, String code, String harness) { }
+        List<Probe> probes = List.of(
+                new Probe("C", "int doubler(int n) { return n * BON; }\n",
+                        "return doubler(5) == 10;"),
+                new Probe("C++", "int doubler(int n) { return n * BON; }\n",
+                        "return doubler(5) == 10;"),
+                new Probe("Rust", "fn doubler(n: i32) -> i32 { n * BON }\n",
+                        "doubler(5) == 10"),
+                new Probe("Go", "package main\n\nfunc doubler(n int) int { return n * BON }\n\n"
+                        + "func main() {}\n", "return doubler(5) == 10"),
+                new Probe("Java", "public class Solution {\n    public static int doubler(int n) "
+                        + "{ return n * BON; }\n}\n", "return Solution.doubler(5) == 10;"),
+                new Probe("C#", "public class Solution {\n    public static int doubler(int n) "
+                        + "{ return n * BON; }\n}\n", "return Solution.doubler(5) == 10;"));
+        JsonMapper mapper = JsonMapper.builder().build();
+        for (Probe probe : probes) {
+            require(probe.language());
+            for (boolean compiles : new boolean[] {false, true}) {
+                String code = probe.code().replace("BON", compiles ? "2" : "inconnue");
+                String what = probe.language() + (compiles ? " (juste)" : " (erreur)");
+                List<TestCaseInput> cases = List.of(new TestCaseInput("a", probe.harness(), 1),
+                        new TestCaseInput("b", probe.harness(), 1),
+                        new TestCaseInput("c", probe.harness(), 1));
+                HarnessProjects.Project project =
+                        HarnessProjects.build(probe.language(), code, cases, 10_000, 600_000L);
+                DockerSandbox.ContainerRun run = evaluator.sandbox().run(
+                        evaluator.imageFor(project.runnerLanguage()), project.files(), 900_000);
+                JsonNode root = mapper.readTree(run.stdout());
+                String expected = compiles ? "compilation_rejouee" : "echec_compilation_rejoue";
+                long replays = 0;
+                for (JsonNode event : root.path("events")) {
+                    if (expected.equals(event.path("type").asString(""))) {
+                        replays++;
+                    }
+                }
+                // Trois cas réels + deux canaris : une seule vraie compilation, quatre rejouées.
+                assertThat(replays).withFailMessage("%s : %d rejeux — %s", what, replays,
+                        run.stdout()).isEqualTo(project.caseCount() + 2L - 1L);
+                assertThat(root.path("results")).hasSize(3);
+                for (JsonNode result : root.path("results")) {
+                    if (compiles) {
+                        // TÉMOIN : le binaire rejoué tourne et répond juste, canaris compris.
+                        assertThat(result.path("passed").asBoolean(false))
+                                .withFailMessage("%s : %s", what, result).isTrue();
+                    } else {
+                        // TÉMOIN : le compilateur a bien tourné, et son diagnostic est rendu
+                        // à CHAQUE cas, rejoué compris.
+                        assertThat(result.path("passed").asBoolean(true)).isFalse();
+                        assertThat(result.path("detail").asString(""))
+                                .withFailMessage("%s : diagnostic absent — %s", what, result)
+                                .contains("Échec de compilation").contains("inconnue");
+                    }
+                }
+                if (compiles) {
+                    assertThat(root.path("canaries").asString("")).isEqualTo("ok");
+                }
+            }
+        }
     }
 
     @Test

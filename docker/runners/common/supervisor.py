@@ -39,6 +39,7 @@ Le protocole côté Java vit dans execution-service/…/sandbox/ ; garder les de
 import bisect
 import collections
 import functools
+import hashlib
 import json
 import os
 import random
@@ -294,31 +295,39 @@ def oom_victim_first(preexec):
     return launch
 
 
-# ── Verrous d'enregistrement POSIX refusés au code soumis ────────────────────────────────────
-# Un verrou fcntl (F_SETLK…) est un objet noyau de ~216 octets que le cgroup NE COMPTE PAS
-# (comptage retiré du noyau en 2021, revert 3754707bcc3e ; vérifié sur 6.6) : 4 millions de
-# verrous posés en 16 s par le code soumis ajoutaient 872 Mo de mémoire noyau à l'HÔTE et 0 au
-# conteneur. Un seul « Exécuter » de 60 s suffisait à pousser le VPS de prod (8 Go, ~1 Go de
-# marge) dans l'OOM GLOBAL, qui tue alors le processus le plus lourd parmi les candidats à 1000 —
-# souvent le code soumis d'un AUTRE étudiant, dont la note devient fausse. Aucune limite du
-# noyau ne borne leur nombre (RLIMIT_LOCKS n'est plus appliquée) : on les refuse (ENOLCK) aux
-# processus de l'UID étudiant par un filtre seccomp, qui s'ajoute au profil de Docker. flock()
-# — un verrou par fichier ouvert, donc borné par RLIMIT_NOFILE × RLIMIT_NPROC — reste permis :
-# c'est lui que les chaînes de compilation utilisent (cache de go build, mesuré).
+# ── Filtre seccomp des processus de l'UID étudiant ─────────────────────────────────────────
+# Il s'ajoute au profil de Docker et refuse deux familles d'appels que ni le cgroup ni une limite
+# par UID ne bornent :
+#
+# 1. Les verrous d'enregistrement POSIX (F_SETLK…, refusés en ENOLCK). Un verrou fcntl est un
+#    objet noyau de ~216 octets que le cgroup NE COMPTE PAS (comptage retiré du noyau en 2021,
+#    revert 3754707bcc3e ; vérifié sur 6.6) : 4 millions de verrous posés en 16 s par le code
+#    soumis ajoutaient 872 Mo de mémoire noyau à l'HÔTE et 0 au conteneur. Un seul « Exécuter »
+#    de 60 s suffisait à pousser le VPS de prod (8 Go, ~1 Go de marge) dans l'OOM GLOBAL, qui tue
+#    alors le processus le plus lourd parmi les candidats à 1000 — souvent le code soumis d'un
+#    AUTRE étudiant, dont la note devient fausse. Aucune limite du noyau ne borne leur nombre
+#    (RLIMIT_LOCKS n'est plus appliquée). flock() et les baux — un objet par fichier ouvert, donc
+#    bornés par RLIMIT_NOFILE × RLIMIT_NPROC : 31 248 au plus, 16 Mo d'hôte mesurés — restent
+#    permis : flock est celui que les chaînes de compilation utilisent (cache de go build, mesuré).
+# 2. L'AIO noyau (io_setup, refusé en ENOSYS, la réponse d'un noyau qui ne l'a pas). Sa limite,
+#    fs.aio-max-nr, est GLOBALE à l'hôte : 128 contextes de 512 événements, pris en une seconde,
+#    la vidaient pour tous les conteneurs. Aucun langage des images ne s'en sert.
 LOCK_DENY_ERRNO = 37                       # ENOLCK
+AIO_DENY_ERRNO = 38                        # ENOSYS
 LOCK_COMMANDS = (6, 7, 37, 38)             # F_SETLK, F_SETLKW, F_OFD_SETLK, F_OFD_SETLKW
 LOCK_COMMANDS_32 = (13, 14)                # F_SETLK64, F_SETLKW64 (ABI 32 bits)
-# (AUDIT_ARCH_*, numéros de fcntl/fcntl64, ABI 32 bits ?) ; x32 = numéro x86_64 | 0x40000000.
-LOCK_FILTER_ARCHES = ((0xC000003E, (72, 0x40000000 | 72), False),     # x86_64 (+ x32)
-                      (0xC00000B7, (25,), False),                     # aarch64
-                      (0x40000003, (55, 221), True),                  # i386 sur x86_64
-                      (0x40000028, (55, 221), True))                  # arm 32 bits sur aarch64
+# (AUDIT_ARCH_*, numéros de fcntl/fcntl64, ABI 32 bits ?, numéros de io_setup) ; x32 = numéro
+# | 0x40000000 (son io_setup est le 543 : le 206 n'existe qu'en 64 bits).
+STUDENT_FILTER_ARCHES = ((0xC000003E, (72, 0x40000000 | 72), False, (206, 0x40000000 | 543)),
+                         (0xC00000B7, (25,), False, (0,)),                    # aarch64
+                         (0x40000003, (55, 221), True, (245,)),               # i386 sur x86_64
+                         (0x40000028, (55, 221), True, (243,)))               # arm sur aarch64
 _BPF_LD_W_ABS, _BPF_JEQ_K, _BPF_RET_K = 0x20, 0x15, 0x06
 SECCOMP_RET_ALLOW, SECCOMP_RET_ERRNO = 0x7FFF0000, 0x00050000
 
 
-def lock_filter_program():
-    """Programme BPF du filtre des verrous : liste de (code, jt, jf, k). FONCTION PURE (testée).
+def student_filter_program():
+    """Programme BPF du filtre étudiant : liste de (code, jt, jf, k). FONCTION PURE (testée).
 
     seccomp_data : nr à l'octet 0, arch à 4, args[1] (la commande de fcntl) à 24 — mot de poids
     faible en petit-boutiste, celui que le noyau lit (`unsigned int cmd`) : un 6 + 2³² est donc vu
@@ -332,12 +341,14 @@ def lock_filter_program():
         prog.append([code, 0, 0, k])
 
     emit(_BPF_LD_W_ABS, 4)
-    for arch, _, _ in LOCK_FILTER_ARCHES:
+    for arch, _, _, _ in STUDENT_FILTER_ARCHES:
         emit(_BPF_JEQ_K, arch, "arch%x" % arch)
     emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
-    for arch, numbers, abi32 in LOCK_FILTER_ARCHES:
+    for arch, numbers, abi32, aio_numbers in STUDENT_FILTER_ARCHES:
         labels["arch%x" % arch] = len(prog)
         emit(_BPF_LD_W_ABS, 0)
+        for number in aio_numbers:
+            emit(_BPF_JEQ_K, number, "nosys")
         for number in numbers:
             emit(_BPF_JEQ_K, number, "cmd32" if abi32 else "cmd")
         emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
@@ -352,12 +363,14 @@ def lock_filter_program():
     emit(_BPF_RET_K, SECCOMP_RET_ALLOW)
     labels["deny"] = len(prog)
     emit(_BPF_RET_K, SECCOMP_RET_ERRNO | LOCK_DENY_ERRNO)
+    labels["nosys"] = len(prog)
+    emit(_BPF_RET_K, SECCOMP_RET_ERRNO | AIO_DENY_ERRNO)
     for at, target in jumps:
         prog[at][1] = labels[target] - at - 1
     return [tuple(instruction) for instruction in prog]
 
 
-def _prepare_lock_filter():
+def _prepare_student_filter():
     """Objets ctypes du filtre, construits UNE fois dans le superviseur : le preexec_fn (après
     fork) n'a plus que deux appels à faire. None hors Linux (tests unitaires sous Windows)."""
     if not sys.platform.startswith("linux"):
@@ -372,7 +385,7 @@ def _prepare_lock_filter():
         class SockFprog(ctypes.Structure):
             _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.POINTER(SockFilter))]
 
-        program = lock_filter_program()
+        program = student_filter_program()
         instructions = (SockFilter * len(program))(*(SockFilter(*i) for i in program))
         fprog = SockFprog(len(program), instructions)
         prctl = ctypes.CDLL("libc.so.6", use_errno=True).prctl
@@ -385,25 +398,25 @@ def _prepare_lock_filter():
         return None
 
 
-_LOCK_FILTER = _prepare_lock_filter()
+_STUDENT_FILTER = _prepare_student_filter()
 PR_SET_NO_NEW_PRIVS, PR_SET_SECCOMP, SECCOMP_MODE_FILTER = 38, 22, 2
 
 
-def deny_record_locks():
-    """preexec_fn (fin) des processus de l'UID étudiant : pose le filtre des verrous.
+def install_student_filter():
+    """preexec_fn (fin) des processus de l'UID étudiant : pose le filtre (verrous, AIO noyau).
 
     FAIL-CLOSED : un filtre qui ne se pose pas ne laisse pas tourner le processus sans lui — il
     meurt (127) avant exec, avec un message sur sa sortie d'erreur. Pas d'exception : levée dans
     un preexec_fn, elle deviendrait une SubprocessError, que run_proc ne rattrape pas — un 502,
     donc un essai de plus, au lieu d'un cas en échec."""
-    ok = _LOCK_FILTER is not None
+    ok = _STUDENT_FILTER is not None
     if ok:
-        prctl, fprog_address, _ = _LOCK_FILTER
+        prctl, fprog_address, _ = _STUDENT_FILTER
         ok = (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
               and prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, fprog_address, 0, 0) == 0)
     if not ok:
         try:
-            os.write(2, b"superviseur: filtre seccomp des verrous non pose\n")
+            os.write(2, b"superviseur: filtre seccomp etudiant non pose\n")
         finally:
             os._exit(127)
 
@@ -418,7 +431,7 @@ def demote_student():
     resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
-    deny_record_locks()
+    install_student_filter()
 
 
 def canary_reserve_seconds(budget_s, timeout_s):
@@ -708,7 +721,7 @@ def preexec_student_compile():
     os.setgroups([])
     os.setgid(STUDENT_GID)
     os.setuid(STUDENT_UID)
-    deny_record_locks()
+    install_student_filter()
 
 
 def student_build_env(build_dir):
@@ -729,6 +742,235 @@ def student_build_env(build_dir):
         "CGO_ENABLED": "0",
         "RUSTUP_HOME": "/usr/local/rustup",
     }
+
+
+# Compilations du CODE SOUMIS déjà faites dans ce job, par empreinte de leurs entrées (voir
+# compile_student). Le programme étudiant ne dépend que du code soumis : il est identique d'un
+# cas à l'autre, canaris compris (le marqueur réservé est refusé en amont) — sauf en C#, où le
+# serveur porte la classe que le harnais nomme : un harnais qui en nomme une autre recompile.
+STUDENT_BUILDS = {}
+# Artefacts des compilations RÉUSSIES (binaire, ou dossier de classes en Java), copiés par root
+# hors du chantier de l'étudiant. Dans /box : comptés dans la mémoire du conteneur, d'où le
+# plafond (st_size : un binaire creux de 1 Gio compte pour 1 Gio et n'est pas gardé).
+STUDENT_BUILD_CACHE = os.path.join(BOX, "etu_compilations")
+STUDENT_ARTIFACT_CAP = 64 * 1024 * 1024
+# ... et en nombre de fichiers : le cache garde ses inodes tout le job, sur un /box borné à
+# BOX_INODES (une classe Java par fichier ; une solution honnête en a quelques-unes).
+STUDENT_ARTIFACT_MAX_FILES = 256
+# Un échec NON CONCLUANT (délai dépassé, compilateur tué par signal) peut venir de l'hôte — une
+# machine chargée, le cache de Go encore froid à la première compilation — et non des entrées :
+# il n'est rejoué qu'une fois constaté DEUX fois. Un échec du compilateur l'est dès la première.
+INCONCLUSIVE_REPLAY_AFTER = 2
+
+
+class StudentBuild:
+    """Résultat d'une compilation étudiante, tel qu'il sera rejoué."""
+
+    def __init__(self, code, expired, out_text, err_text, artifact=None):
+        self.code, self.expired = code, expired
+        self.out_text, self.err_text = out_text, err_text
+        self.artifact = artifact          # (chemin dans STUDENT_BUILD_CACHE, dossier ?)
+        self.occurrences = 1
+
+    def succeeded(self):
+        return self.code == 0 and not self.expired
+
+    def inconclusive(self):
+        return self.expired or (self.code is not None and self.code < 0)
+
+    def replayable(self):
+        if self.succeeded():
+            return self.artifact is not None
+        return not self.inconclusive() or self.occurrences >= INCONCLUSIVE_REPLAY_AFTER
+
+
+def student_build_key(cmd, cwd, env, inputs, case_dir):
+    """Empreinte d'une compilation ÉTUDIANTE : commande, dossier, environnement et octets des
+    sources, le chemin du cas neutralisé (seule différence d'un cas à l'autre). Testée.
+
+    Les sources sont relues sans suivre de lien : elles vivent dans le chantier de l'étudiant
+    (root vient de les y écrire, aucun processus étudiant n'a encore tourné dans ce cas)."""
+    case_dir = case_dir.rstrip(os.sep)
+    prefix = case_dir + os.sep
+    digest = hashlib.sha256()
+
+    def feed(text):
+        # Le dossier du cas LUI-MÊME aussi (dossier de travail de javac), pas seulement ce
+        # qu'il contient.
+        text = prefix if text == case_dir else text
+        digest.update(text.replace(prefix, "\0cas" + os.sep).encode("utf-8", "surrogatepass"))
+        digest.update(b"\0")
+
+    for part in list(cmd) + [cwd] + sorted("%s=%s" % item for item in env.items()):
+        feed(part)
+    for path in inputs:
+        feed(path)
+        fd = os.open(path, os.O_RDONLY | O_NO_LINK)
+        with os.fdopen(fd, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                digest.update(chunk)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def replay_output(path, text):
+    """Réécrit une sortie mémorisée (root, 0600, sans suivre de lien)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | O_NO_LINK, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as f:
+        f.write(text)
+
+
+def artifact_files(path):
+    """Fichiers d'un artefact (fichier ou dossier) : liste de chemins relatifs ("" pour un
+    fichier seul), ou None s'il ne se garde pas — lien, fichier spécial, plus de
+    STUDENT_ARTIFACT_CAP octets (taille apparente : la copie remplit les trous d'un fichier
+    creux) ou de STUDENT_ARTIFACT_MAX_FILES fichiers. Lu sans suivre de lien (chantier de
+    l'étudiant). Testée."""
+    st = os.lstat(path)
+    if stat.S_ISREG(st.st_mode):
+        return [""] if st.st_size <= STUDENT_ARTIFACT_CAP else None
+    if not stat.S_ISDIR(st.st_mode):
+        return None
+    files, total = [], 0
+    for root, dirs, names in os.walk(path, followlinks=False):
+        for name in dirs + names:
+            full = os.path.join(root, name)
+            st = os.lstat(full)
+            if stat.S_ISDIR(st.st_mode):
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                return None
+            total += st.st_size
+            if total > STUDENT_ARTIFACT_CAP or len(files) >= STUDENT_ARTIFACT_MAX_FILES:
+                return None
+            files.append(os.path.relpath(full, path))
+    return files
+
+
+def copy_regular(src, dst, owner=None):
+    """Copie un fichier ORDINAIRE sans suivre de lien, ni à la lecture ni à l'écriture (la
+    destination ne doit pas exister). owner=(uid, gid) : la copie lui est donnée, en 0700."""
+    fd_in = os.open(src, os.O_RDONLY | O_NO_LINK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd_in).st_mode):
+            raise OSError("artefact non ordinaire : %s" % src)
+        fd_out = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NO_LINK, 0o700)
+        try:
+            for chunk in iter(lambda: os.read(fd_in, 1 << 20), b""):
+                os.write(fd_out, chunk)
+            if owner is not None:
+                os.fchown(fd_out, *owner)
+                os.fchmod(fd_out, 0o700)
+        finally:
+            os.close(fd_out)
+    finally:
+        os.close(fd_in)
+
+
+def save_artifact(path, key):
+    """Garde l'artefact d'une compilation RÉUSSIE → (copie, dossier ?), ou None.
+
+    Appelée juste après la compilation : run_proc a tué le groupe et balayé l'UID étudiant, aucun
+    processus de l'étudiant ne peut plus toucher son chantier pendant la copie."""
+    dest = os.path.join(STUDENT_BUILD_CACHE, key)
+    try:
+        files = artifact_files(path)
+        if files is None:
+            return None
+        os.makedirs(STUDENT_BUILD_CACHE, mode=0o700, exist_ok=True)
+        if files == [""]:
+            copy_regular(path, dest)
+            return dest, False
+        os.mkdir(dest, 0o700)
+        for rel in files:
+            os.makedirs(os.path.dirname(os.path.join(dest, rel)), mode=0o700, exist_ok=True)
+            copy_regular(os.path.join(path, rel), os.path.join(dest, rel))
+        return dest, True
+    except OSError:
+        # Rien de gardé : les cas suivants recompilent, comme avant.
+        if os.path.isdir(dest) and not os.path.islink(dest):
+            shutil.rmtree(dest, ignore_errors=True)
+        else:
+            try:
+                os.unlink(dest)
+            except OSError:
+                pass
+        return None
+
+
+def restore_artifact(artifact, path):
+    """Rend l'artefact gardé à `path`, donné à l'étudiant comme s'il venait de le compiler.
+    → vrai si c'est fait ; faux = recompiler (une copie partielle d'un fichier seul est retirée,
+    celle d'un dossier de classes est écrasée par la compilation)."""
+    saved, is_dir = artifact
+    owner = (STUDENT_UID, STUDENT_GID)
+    try:
+        if not is_dir:
+            copy_regular(saved, path, owner)
+            return True
+        for root, _, names in os.walk(saved):
+            target_dir = os.path.normpath(os.path.join(path, os.path.relpath(root, saved)))
+            if not os.path.isdir(target_dir):
+                os.mkdir(target_dir, 0o700)
+                os.chown(target_dir, *owner)
+            for name in names:
+                copy_regular(os.path.join(root, name), os.path.join(target_dir, name), owner)
+        return True
+    except OSError:
+        if not is_dir:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        return False
+
+
+def compile_student(cmd, cwd, env, case_dir, inputs, out_path, err_path, artifact):
+    """Compile le CODE SOUMIS sous son UID → (exit, timed_out), comme run_proc. `artifact` :
+    ce que la compilation produit (binaire, ou dossier de classes en Java).
+
+    Une compilation n'est faite qu'UNE fois par job pour des entrées identiques, puis rejouée
+    aux cas suivants. Sans cela, une compilation lente — boucle d'évaluation constante en Rust
+    jusqu'au délai de 90 s, bombe de templates C++ jusqu'à l'OOM, ou compilation qui RÉUSSIT
+    juste avant le délai — était refaite à CHAQUE cas, canaris compris : 451 s de place tenue
+    pour trois cas, sans rien changer au verdict.
+    - Réussite : l'artefact, gardé par root hors du chantier, est recopié dans celui du cas ;
+      s'il n'a pas pu être gardé (trop gros) ou rendu, le cas recompile.
+    - Échec : même code de sortie, même expiration ou mort par signal (donc même verdict et même
+      traitement des canaris), mêmes messages du compilateur. Un échec NON CONCLUANT n'est
+      rejoué qu'à sa deuxième occurrence (INCONCLUSIVE_REPLAY_AFTER).
+    Rien n'est mémorisé quand une sortie a été perdue (tmpfs saturé : la cause est l'espace)."""
+    key = student_build_key(cmd, cwd, env, inputs, case_dir)
+    known = STUDENT_BUILDS.get(key)
+    if known is not None and known.replayable():
+        if not known.succeeded() or restore_artifact(known.artifact, artifact):
+            replay_output(out_path, known.out_text)
+            replay_output(err_path, known.err_text)
+            if known.expired:
+                EXIT_STATE.expired = True
+            if known.code is not None and known.code < 0:
+                EXIT_STATE.killed_by_signal = True
+            event("compilation_rejouee" if known.succeeded() else "echec_compilation_rejoue",
+                  case=EXIT_STATE.case)
+            return known.code, known.expired
+    code, expired = run_proc(cmd, cwd, env, COMPILE_TIMEOUT_S, out_path, err_path,
+                             preexec_student_compile)
+    if EXIT_STATE.lost:
+        return code, expired
+    build = StudentBuild(code, expired, read_capped(out_path), read_capped(err_path))
+    if build.succeeded():
+        build.artifact = (known.artifact if known is not None and known.succeeded()
+                          else save_artifact(artifact, key))
+        if build.artifact is None:
+            return code, expired
+    elif known is not None and known.succeeded():
+        # Entrées identiques, réussite déjà constatée : cet échec vient de l'environnement (la
+        # restauration a échoué, faute de place) — la réussite reste celle que l'on rejoue.
+        return code, expired
+    elif known is not None and known.inconclusive() and build.inconclusive():
+        build.occurrences = known.occurrences + 1
+    STUDENT_BUILDS[key] = build
+    return code, expired
 
 
 def set_owner_mode(fpath, uid, gid, mode, dir_mode=None):
@@ -5215,10 +5457,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         return None, ("Retire la ligne « package ... ; » en tete du fichier : la notation "
                       "attend la classe dans le paquet par defaut. (Le bouton « Executer » "
                       "l accepte, pas la notation.)")
-    code, expired = run_proc(["javac", "-encoding", "UTF-8", "-d", student_classes, student_file],
-                            case_dir, student_build_env(build_area), COMPILE_TIMEOUT_S,
-                            os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                            preexec_student_compile)
+    code, expired = compile_student(["javac", "-encoding", "UTF-8", "-d", student_classes, student_file],
+                                    case_dir, student_build_env(build_area), case_dir, [student_file],
+                                    os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
+                                    student_classes)
     if expired or code != 0:
         return None, "Échec de compilation :\n" + read_capped(os.path.join(case_dir, "cc.err"))[:1500]
 
@@ -5408,12 +5650,15 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     # code soumis : meme regime que les autres — sous l'UID etudiant, dans son chantier.
     for cmd, label, cwd_c, env_c, preexec_c in (
             (["mcs", "-main:MooditSrv.MooditServer", "-out:" + student_bin, student_src, student_copy],
-             "code soumis", build_area, student_build_env(build_area), preexec_student_compile),
+             "code soumis", build_area, student_build_env(build_area), None),
             (["mcs", "-main:MooditGrader", "-out:" + grader_bin, grader_src],
              "harnais", case_dir, env, preexec_compile)):
-        code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S,
-                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_c)
+        outputs = (os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"))
+        if label == "code soumis":
+            code, expired = compile_student(cmd, cwd_c, env_c, case_dir,
+                                            [student_src, student_copy], *outputs, student_bin)
+        else:
+            code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
             detail = (read_capped(os.path.join(case_dir, "cc.err"))
                       or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
@@ -5464,12 +5709,15 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
     # embarquait harnais et nonce quand rustc tournait en root a cote du noteur.
     for source, out_value, label, cwd_c, env_c, preexec_c in (
             (student_src, student_bin, "code soumis", build_area, student_build_env(build_area),
-             preexec_student_compile),
+             None),
             (grader_src, grader_bin, "harnais", case_dir, env, preexec_compile)):
-        code, expired = run_proc(["rustc", "-O", "--edition", "2021", source, "-o", out_value],
-                                cwd_c, env_c, COMPILE_TIMEOUT_S,
-                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_c)
+        cmd = ["rustc", "-O", "--edition", "2021", source, "-o", out_value]
+        outputs = (os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"))
+        if label == "code soumis":
+            code, expired = compile_student(cmd, cwd_c, env_c, case_dir, [source], *outputs,
+                                            out_value)
+        else:
+            code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
@@ -5607,10 +5855,13 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         # -fno-builtin : `abs`, `sqrt`… sont des fonctions INTEGREES de gcc, calculees a la
         # compilation (abs(-5) devient 5) sans appeler la fonction notee du meme nom — une
         # reponse fausse passait. Les deux programmes, pour que chacun appelle la vraie.
-        code, expired = run_proc([compiler, std, "-O1", "-fno-builtin", source, "-o", out_value, "-lm"],
-                                cwd_c, env_c, COMPILE_TIMEOUT_S,
-                                os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
-                                preexec_c)
+        cmd = [compiler, std, "-O1", "-fno-builtin", source, "-o", out_value, "-lm"]
+        outputs = (os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"))
+        if label == "code soumis":
+            code, expired = compile_student(cmd, cwd_c, env_c, case_dir, [source], *outputs,
+                                            out_value)
+        else:
+            code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
@@ -5702,11 +5953,17 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     student_bin = os.path.join(student_mod, "etu_bin")
     grader_bin = os.path.join(case_dir, "noteur_bin")
     for directory, out_value, label, env_c, preexec_c in (
-            (student_mod, student_bin, "code soumis", student_build_env(build_area), preexec_student_compile),
+            (student_mod, student_bin, "code soumis", student_build_env(build_area), None),
             (grader_src_dir, grader_bin, "harnais", env, preexec_compile)):
-        code, expired = run_proc(["go", "build", "-o", out_value, "."], directory, env_c,
-                                COMPILE_TIMEOUT_S, os.path.join(case_dir, "cc.out"),
-                                os.path.join(case_dir, "cc.err"), preexec_c)
+        cmd = ["go", "build", "-o", out_value, "."]
+        outputs = (os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"))
+        if label == "code soumis":
+            code, expired = compile_student(
+                cmd, directory, env_c, case_dir,
+                [os.path.join(student_mod, name) for name in ("go.mod", "solution.go", "serveur.go")],
+                *outputs, out_value)
+        else:
+            code, expired = run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
             detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
             if label == "harnais":
