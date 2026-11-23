@@ -3599,6 +3599,29 @@ class SubmittedCodeStageTest(unittest.TestCase):
         self.assertEqual(source.count("announce_submitted_code_stage()"), 1)
         self.assertLess(source.index(platform_error), announce)
         self.assertLess(announce, source.index(first_submitted_code_step))
+        # Le filtre étudiant est sondé AVANT la ligne témoin : absent, c'est une panne de
+        # plateforme (erreur JSON, « indisponible »), pas un code soumis noté 0.
+        probe = source.index("student_filter_available()")
+        self.assertLess(probe, announce)
+        self.assertLess(probe, source.index("STUDENT_FILTER_UNAVAILABLE"))
+        self.assertLess(source.index("STUDENT_FILTER_UNAVAILABLE"), announce)
+
+    def test_filter_probe_fails_without_a_prepared_filter(self):
+        with unittest.mock.patch.object(supervisor, "_STUDENT_FILTER", None):
+            self.assertFalse(supervisor.student_filter_available())
+
+    @unittest.skipUnless(hasattr(os, "fork") and sys.platform.startswith("linux"),
+                         "fork + seccomp : Linux seulement")
+    def test_filter_probe_reports_what_the_child_saw(self):
+        # Filtre réel : il se pose (le fils sort en 0). prctl qui échoue : le fils sort en 1. Le
+        # processus de test lui-même n'est jamais filtré, tout se passe dans le fils.
+        self.assertTrue(supervisor.student_filter_available())
+        failing = (lambda *a: -1, 0, None)
+        with unittest.mock.patch.object(supervisor, "_STUDENT_FILTER", failing):
+            self.assertFalse(supervisor.student_filter_available())
+        raising = (unittest.mock.Mock(side_effect=OSError("refusé")), 0, None)
+        with unittest.mock.patch.object(supervisor, "_STUDENT_FILTER", raising):
+            self.assertFalse(supervisor.student_filter_available())
 
     def test_grading_mode_announces_after_setup_and_before_the_cases(self):
         self.assert_announced_between(supervisor.main, "langage non pris en charge",

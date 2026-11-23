@@ -366,9 +366,11 @@ public class DockerEvaluator {
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
         }
-        // Notation INCOMPLETE pour une cause NON IMPUTABLE — une erreur interne du superviseur,
-        // seule cause qui ne vient jamais de l'etudiant : sur le chemin interne, ce n'est pas une
-        // note (502, tentative a reprendre). Un budget epuise, lui, reste une note partielle :
+        // Notation INCOMPLETE : une erreur interne du superviseur en traitant le code soumis. Sur
+        // le chemin interne, ce n'est pas une note (502, tentative a reprendre), mais c'est
+        // COMPTE « sans verdict » (#116, S4) : l'extraction des signatures et les bouchons lisent
+        // le code soumis, qui peut donc la provoquer. Un bogue deterministe du superviseur sur
+        // une soumission honnete finit ainsi « a revoir ». Un budget epuise, lui, reste une note partielle :
         // dans le conteneur l'attente de place a deja eu lieu, le budget ne mesure que le
         // travail, et son epuisement est reproductible. Le « Tester » garde ses verdicts.
         // Les canaris sont lus AVANT : un verdict de falsification ne doit jamais devenir une

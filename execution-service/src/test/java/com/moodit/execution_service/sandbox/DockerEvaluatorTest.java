@@ -98,8 +98,8 @@ class DockerEvaluatorTest {
 
     @Test
     void incomplete_grading_is_internal_failure_but_visible_to_tester() {
-        // Le superviseur signale une notation INCOMPLETE pour cause non imputable : une erreur
-        // interne de son propre code, seule cause qui ne vient jamais de l'etudiant.
+        // Le superviseur signale une notation INCOMPLETE : une erreur interne de son propre code,
+        // survenue en traitant le code soumis (qui peut donc la provoquer).
         supervisorReturns("""
                 {"v":1,"results":[
                   {"index":0,"passed":true,"detail":null,"ms":1},

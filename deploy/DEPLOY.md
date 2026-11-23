@@ -417,7 +417,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
     et au troisième sa tentative est gardée « à revoir » au lieu d'être supprimée, pour une
     relance par l'enseignant (`docker/runners/README.md`, « Mort sans verdict : journal et
     plafond »). Le second est « indisponible » et ne compte pas. Un runner mort sans verdict
-    (muet ou illisible) après avoir pris en charge le code soumis compte aussi. Des canaris
+    (muet ou illisible) après avoir pris en charge le code soumis compte aussi, comme une
+    notation compilée « incomplète » (erreur interne du superviseur en traitant le code
+    soumis). Des canaris
     incohérents (falsification) l'emportent toujours : jamais de 502 dans ce cas. Cette variable est lue par execution-service **et**
   par core-service (son miroir de délai de lecture, cf. #216) : elle vient du `.env` commun, et
   la changer pour un seul des deux ferait abandonner des corrections encore en cours.
@@ -472,6 +474,10 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
     (`DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ`), et chaque notation répondrait 502 ; ce choix
     demande de revoir d'abord la protection du superviseur contre l'OOM
     (`docker/runners/README.md`, « Conteneur mort sans verdict »).
+  - Dans tous les cas, **pas de `userns-remap`** sur le démon des runners : il ne mappe que
+    65 536 UID par conteneur, et l'UID étudiant est tiré au-delà de 2²⁴ (limites par UID de
+    l'hôte non partagées entre conteneurs). Vérifier : `docker info --format
+    '{{.SecurityOptions}}'` ne contient ni `rootless` ni `userns`.
 
   En complément, faire tourner `execution-service` sous un utilisateur non root (`USER` dans son
   `Dockerfile`, `group_add` sur le GID du socket de l'hôte dans le compose) : ce GID dépend de

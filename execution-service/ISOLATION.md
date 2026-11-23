@@ -150,7 +150,8 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   seule raison, rend la valeur irréversible : le code soumis ne peut plus la redescendre au niveau
   du superviseur, ce qui lui permettait, avec de la mémoire noyau tenue hors de son RSS (memfd,
   tampons de sockets, VMA), de faire tuer le PID 1 (sortie 137 mesurée). Le code soumis n'a aucune
-  capacité. Requiert Docker rootful.
+  capacité. Requiert Docker rootful, sans `userns-remap` (l'UID étudiant est tiré au-delà de 2²⁴,
+  hors des 65 536 UID qu'il mappe).
 - **Verrous d'enregistrement POSIX refusés au code soumis** (filtre seccomp posé par le
   superviseur, `install_student_filter`) : le cgroup ne les compte pas, et 4 millions de verrous en
   16 s ajoutaient 872 Mo de mémoire noyau à l'hôte. `flock()` reste permis. Coût : SQLite sur

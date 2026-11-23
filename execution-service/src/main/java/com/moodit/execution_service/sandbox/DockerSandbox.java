@@ -150,7 +150,7 @@ public class DockerSandbox {
      * Mais une victime qui ne rend pas sa mémoire assez vite (tables de pages d'un processus
      * soumis, que le moissonneur de l'OOM ne libère pas) laisse l'OOM passer à la suivante : à
      * -500, le superviseur y passait encore (2 courses sur 6, sortie 137, sonde mmap sous
-     * 512 Mo) ; à -1000, aucune sur 6 — l'allocation attend que la victime ait fini de mourir.
+     * 512 Mo) ; à -1000, aucune sur 12 — l'allocation attend que la victime ait fini de mourir.
      *
      * <p>Contrepartie : une mémoire qui ne serait JAMAIS rendue (objet qui survit à son créateur)
      * bloquerait l'OOM au lieu de tuer le conteneur, jusqu'au mur. Ces objets sont bornés

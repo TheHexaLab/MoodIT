@@ -413,6 +413,7 @@ def _prepare_student_filter():
 
 _STUDENT_FILTER = _prepare_student_filter()
 PR_SET_NO_NEW_PRIVS, PR_SET_SECCOMP, SECCOMP_MODE_FILTER = 38, 22, 2
+STUDENT_FILTER_UNAVAILABLE = "filtre seccomp étudiant indisponible sur cet hôte"
 
 
 def install_student_filter():
@@ -432,6 +433,27 @@ def install_student_filter():
             os.write(2, b"superviseur: filtre seccomp etudiant non pose\n")
         finally:
             os._exit(127)
+
+
+def student_filter_available():
+    """Le filtre étudiant se pose-t-il sur cet hôte ? Sondé dans un fils jetable, AVANT la ligne
+    témoin. Faute de filtre, chaque processus étudiant meurt en 127 (install_student_filter,
+    fail-closed) : le code soumis ne tourne jamais et l'étudiant recevrait 0 sur des cas qu'il n'a
+    pas pu jouer. Constaté ici, c'est une panne de PLATEFORME (libc introuvable, seccomp refusé
+    par l'hôte), rendue comme telle — cause « indisponible », jamais comptée contre l'étudiant."""
+    if _STUDENT_FILTER is None:
+        return False
+    pid = os.fork()
+    if pid == 0:
+        try:
+            prctl, fprog_address, _ = _STUDENT_FILTER
+            ok = (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
+                  and prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, fprog_address, 0, 0) == 0)
+        except BaseException:
+            ok = False
+        os._exit(0 if ok else 1)
+    _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status) == 0
 
 
 def demote_student():
@@ -1360,8 +1382,10 @@ def exception_cause(e):
 
     Une OSError vient de l'ENVIRONNEMENT — disque plein, lien pose dans /box, table des processus
     saturee — que l'etudiant partage et peut provoquer : elle reste une note. Toute autre
-    exception est un bogue de LOGIQUE du superviseur, que le code soumis ne peut pas choisir de
-    declencher : seule celle-la rend la notation incomplete (502, tentative a reprendre)."""
+    exception est un bogue de LOGIQUE du superviseur : seule celle-la rend la notation incomplete
+    (502, tentative a reprendre). Ce bogue se declenche en traitant le code soumis (extraction des
+    signatures, bouchons), qui peut donc le provoquer : execution-service le compte « sans
+    verdict » (#116, S4), et un bogue deterministe sur une soumission honnete finit « a revoir »."""
     return "environnement" if isinstance(e, OSError) else "erreur"
 
 
@@ -1405,9 +1429,10 @@ def note_grader_output_lost(code, passed):
 def grading_incomplete(real_cases):
     """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
 
-    Vrai SEULEMENT si un cas a subi une erreur interne du superviseur : notre code a leve, ce
-    n'est jamais la faute de l'etudiant. Execution-service en fait un 502 sur le chemin
-    INTERNE — la tentative est supprimee, l'etudiant resoumet.
+    Vrai SEULEMENT si un cas a subi une erreur interne du superviseur : notre code a leve en
+    traitant le code soumis. Execution-service en fait un 502 sur le chemin INTERNE, de cause
+    « sans verdict » : la tentative est supprimee et l'etudiant resoumet, jusqu'au plafond de
+    core, au-dela duquel elle est gardee « a revoir » (#116, S4).
 
     Un budget global epuise reste IMPUTABLE (note partielle), sans exception : dans le conteneur,
     l'attente d'une place a deja eu lieu avant le demarrage, et le budget ne mesure que les
@@ -6204,6 +6229,9 @@ def exec_main(job):
     if run_cmd is None:
         print(json.dumps({"v": 1, "error": "runtime non pris en charge : " + runtime}))
         return
+    if not student_filter_available():
+        print(json.dumps({"v": 1, "error": STUDENT_FILTER_UNAVAILABLE}))
+        return
     announce_submitted_code_stage()
     env = exec_env(work)
 
@@ -6302,6 +6330,9 @@ def main():
     language = job["language"]
     if language not in RUNNERS:
         print(json.dumps({"v": 1, "error": "langage non pris en charge : " + language}))
+        return
+    if not student_filter_available():
+        print(json.dumps({"v": 1, "error": STUDENT_FILTER_UNAVAILABLE}))
         return
     announce_submitted_code_stage()
     if language == "go":

@@ -68,8 +68,9 @@ est pédagogique (varier les cas).
 
 ## Conteneur mort sans verdict
 
-Si le conteneur meurt sans imprimer son JSON, `DockerEvaluator` lève une `NoVerdictException` :
-502, la tentative est supprimée et l'étudiant resoumet. Aucune note n'est falsifiée ; le défaut
+Si le conteneur meurt sans imprimer son JSON une fois le code soumis pris en charge,
+`DockerEvaluator` lève une `NoVerdictException` (avant, une panne de plateforme : voir la ligne
+témoin plus bas) : 502, la tentative est supprimée et l'étudiant resoumet. Aucune note n'est falsifiée ; le défaut
 était le rejeu, à volonté sur une question à tentative unique. Il est désormais plafonné (voir
 « Mort sans verdict : journal et plafond » plus bas), et trois réglages ferment cette classe pour
 ce que le code soumis peut provoquer.
@@ -99,8 +100,10 @@ ce que le code soumis peut provoquer.
   l'allocation attend que la victime ait fini de mourir. Contrepartie : une mémoire jamais rendue
   bloquerait l'OOM au lieu de tuer le conteneur, jusqu'au mur. Les objets qui survivent à leur
   créateur sont bornés (tmpfs en taille et en inodes, IPC System V fermée) et tiennent sous la
-  mémoire du conteneur : mesuré ci-dessous à 512, 1024 et 1536 Mo. **Docker rootful requis** :
-  un démon rootless refuserait un `oom_score_adj` négatif, et chaque notation répondrait 502.
+  mémoire du conteneur : mesuré ci-dessous à 512, 1024 et 1536 Mo. **Docker rootful, sans
+  `userns-remap`, requis** : un démon rootless refuserait un `oom_score_adj` négatif, et chaque
+  notation répondrait 502 ; `userns-remap` ne mappe que 65 536 UID par conteneur, trop peu pour
+  l'UID étudiant tiré au-delà de 2²⁴ (voir plus bas).
 - **Verrous d'enregistrement et AIO noyau refusés au code soumis.** Un verrou `fcntl` est de la mémoire noyau
   que le cgroup NE COMPTE PAS (comptage retiré du noyau en 2021, revert 3754707bcc3e ; vérifié sur
   6.6) : 4 millions de verrous posés en 16 s ajoutaient 872 Mo à l'HÔTE et 0 au conteneur. Le VPS
@@ -248,6 +251,13 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   quiz) ; un 502 « sans verdict » ne lui rend la main que trois fois (voir « Mort sans verdict :
   journal et plafond » ci-dessus). Aucune correction n'est perdue (elles attendent dans la file de core),
   elles peuvent être retardées.
+- **Ce que la ligne témoin ne distingue pas.** Elle part juste avant que le superviseur prenne en
+  charge le code soumis. Une panne de PLATEFORME survenue après elle (bogue du superviseur dans
+  la substitution des gabarits, le verrouillage des sources, la préparation de Go) est donc
+  comptée « sans verdict » ; de même pour une notation compilée « incomplète » (erreur interne
+  du superviseur en traitant le code soumis, que le code soumis peut provoquer). Jamais de
+  fausse note : au pire une tentative « à revoir », et un bogue déterministe y reste après
+  relance — l'enseignant ne peut que relancer.
 - **Attente d'une place au-delà de `EXEC_INTERNAL_QUEUE_WAIT_MS` (429)** : tentative supprimée,
   non comptée. Pour un compilé, elle a lieu avant tout conteneur ; pour un interprété ou du SQL,
   qui prend une place PAR harnais, elle peut tomber entre deux harnais, après que le code soumis
