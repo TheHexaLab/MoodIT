@@ -58,9 +58,14 @@ public class DockerEvaluator {
      * verdicts partiels (« non exécuté : budget dépassé »), ce qui reste lisible pour le prof.
      */
     public static final long PUBLIC_WALL_MS = 4 * 60_000;
-    /** Verdicts des canaris que le superviseur sait rendre (cf. canary_verdict, supervisor.py). */
+    /**
+     * Verdicts des canaris acceptés (cf. canary_verdict, supervisor.py). « aucun » n'en fait pas
+     * partie : le superviseur ne le rend que pour un job SANS canaris, et HarnessProjects.build
+     * en ajoute toujours deux. Le recevoir veut dire « canaris non jugés » — exactement ce que la
+     * garde ci-dessous refuse.
+     */
     private static final java.util.Set<String> CANARY_VERDICTS =
-            java.util.Set.of("ok", "aucun", "indetermines", "incoherents");
+            java.util.Set.of("ok", "indetermines", "incoherents");
     /**
      * Événements du FONCTIONNEMENT NORMAL du superviseur (compilation du code soumis faite une
      * fois par job, puis rejouée) : journalisés en DEBUG, pour ne pas noyer les vrais signaux.

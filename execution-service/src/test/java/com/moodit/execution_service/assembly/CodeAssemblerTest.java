@@ -407,6 +407,73 @@ class CodeAssemblerTest {
     }
 
     @Test
+    void name_the_start_code_imposes_is_not_refused_but_an_added_one_still_is() {
+        // #22 : une fonction que l'ÉNONCÉ impose sous le nom d'une intégrée (`def sum`) était
+        // refusée (« Nom réservé ») et notait 0 une réponse juste. Le code de départ de
+        // l'enseignant la déclare : elle garde son mandataire sans être refusée. Un nom que
+        // l'étudiant AJOUTE (`abs`) reste refusé.
+        String py = assembler.assemble("Python",
+                "def abs(x):\n    return 0\ndef sum(l):\n    return 6\nclass len:\n    pass",
+                "return abs(sum([1, 2, 3]) - 6) < 1 and len() is not None", "N",
+                "def sum(l):\n    pass\nclass len:\n    pass").files().get(0).content();
+        assertThat(py)
+                .contains("[\"abs\"] if hasattr(__moodit_builtins, __n)")
+                .contains("def sum(*a):")
+                .contains("class len:");
+
+        String js = assembler.assemble("JavaScript",
+                "function parseInt(s){ return 1; }\nconst Number = (x) => 2;\nclass Map {}\n"
+                        + "function isNaN(x){ return false; }",
+                "return parseInt('1') + Number(1) === 3 && !isNaN(new Map());", "N",
+                "export function parseInt(s) {}\nconst Number = (x) => 0;\nclass Map {}")
+                .files().get(0).content();
+        assertThat(js).startsWith("const __moodit_shadow=[\"isNaN\"]");
+
+        String sh = assembler.assemble("Bash", "test() { echo 1; }\nexpr() { echo 2; }",
+                "[ \"$(test)\" = 1 ] && [ \"$(expr)\" = 2 ]", "N",
+                "function test() {\n  :\n}").files().get(0).content();
+        assertThat(sh).contains("for __moodit_n in expr; do");
+
+        // Tout imposé : aucune vérification n'est générée en bash.
+        String allImposed = assembler.assemble("Bash", "test() { echo 1; }", "[ \"$(test)\" = 1 ]",
+                "N", "test() { :; }").files().get(0).content();
+        assertThat(allImposed).doesNotContain("for __moodit_n in");
+
+        // Un nom imposé que le NOTEUR emploie lui-même reste vérifié : son mandataire remplacerait
+        // l'outil dans la boucle RPC (récursion sans fin, ou erreur), au lieu d'un refus expliqué.
+        assertThat(assembler.assemble("Python", "def print(x):\n    return x", "return print(1) == 1",
+                "N", "def print(x):\n    pass").files().get(0).content())
+                .contains("[\"print\"] if hasattr(__moodit_builtins, __n)");
+        // Outils du texte FIXE des mandataires : `list(a)` dans chaque mandataire de fonction,
+        // `object` et `globals` dans ceux de classe. Exemptés, le mandataire s'appelait lui-même.
+        for (String tool : List.of("list", "object", "globals")) {
+            assertThat(assembler.assemble("Python", "def " + tool + "(n):\n    return n * 2",
+                    "return " + tool + "(3) == 6", "N", "def " + tool + "(n):\n    pass")
+                    .files().get(0).content())
+                    .as(tool).contains("[\"" + tool + "\"] if hasattr(__moodit_builtins, __n)");
+        }
+        assertThat(assembler.assemble("JavaScript", "class Proxy { v() { return 1; } }",
+                "return new Proxy().v() === 1;", "N", "class Proxy {}").files().get(0).content())
+                .startsWith("const __moodit_shadow=[\"Proxy\"]");
+        assertThat(assembler.assemble("JavaScript", "function JSON() { return 1; }",
+                "return JSON() === 1;", "N", "function JSON() {}").files().get(0).content())
+                .startsWith("const __moodit_shadow=[\"JSON\"]");
+        assertThat(assembler.assemble("Bash", "head() { echo 1; }", "[ \"$(head)\" = 1 ]", "N",
+                "head() { :; }").files().get(0).content())
+                .contains("for __moodit_n in head; do");
+        // L'emplacement des noms refusés ne reste jamais dans le noteur produit.
+        for (String language : List.of("Python", "JavaScript", "Bash")) {
+            assertThat(assembler.assemble(language, "", "", "N", null).files().get(0).content())
+                    .doesNotContain("__moodit_shadow_slot__");
+        }
+
+        // Sans code de départ, comportement d'avant : tout nom employé est vérifié.
+        assertThat(assembler.assemble("Python", "def sum(l):\n    return 6", "return sum([1]) == 6",
+                "N", null).files().get(0).content())
+                .contains("[\"sum\"] if hasattr(__moodit_builtins, __n)");
+    }
+
+    @Test
     void harnessMentions_matches_whole_identifiers_only() {
         assertThat(CodeAssembler.harnessMentions("return max(1, 2) == 2", "max")).isTrue();
         assertThat(CodeAssembler.harnessMentions("return maximum(1, 2) == 2", "max")).isFalse();

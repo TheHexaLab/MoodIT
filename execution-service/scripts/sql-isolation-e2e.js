@@ -4,8 +4,10 @@
 // exec du runner (sqlite3 -safe -bail -batch :memory:). Nécessite node ET sqlite3 dans le PATH.
 // Cf. scripts/README.md. Aucun effet de bord (base en mémoire, jetable).
 const { spawnSync } = require('child_process');
-const NONCE = 'MOODIT_TEST_NONCE';
-const DS = NONCE + '_DUMP_START', DE = NONCE + '_DUMP_END';
+// Un nonce PAR PHASE, comme runSqlIsolated (#23) : le code soumis tourne en phase 1, rien de ce
+// qu'il y verrait ne doit valoir en phase 2.
+const DUMP_NONCE = 'MOODIT_TEST_DUMP_NONCE', NONCE = 'MOODIT_TEST_NONCE';
+const DS = DUMP_NONCE + '_DUMP_START', DE = DUMP_NONCE + '_DUMP_END';
 const VS = NONCE + '_VERDICT_START', VE = NONCE + '_VERDICT_END';
 
 const SETUP = "CREATE TABLE utilisateurs(nom TEXT, actif INTEGER);\n" +
@@ -20,10 +22,12 @@ function run(sql) {
   return Promise.resolve({ code: r.status === null ? -1 : r.status,
     stdout: r.stdout || '', stderr: r.stderr || '' });
 }
+// Comme ExecutionService.linesBetween : une sentinelle de début EN DOUBLE (sortie forgée) = échec.
 function between(out, a, b) {
   const L = (out || '').split('\n'); let s = -1, e = -1;
   for (let i = 0; i < L.length; i++) { const t = L[i].trim();
-    if (s < 0) { if (t === a) s = i; } else if (t === b) { e = i; break; } }
+    if (t === a) { if (s >= 0) return null; s = i; }
+    else if (s >= 0 && e < 0 && t === b) e = i; }
   return (s < 0 || e < 0) ? null : L.slice(s + 1, e);
 }
 function filterDump(lines) {

@@ -210,22 +210,48 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > JavaScript, TypeScript et Bash, pour un seul contrôle. Depuis #116, une fonction ou une classe
 > que le harnais nomme et qui porte le nom d'une intégrée du langage (`sum`, `max`, `len` en
 > Python ; `Number`, `parseInt` en JavaScript ; `test`, `factor` en Bash) est refusée avec
-> « Nom réservé », alors qu'elle se notait avant : le mandataire généré à ce nom remplaçait
-> l'intégrée dans le harnais. Une question dont l'énoncé impose un tel nom note donc 0 à tout le
-> monde, avec la consigne de renommer. Elle sort **BLOQUANT** (et son quiz est fermé par
-> `--unpublish`) : renommer la fonction dans l'énoncé, le code de départ et les harnais. Une
-> question interprétée sans code de départ sort À VÉRIFIER, comme une compilée : la rejouer avec
-> une solution (« Tester »).
+> « Nom réservé » : le mandataire généré à ce nom remplaçait l'intégrée dans le harnais, et un
+> `abs` ajouté par l'étudiant faisait passer `abs(f(x) - 3) < 1e-9`. Le refus épargne le nom que
+> le **code de départ** de la question déclare : c'est celui que l'énoncé impose (« écris
+> `sum(l)` »), et il se note comme avant (#22). Core envoie ce code de départ avec chaque
+> correction, et le script aussi. Une question au code de départ refusé malgré tout sort
+> **BLOQUANT** (garde-fou). Une question interprétée **sans code de départ** sort À VÉRIFIER,
+> comme une compilée : la rejouer avec une solution (« Tester ») ; si son énoncé impose un nom
+> d'intégrée, lui ajouter un code de départ qui le déclare. Même règle quand le code de départ
+> existe mais ne déclare pas ce nom (gabarit `def solution()` laissé tel quel alors que l'énoncé
+> demande `sum`) : le script ne peut pas le voir, puisque le code de départ ne nomme rien de
+> réservé. Chercher ces questions dans les énoncés et déclarer la fonction imposée dans leur code
+> de départ.
 >
 > Le contrôle se fait en **deux temps**, parce que le script interroge le nouveau noteur : lancé
 > seulement après la bascule, il laisse une fenêtre (plusieurs minutes par question compilée)
 > pendant laquelle un quiz au harnais cassé est déjà ouvert et note 0 sur une tentative unique.
 >
-> **1. AVANT la mise en prod (obligatoire).** Une pile locale de cette version
-> (`docker-compose-dev.yml` + images runner construites + execution-service lancé), chargée d'un
-> dump de la base de prod, puis `EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… python3
-> deploy/check-compiled-harnesses.py` (sous Docker Desktop, l'IP d'un conteneur n'est pas
-> joignable depuis l'hôte : `EXEC_URL` est obligatoire). Le harnais C/C++ dispose de
+> **1. AVANT la mise en prod (obligatoire).** Sur une machine de dev, avec cette version
+> extraite, les dix images runner construites (`docker/runners/build.sh`) et execution-service
+> lancé (`./gradlew bootRun` dans `execution-service/`, `.env` local), rejouer les questions de
+> la prod contre une **base jetable** chargée de son dernier dump. Pas la base de
+> `docker-compose-dev.yml` : son `db-migrate` y ajouterait les données de démo.
+>
+> ```bash
+> # Mêmes POSTGRES_USER / POSTGRES_DB que la prod (.env.docker), pour que le dump s'applique tel quel.
+> docker run -d --name moodit_precheck -e POSTGRES_USER="$POSTGRES_USER" \
+>   -e POSTGRES_PASSWORD=precheck -e POSTGRES_DB="$POSTGRES_DB" postgres:16
+> # L'image redémarre une fois après son initialisation : attendre le DEUXIÈME « ready ».
+> until [ "$(docker logs moodit_precheck 2>&1 | grep -c 'ready to accept connections')" -ge 2 ]; do sleep 1; done
+> # Dernier dump pris par update.sh sur le serveur (backups/db-*.sql.gz), copié en local.
+> gunzip -c db-AAAAMMJJ-HHMMSS.sql.gz | docker exec -i moodit_precheck psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+> # Migrations de CETTE version seulement (V4 et suivantes), sans la démo.
+> docker run --rm --network container:moodit_precheck -v "$PWD/db:/flyway/db:ro" flyway/flyway:13.10.0 \
+>   -url="jdbc:postgresql://localhost:5432/$POSTGRES_DB" -user="$POSTGRES_USER" -password=precheck \
+>   -locations=filesystem:/flyway/db/migration -placeholderReplacement=false migrate
+> PG_CONTAINER=moodit_precheck EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… \
+>   python3 deploy/check-compiled-harnesses.py
+> docker rm -f moodit_precheck
+> ```
+>
+> `EXEC_URL` est obligatoire sous Docker Desktop : l'IP d'un conteneur n'y est pas joignable
+> depuis l'hôte. Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
 > Corriger dans l'éditeur de la prod encore en place les harnais sortis BLOQUANT, ou fermer leurs
 > quiz, **avant** de lancer `./deploy/update.sh` ; noter les À VÉRIFIER à rejouer après. Si ce
@@ -256,10 +282,26 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > Avec l'accord de l'enseignant, supprimer ces lignes (`DELETE FROM Attempt WHERE id IN (…)`,
 > les réponses suivent par cascade) rend leur tentative unique aux étudiants concernés.
 >
-> **Retour arrière.** Tant que la purge ci-dessous n'est pas faite, revenir au commit précédent
-> (`git reset --hard <commit>` puis `./deploy/update.sh`, ou le rollback automatique du script)
-> retrouve Piston tel quel : son image et son volume (qui porte ses paquets) sont encore là. `V4` est
-> additive (colonne nullable), l'ancien core démarre donc avec elle. `V5`, elle, **n'est pas
+> **Retour arrière.** Un échec pendant `update.sh` déclenche son rollback automatique. Après
+> coup, **ne pas** relancer `update.sh` sur un commit plus ancien : le script revient toujours à
+> `origin/deploiement`, donc à la version qu'on veut quitter (et un `update.sh` en cron annule de
+> même un retour fait à la main). Deux voies :
+>
+> - **durable** : un `git revert` de la fusion sur `main`, puis la PR `main → deploiement`
+>   habituelle ; `update.sh` déploie alors l'ancienne version ;
+> - **urgence**, en attendant : suspendre la ligne `update.sh` du cron (`crontab -e`), puis
+>
+>   ```bash
+>   git reset --hard <commit d'avant la fusion>
+>   docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build --remove-orphans
+>   ```
+>
+>   et réactiver le cron une fois le revert arrivé sur `deploiement`.
+>
+> Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
+> image et son volume (qui porte ses paquets) sont encore là, et le compose recrée ses conteneurs.
+> `V4`, `V6` et `V7` sont additives (colonne nullable, nouvelle table, colonne à valeur par
+> défaut) : l'ancien core, en `ddl-auto=validate`, démarre avec elles. `V5`, elle, **n'est pas
 > réversible** : elle a réécrit les six gabarits de harnais compilés au format booléen, et
 > l'ancienne version les lirait tels quels — après un retour arrière, restaurer ces gabarits depuis
 > la sauvegarde que `update.sh` prend avant les migrations, ou les recréer dans l'éditeur.
@@ -268,8 +310,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > l'image Piston et à réinstaller ses onze paquets (`piston-init`, réseau requis, plusieurs minutes
 > sans exécution de code). Ne la faire qu'une fois la bascule validée —
 > `check-compiled-harnesses.py` en sortie 0, puis au moins un quiz de code corrigé de bout en bout
-> en prod. D'ici là, ses conteneurs (`restart: unless-stopped`) survivent au retrait du compose et
-> gardent le volume occupé, sans gêner la nouvelle version :
+> en prod. Le premier `update.sh` de cette version retire déjà ses conteneurs (`--remove-orphans`)
+> ; l'image et le volume restent, sans gêner la nouvelle version. La purge les supprime :
 >
 > ```bash
 > docker rm -f moodit_piston moodit_piston_init 2>/dev/null

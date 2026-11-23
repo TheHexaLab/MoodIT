@@ -26,8 +26,10 @@ Deux MODES (job.json) :
   - « exec » : exécution GÉNÉRIQUE d'un programme assemblé (/box/src/…) — reprend le rôle de
     Piston pour les interprétés/SQL/vues (programmes RPC 2-processus à nonce, inchangés) et pour
     le bouton « Exécuter » de tous les langages. Tout y tourne sous l'UID étudiant (le noteur
-    assemblé embarque sa propre protection : nonce, auto-suppression), avec une étape de
-    compilation (root) pour les langages qui en ont une. Sortie : {compile?, run} à la Piston.
+    assemblé embarque sa propre protection : nonce, auto-suppression), compilation comprise
+    pour les langages qui en ont une (preexec_student_compile : jamais root, le compilateur
+    obéit à un texte choisi par l'étudiant). /box reste root 0755 ; les sorties sont écrites
+    dans /box/.sorties (root, 0700). Sortie : {compile?, run} à la Piston.
 
 Entrée  : job.json + les sources, copiés par execution-service AVANT le démarrage dans
           /opt/moodit/staging (sentinelle .ready en dernier), puis déplacés ici dans le
@@ -714,13 +716,67 @@ def reset_go_student_dirs(keep_cache=False):
         if (keep_cache and name == "gocache_etu" and os.path.isdir(fpath)
                 and not os.path.islink(fpath)):
             continue
-        if os.path.islink(fpath) or os.path.isfile(fpath):
-            os.unlink(fpath)
-        else:
-            shutil.rmtree(fpath, ignore_errors=True)
+        remove_tree(fpath)
         os.makedirs(fpath, exist_ok=True)
         os.chown(fpath, STUDENT_UID, STUDENT_GID)
         os.chmod(fpath, 0o700)
+
+
+RM = "/bin/rm"
+
+
+def _remove_tree_iterative(path):
+    """Repli sans `rm` (tests hors image) : parcours par pile, sans récursion Python ni suivi de
+    lien. Ne lève jamais."""
+    stack, seen = [path], []
+    while stack:
+        current = stack.pop()
+        seen.append(current)
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        else:
+                            os.unlink(entry.path)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    for directory in reversed(seen):
+        try:
+            os.rmdir(directory)
+        except OSError:
+            continue
+
+
+def remove_tree(path):
+    """Supprime `path` (dossier ou fichier) sans suivre de lien, et SANS JAMAIS LEVER.
+
+    shutil.rmtree est récursif sous le Python des images (3.11, 3.12.3) : une arborescence de
+    plus d'un millier de niveaux, que le code soumis crée en quelques millisecondes dans /tmp ou
+    dans son dossier de travail, lui faisait lever RecursionError — qui n'est pas une OSError,
+    donc ni `ignore_errors` ni les `except OSError` ne l'arrêtaient. Le superviseur mourait sans
+    JSON : un 502 « sans verdict » à la demande de l'étudiant, celui que exception_cause existe
+    pour refuser. `rm -rf` (coreutils, parcours fts) ne dépend pas de la profondeur."""
+    try:
+        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+            os.unlink(path)
+            return
+        if not os.path.lexists(path):
+            return
+    except OSError:
+        return
+    if os.path.exists(RM):
+        try:
+            subprocess.run([RM, "-rf", "--one-file-system", "--", path],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=120, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if os.path.lexists(path):
+        _remove_tree_iterative(path)
 
 
 def purge_shared_dirs():
@@ -730,13 +786,7 @@ def purge_shared_dirs():
         try:
             for ident in os.listdir(directory):
                 fpath = os.path.join(directory, ident)
-                try:
-                    if os.path.isdir(fpath) and not os.path.islink(fpath):
-                        shutil.rmtree(fpath, ignore_errors=True)
-                    else:
-                        os.unlink(fpath)
-                except OSError:
-                    continue
+                remove_tree(fpath)
         except OSError:
             continue
 
@@ -855,6 +905,33 @@ def replay_output(path, text):
         f.write(text)
 
 
+def walk_tree(top):
+    """os.walk sans RÉCURSION Python ni suivi de lien : (dossier, sous-dossiers, autres entrées).
+
+    os.walk est récursif avant Python 3.12, et la plupart des images ont 3.11 : un arbre de plus
+    d'un millier de niveaux — un `package a.a.a…` que javac déploie en dossiers, un mkdir/chdir
+    en boucle du code soumis — lui faisait lever RecursionError, qui n'est pas une OSError et
+    tuait le cas en « erreur interne » (502, réessai offert). Un lien, même vers un dossier, est
+    rangé avec les autres entrées et jamais parcouru ; un dossier illisible est sauté."""
+    stack = [top]
+    while stack:
+        root = stack.pop()
+        try:
+            with os.scandir(root) as entries:
+                listed = list(entries)
+        except OSError:
+            continue
+        dirs, others = [], []
+        for entry in listed:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+            (dirs if is_dir else others).append(entry.name)
+        yield root, dirs, others
+        stack.extend(os.path.join(root, name) for name in reversed(dirs))
+
+
 def artifact_files(path):
     """Fichiers d'un artefact (fichier ou dossier) : liste de chemins relatifs ("" pour un
     fichier seul), ou None s'il ne se garde pas — lien, fichier spécial, plus de
@@ -867,7 +944,7 @@ def artifact_files(path):
     if not stat.S_ISDIR(st.st_mode):
         return None
     files, total = [], 0
-    for root, dirs, names in os.walk(path, followlinks=False):
+    for root, dirs, names in walk_tree(path):
         for name in dirs + names:
             full = os.path.join(root, name)
             st = os.lstat(full)
@@ -924,7 +1001,7 @@ def save_artifact(path, key):
     except OSError:
         # Rien de gardé : les cas suivants recompilent, comme avant.
         if os.path.isdir(dest) and not os.path.islink(dest):
-            shutil.rmtree(dest, ignore_errors=True)
+            remove_tree(dest)
         else:
             try:
                 os.unlink(dest)
@@ -943,7 +1020,7 @@ def restore_artifact(artifact, path):
         if not is_dir:
             copy_regular(saved, path, owner)
             return True
-        for root, _, names in os.walk(saved):
+        for root, _, names in walk_tree(saved):
             target_dir = os.path.normpath(os.path.join(path, os.path.relpath(root, saved)))
             if not os.path.isdir(target_dir):
                 os.mkdir(target_dir, 0o700)
@@ -1029,7 +1106,7 @@ def set_owner_mode_tree(tree_root, uid, gid, file_mode, dir_mode):
     """set_owner_mode sur un arbre, racine comprise. Un lien n'est ni suivi ni modifie."""
     if os.path.islink(tree_root):
         return
-    for r, ds, fs in os.walk(tree_root):
+    for r, ds, fs in walk_tree(tree_root):
         for ident in ds + fs:
             fpath = os.path.join(r, ident)
             if not os.path.islink(fpath):
@@ -1041,7 +1118,7 @@ def chown_tree(tree_root, uid, gid):
     """chown recursif, racine comprise — sans suivre aucun lien (cf. lock_sources)."""
     if os.path.islink(tree_root):
         return
-    for r, ds, fs in os.walk(tree_root):
+    for r, ds, fs in walk_tree(tree_root):
         for ident in ds + fs:
             os.chown(os.path.join(r, ident), uid, gid, follow_symlinks=False)
     os.chown(tree_root, uid, gid)
@@ -1094,9 +1171,10 @@ def preexec_compile():
 
 
 def open_output(path):
-    """Ouvre un fichier de sortie SANS suivre un lien symbolique : en mode exec, /box
-    appartient à l'UID étudiant, qui pouvait remplacer run.out par un lien et faire écrire
-    root ailleurs (nuisance dans un conteneur jetable, mais primitive gratuite à supprimer).
+    """Ouvre un fichier de sortie SANS suivre un lien symbolique. Défense en profondeur : les
+    sorties vivent dans des dossiers root (/box/.sorties en 0700 en mode exec, le dossier du
+    cas en mode evaluate), mais un chemin que l'UID étudiant pourrait un jour atteindre ne doit
+    pas pouvoir faire écrire root ailleurs par un lien.
     Si le chemin EST un lien, O_NOFOLLOW échoue : on le retire et on recommence — sans ça,
     l'OSError remontait jusqu'en haut et le job entier répondait 502."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
@@ -1340,7 +1418,7 @@ def lock_sources(src_dir):
     est ignoree ; un lien rencontre est change sans etre suivi (lchown), jamais chmode."""
     if os.path.islink(src_dir):
         return
-    for root, dirs, files in os.walk(src_dir):
+    for root, dirs, files in walk_tree(src_dir):
         for name in dirs + files:
             path = os.path.join(root, name)
             os.chown(path, 0, 0, follow_symlinks=False)
@@ -1689,6 +1767,53 @@ def java_class_api(javap_output):
     statics = {(r, n, tuple(t)) for r, n, t in java_signatures(javap_output)}
     method_list = [m for m in method_list if (m[0], m[1], tuple(m[2])) not in statics]
     return binary_name.replace("$", "."), ctors, method_list
+
+
+JAVAP_EXTENDS = re.compile(r"^[\w ]*?\bclass\s+([\w.$]+)\s+extends\s+([\w.$]+)", re.M)
+
+
+def java_superclass(javap_output):
+    """Classe mère déclarée dans un bloc javap (forme source `Outer.Inner`), ou None. PURE."""
+    found = JAVAP_EXTENDS.search(javap_output or "")
+    return found.group(2).replace("$", ".") if found else None
+
+
+def inherit_instance_methods(apis, parents, hiding=None):
+    """Ajoute à chaque classe les méthodes d'instance HÉRITÉES d'une classe du code soumis.
+    FONCTION PURE (testée).
+
+    `apis` : nom → (constructeurs, méthodes d'instance) ; `parents` : nom → classe mère (ou
+    None). Rend un nouveau dict nom → méthodes d'instance, celles de la classe d'abord, puis
+    celles de ses ancêtres qu'elle ne redéfinit pas (même nom, mêmes types). Sans cela, le
+    bouchon ne portait que les méthodes DÉCLARÉES : `new Carre(3).aire()` avec un `aire()`
+    hérité de `Forme` ne compilait pas, et l'étudiant qui hérite — l'esprit d'un exercice
+    d'héritage — recevait 0, quand la solution du prof, qui redéfinissait, passait. Une chaîne
+    circulaire (impossible en Java compilé) s'arrête au premier nom déjà vu.
+
+    `hiding` (C++) : classe → noms de méthodes qu'elle DÉCLARE, toutes sections et tous types
+    confondus. En C++, déclarer `aire(int)` dans `Carre` masque TOUTES les surcharges `aire` de
+    `Forme` : hériter `aire()` quand même faisait générer au serveur un appel qui ne compile pas
+    (« Échec de compilation » sur une réponse juste). Java et C# résolvent les surcharges en
+    remontant la hiérarchie : pas de masquage par nom (None)."""
+    merged = {}
+    for name, (_ctors, own) in apis.items():
+        methods = list(own)
+        seen = {(m[1], tuple(m[2])) for m in methods}
+        hidden = set(hiding.get(name, ())) if hiding is not None else set()
+        visited = {name}
+        ancestor = parents.get(name)
+        while ancestor in apis and ancestor not in visited:
+            visited.add(ancestor)
+            for method in apis[ancestor][1]:
+                key = (method[1], tuple(method[2]))
+                if key not in seen and method[1] not in hidden:
+                    seen.add(key)
+                    methods.append(method)
+            if hiding is not None:
+                hidden |= set(hiding.get(ancestor, ()))
+            ancestor = parents.get(ancestor)
+        merged[name] = methods
+    return merged
 
 
 def java_object_stub(source_name, ctors, method_list, statics=()):
@@ -2177,18 +2302,23 @@ public final class MooditServer {
         int handle = Integer.parseInt(entre(ligne + ",", "\\"handle\\":", ",").trim());
         Object[] args = decoupe(entre(ligne, "\\"args\\":[", "]"));
         Object instance = OBJETS.get(handle);
-        for (Method m : instance.getClass().getDeclaredMethods()) {
-            if (!m.getName().equals(nom) || !signe(m.getParameterTypes(), appel, args.length)) {
-                continue;
+        // Classe de l'objet D'ABORD, puis ses classes meres : une methode heritee (`aire()` de
+        // `Forme` sur un `Carre`) est declaree par le bouchon, elle doit etre trouvee ici.
+        for (Class<?> k = instance.getClass(); k != null; k = k.getSuperclass()) {
+            for (Method m : k.getDeclaredMethods()) {
+                if (!m.getName().equals(nom) || java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        || !signe(m.getParameterTypes(), appel, args.length)) {
+                    continue;
+                }
+                m.setAccessible(true);
+                Class<?>[] types = m.getParameterTypes();
+                Object[] convertis = new Object[args.length];
+                for (int i = 0; i < args.length; i++) {
+                    convertis[i] = convertit(types[i], (String) args[i]);
+                }
+                return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":"
+                        + encode(m.invoke(instance, convertis)) + "}";
             }
-            m.setAccessible(true);
-            Class<?>[] types = m.getParameterTypes();
-            Object[] convertis = new Object[args.length];
-            for (int i = 0; i < args.length; i++) {
-                convertis[i] = convertit(types[i], (String) args[i]);
-            }
-            return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":"
-                    + encode(m.invoke(instance, convertis)) + "}";
         }
         throw new NoSuchMethodException(nom);
     }
@@ -3377,7 +3507,8 @@ def cpp_object_api(source):
     Le corps de la classe est découpé par appariement d'accolades, et seules les déclarations de
     la section PUBLIQUE comptent (une `class` commence en privé, une `struct` en public)."""
     src_text = source or ""
-    result = []
+    found = []            # (classe, constructeurs, méthodes, instanciable), dans l'ordre du source
+    apis, parents, hiding = {}, {}, {}
     cover = span_cover(cpp_class_spans(src_text) + cpp_namespace_spans(src_text))
     heads = [m.start() for m in CPP_TEMPLATE_HEAD.finditer(src_text)]
     bounds = [m.start() for m in CPP_STATEMENT_END.finditer(src_text)]
@@ -3399,12 +3530,19 @@ def cpp_object_api(source):
         body = src_text[begin + 1:finish]
         # Classe ABSTRAITE (une methode virtuelle pure) : elle ne s'instancie pas, et le
         # `push_back(K(...))` de l'aiguillage faisait refuser tout le programme de l'etudiant
-        # (« Echec de compilation » sur un exercice d'heritage juste). Ses classes derivees,
-        # elles, restent proxifiees.
-        if CPP_PURE_VIRTUAL.search(body):
-            continue
-        public = src_text[klass.start():begin].lstrip().startswith("struct")
+        # (« Echec de compilation » sur un exercice d'heritage juste). Elle n'est pas proxifiee,
+        # mais ses methodes publiques comptent pour ses classes derivees (heritage).
+        abstract = bool(CPP_PURE_VIRTUAL.search(body))
+        is_struct = src_text[klass.start():begin].lstrip().startswith("struct")
+        public = is_struct
+        # Base PUBLIQUE (`: public Forme`, ou toute base d'une struct) : ses methodes publiques
+        # s'appellent sur la derivee. L'heritage d'une `class` est PRIVE par defaut.
+        base = re.match(r"\s*:\s*(public|protected|private)?\s*(?:virtual\s+)?(\w+)",
+                        src_text[klass.end():begin])
+        if base and (base.group(1) == "public" or (base.group(1) is None and is_struct)):
+            parents[class_ident] = base.group(2)
         ctors, method_list = [], []
+        declared_names, unhidden = set(), set()
         declares_ctor = False
         depths = _closings(src_text)[0]
         level = depths[begin] + 1
@@ -3423,6 +3561,19 @@ def cpp_object_api(source):
             elif bare_line.startswith("private:") or bare_line.startswith("protected:"):
                 public = False
                 bare_line = bare_line.split(":", 1)[1].strip()
+            # Noms de methodes DECLARES, toutes sections et tous types : ils masquent ceux de la
+            # base (cf. inherit_instance_methods). Lus dans la TETE de declaration seulement :
+            # un appel `aire()` dans le corps d'une autre methode ne declare rien.
+            # Jusqu'au premier `=` : `int c = f(2);` initialise un champ, il ne declare pas `f`
+            # (un argument par defaut `f(int a = 3)` garde, lui, son nom avant le `=`).
+            head = CPP_QUALIF.sub("", bare_line.split("{", 1)[0].split("=", 1)[0])
+            using = re.match(r"using\s+[\w:]+::(\w+)\s*;", bare_line)
+            if using:
+                unhidden.add(using.group(1))
+            else:
+                declared = re.search(r"(~?\w+)\s*\(", head)
+                if declared and declared.group(1) not in (class_ident, "~" + class_ident):
+                    declared_names.add(declared.group(1))
             # Un constructeur DECLARE, meme prive ou non transportable, retire le constructeur
             # par defaut implicite (voir plus bas).
             if re.match(re.escape(class_ident) + r"\s*\(", CPP_QUALIF.sub("", bare_line)):
@@ -3448,9 +3599,17 @@ def cpp_object_api(source):
         # genere qui ne compile pas casserait le programme de l'etudiant.
         if not declares_ctor and ":" not in src_text[klass.end():begin]:
             ctors = [[]]
-        if ctors and method_list:
-            result.append((class_ident, ctors, method_list))
-    return result
+        if class_ident not in apis:
+            apis[class_ident] = (ctors, method_list)
+            hiding[class_ident] = declared_names - unhidden
+            found.append((class_ident, ctors, not abstract))
+    # Methodes HERITEES d'une base publique du code soumis : `Carre c(3); c.aire()` avec un
+    # `aire()` de `Forme` compile cote serveur (recherche de nom C++), mais le bouchon ne le
+    # portait pas — et une derivee sans methode propre n'etait meme pas proxifiee (« 'Carre'
+    # was not declared »). 0 sur une reponse juste qui herite au lieu de redefinir.
+    merged = inherit_instance_methods(apis, parents, hiding)
+    return [(name, ctors, merged[name]) for name, ctors, concrete in found
+            if concrete and ctors and merged[name]]
 
 
 def _member_pieces(body, offset, depths, level):
@@ -5016,8 +5175,34 @@ def cs_object_api(source, klass):
     if not declares and re.search(r"\bclass\s+%s\b" % re.escape(klass), source or ""):
         ctors = [[]]
     method_list = [(ret, ident, list(types))
-                   for ret, ident, types in _cs_instance_members(source or "").get(klass, [])]
+                   for ret, ident, types in _cs_members_with_inherited(source or "").get(klass, [])]
     return ctors, dedupe_signatures(method_list)
+
+
+# `class Carre : Forme, IComparable` : la PREMIERE base est la classe mère quand c'en est une.
+CS_BASE = re.compile(r"\bclass\s+(\w+)\s*(?:<[^<>{};]*>)?\s*:\s*([\w.]+)")
+
+
+@functools.lru_cache(maxsize=8)
+def _cs_members_with_inherited(src_text):
+    """Comme _cs_instance_members, plus les méthodes HÉRITÉES d'une classe du même texte.
+    Mémoïsé ; ne pas modifier le résultat.
+
+    Le bouchon ne portait que les méthodes déclarées : `new Carre(3).Aire()` avec un `Aire()`
+    hérité de `Forme` ne compilait pas (CS1061), et l'étudiant qui hérite recevait 0. Le serveur
+    les trouve déjà (GetMethods sans DeclaredOnly)."""
+    own = _cs_instance_members(src_text)
+    classes = set(CS_CLASS.findall(src_text))
+    parents = {}
+    for child, base in CS_BASE.findall(src_text):
+        base = base.split(".")[-1]
+        if base in classes and child not in parents:
+            parents[child] = base
+    apis = {name: ((), methods) for name, methods in own.items()}
+    for name in classes:
+        apis.setdefault(name, ((), []))
+    merged = inherit_instance_methods(apis, parents)
+    return {name: methods for name, methods in merged.items() if methods}
 
 
 CS_CLASS = re.compile(r"\bclass\s+(\w+)")
@@ -5341,7 +5526,7 @@ def cs_object_classes(source):
             declared.add(ident)
             if _cs_param_types(params) is not None:
                 usable.add(ident)
-    members = _cs_instance_members(src_text)
+    members = _cs_members_with_inherited(src_text)
     return [n for n in top_level
             if (n in usable or n not in declared) and members.get(n)]
 
@@ -5530,9 +5715,21 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     obj_list = []
     class_statics = {}
     own_ctors, own_instance = (), ()
+    blocks = {}
+    apis, parents = {}, {}
     for block in re.split(r"(?=^Compiled from )", javap, flags=re.M):
         source_name, ctors, instance = java_class_api(block)
-        if not source_name or not (ctors or instance):
+        if not source_name:
+            continue
+        blocks[source_name] = block
+        apis[source_name] = (ctors, instance)
+        parents[source_name] = java_superclass(block)
+    # Méthodes héritées d'une autre classe du code soumis : le serveur les trouve en remontant
+    # les classes mères (methode()), le bouchon doit donc les déclarer aussi.
+    inherited = inherit_instance_methods(apis, parents)
+    for source_name, block in blocks.items():
+        ctors, instance = apis[source_name][0], inherited[source_name]
+        if not (ctors or instance):
             continue
         if source_name == klass:
             # La classe publique peut ÊTRE l'objet à instancier (question POO dont la classe
@@ -6025,7 +6222,7 @@ RUNNERS = {
 def substitute_placeholders(case_dir, mapping):
     """Remplace les gabarits des canaris (__MOODIT_A__/__MOODIT_B__) dans les sources du cas
     par les valeurs tirées au sort. Le NONCE, lui, ne passe jamais par une source."""
-    for root, _, files in os.walk(os.path.join(case_dir, "src")):
+    for root, _, files in walk_tree(os.path.join(case_dir, "src")):
         for name in files:
             # Le HARNAIS seulement : le fichier etudiant n'est jamais reecrit (defense en
             # profondeur — un code contenant __MOODIT_ est deja refuse en amont).
@@ -6208,7 +6405,7 @@ def exec_main(job):
     for name in ("home", "tmp"):
         os.makedirs(os.path.join(work, name), exist_ok=True)
     # Tout le job est non fiable : sources possédées par l'étudiant (le grader s'auto-supprime).
-    for root, dirs, files in os.walk(BOX):
+    for root, dirs, files in walk_tree(BOX):
         for name in dirs + files:
             os.chown(os.path.join(root, name), STUDENT_UID, STUDENT_GID)
     # /box lui-même reste à ROOT (0755), et les sorties capturées vivent dans un dossier root
@@ -6297,8 +6494,33 @@ def wait_for_files():
     for name in os.listdir(STAGING):
         if name != ".ready":
             shutil.move(os.path.join(STAGING, name), os.path.join(BOX, name))
-    shutil.rmtree(STAGING, ignore_errors=True)
+    remove_tree(STAGING)
     return True
+
+
+def after_case_cleanup(language, case):
+    """Isolation inter-cas : un processus étudiant qui a fait fork + setsid a quitté le groupe tué
+    au timeout — il survivrait au cas et pourrait peser sur (voire tracer, même UID) les cas
+    suivants. Balayage de TOUT processus UID étudiant, puis /tmp et /dev/shm vidés."""
+    kill_student_survivors()
+    purge_shared_dirs()
+    if language == "go":
+        # GOPATH étudiant vidé à chaque cas (aucune dépendance : il ne sert à rien d'un cas
+        # à l'autre). Le GOCACHE est gardé : le vider recompilerait la bibliothèque standard
+        # à chaque cas. Le code soumis peut y écrire, mais n'y nuit qu'à SA propre note (cas
+        # suivants sautés, cause « espace ») : il ne peut pas y forger de verdict.
+        reset_go_student_dirs(keep_cache=True)
+    # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
+    # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
+    # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
+    # « Échec de compilation », voire OOM). Le gocache partagé, lui, sert aux cas suivants.
+    # Le cas est noté : TOUT son répertoire est libéré, work/ compris (HOME et TMPDIR de
+    # l'étudiant — ses seuls points d'écriture). Ne libérer que les caches de build laissait
+    # un code qui écrit des fichiers saturer le tmpfs /box, partagé par tous les cas : les
+    # suivants ne compilaient plus, canaris inclus, et la soumission — honnête mais boguée —
+    # était étiquetée « falsification probable ». Seule exception : le GOCACHE étudiant (Go
+    # seulement, hors cases/), gardé d'un cas à l'autre (voir reset_go_student_dirs).
+    remove_tree(os.path.join(BOX, "cases", str(case["index"])))
 
 
 def main():
@@ -6444,28 +6666,13 @@ def main():
             event("erreur_superviseur", case=case["index"], detail=repr(e))
         outcomes[case["index"]] = outcome
         timings[case["index"]] = ms
-        # Isolation inter-cas : un processus étudiant qui a fait fork + setsid a quitté le
-        # groupe tué au timeout — il survivrait au cas et pourrait peser sur (voire tracer,
-        # même UID) les cas suivants. Balayage de TOUT processus UID étudiant entre deux cas.
-        kill_student_survivors()
-        purge_shared_dirs()
-        if language == "go":
-            # GOPATH étudiant vidé à chaque cas (aucune dépendance : il ne sert à rien d'un cas
-            # à l'autre). Le GOCACHE est gardé : le vider recompilerait la bibliothèque standard
-            # à chaque cas. Le code soumis peut y écrire, mais n'y nuit qu'à SA propre note (cas
-            # suivants sautés, cause « espace ») : il ne peut pas y forger de verdict.
-            reset_go_student_dirs(keep_cache=True)
-        # Le tmpfs /box est compté dans la MÉMOIRE du conteneur : les artefacts de build du cas
-        # (target cargo ~50-100 Mo, HOME/TMP de compilation) ne servent plus après son verdict —
-        # les accumuler faisait saturer une question Rust à beaucoup de cas (ENOSPC déguisé en
-        # « Échec de compilation », voire OOM). Le gocache partagé, lui, sert aux cas suivants.
-        # Le cas est noté : TOUT son répertoire est libéré, work/ compris (HOME et TMPDIR de
-        # l'étudiant — ses seuls points d'écriture). Ne libérer que les caches de build laissait
-        # un code qui écrit des fichiers saturer le tmpfs /box, partagé par tous les cas : les
-        # suivants ne compilaient plus, canaris inclus, et la soumission — honnête mais boguée —
-        # était étiquetée « falsification probable ». Seule exception : le GOCACHE étudiant (Go
-        # seulement, hors cases/), gardé d'un cas à l'autre (voir reset_go_student_dirs).
-        shutil.rmtree(os.path.join(BOX, "cases", str(case["index"])), ignore_errors=True)
+        # Nettoyage d'après-cas (after_case_cleanup) protégé : une exception ici, hors du try du cas, tuait le
+        # superviseur sans JSON (502 « sans verdict », réessai offert au code soumis).
+        try:
+            after_case_cleanup(language, case)
+        except Exception as e:
+            log("superviseur: nettoyage après le cas %s : %r" % (case["index"], e))
+            event("erreur_superviseur", case=case["index"], detail=repr(e))
 
     # Verdict des canaris : significatif seulement si leurs runs ont eu lieu (sinon l'échec de
     # compilation du code étudiant les explique déjà, et les vrais cas échouent de toute façon).

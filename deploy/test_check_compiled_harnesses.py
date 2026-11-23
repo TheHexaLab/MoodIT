@@ -175,9 +175,10 @@ class ClassifyTest(unittest.TestCase):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
 
     def test_nom_reserve_d_une_question_interpretee_bloquant(self):
-        # Refus rendu par CodeAssembler (Python, JavaScript/TypeScript, Bash) dès que le code de
-        # départ déclare un symbole que le harnais nomme et qui masque une intégrée : la
-        # question note 0 à toute réponse qui suit l'énoncé.
+        # Refus rendu par CodeAssembler (Python, JavaScript/TypeScript, Bash) pour un symbole
+        # que le harnais nomme et qui masque une intégrée. Le code de départ partant avec la
+        # demande, ses propres noms n'y sont jamais refusés : ce refus est un garde-fou (noteur
+        # d'une autre version), et il vaudrait pour toute réponse qui suit l'énoncé.
         for detail in ("Nom réservé : « sum » est réservé : il masque une fonction intégrée "
                        "de Python, que le harnais peut appeler. Renommer cette fonction ou "
                        "cette classe, puis resoumettre.\n",
@@ -216,6 +217,66 @@ class ClassifyTest(unittest.TestCase):
         with mock.patch.object(chk, "evaluate", return_value=failed):
             status, lines = chk.check_question("http://x", "t", question)
         self.assertEqual((chk.OK, []), (status, lines))
+
+    def test_la_demande_porte_le_code_de_depart(self):
+        # #22 : sans lui, une fonction imposée par l'énoncé sous le nom d'une intégrée (`sum`)
+        # serait refusée au rejeu alors que la correction, qui l'envoie, la note.
+        question = {"language": "Python", "start_code": "def sum(xs):\n    pass\n",
+                    "exec_timeout_ms": None,
+                    "cases": [{"id": 1, "name": "a", "harnessCode": "return sum([1]) == 1",
+                               "weight": 1}]}
+        sent = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"[]"
+
+        def urlopen(request, timeout):
+            sent["body"] = request.data
+            return Response()
+
+        with mock.patch.object(chk.urllib.request, "urlopen", urlopen):
+            chk.evaluate("http://x", "t", question)
+        body = __import__("json").loads(sent["body"].decode("utf-8"))
+        self.assertEqual("def sum(xs):\n    pass\n", body["startCode"])
+        self.assertEqual(body["code"], body["startCode"])
+
+    def test_harnais_sans_fonction_du_code_de_depart_a_verifier(self):
+        # L'énoncé impose `max`, le code de départ est le gabarit `solution` : le rejeu passe
+        # (aucun nom réservé dans le code de départ), mais l'étudiant qui écrit `def max` sera
+        # refusé. Seul ce contrôle statique le signale.
+        question = {"language": "Python", "start_code": "def solution():\n    pass\n",
+                    "cases": [{"id": 1, "name": "a", "harnessCode": "return max([1, 3]) == 3",
+                               "weight": 1}]}
+        with mock.patch.object(chk, "evaluate", return_value=[{"passed": True}]):
+            status, lines = chk.check_question("http://x", "t", question)
+        self.assertEqual(chk.TO_CHECK, status)
+        self.assertIn("aucune fonction du code de départ", lines[0])
+        # Le code de départ déclare le nom imposé : OK.
+        declared = dict(question, start_code="def max(l):\n    pass\n")
+        with mock.patch.object(chk, "evaluate", return_value=[{"passed": True}]):
+            self.assertEqual((chk.OK, []), chk.check_question("http://x", "t", declared))
+        # Pas pour une question compilée (contrat différent, classée par le compilateur).
+        with mock.patch.object(chk, "evaluate", return_value=[{"passed": True}]):
+            status, _ = chk.check_question("http://x", "t", dict(question, language="Java"))
+        self.assertEqual(chk.OK, status)
+
+    def test_declarations_lues_comme_le_noteur(self):
+        self.assertEqual({"f", "C"}, chk.declared_names("Python", "async def f():\n    pass\nclass C:\n    pass"))
+        self.assertEqual({"a", "b", "K"}, chk.declared_names(
+            "TypeScript", "export function a() {}\nconst b = () => 1;\nexport default class K {}"))
+        self.assertEqual({"carre", "test"}, chk.declared_names("Bash", "carre() { :; }\nfunction test () { :; }"))
+        self.assertEqual(set(), chk.declared_names("Python", None))
+        # Mot entier : `maximum` n'emploie pas `max`, `$f` n'est pas `f`.
+        self.assertFalse(chk.harness_uses_start_code("Python", "def max(l): pass", "maximum(1)"))
+        self.assertFalse(chk.harness_uses_start_code("JavaScript", "function f() {}", "$f(1)"))
+        self.assertTrue(chk.harness_uses_start_code("JavaScript", "function f() {}", "f(1) === 2"))
 
     def test_worst(self):
         self.assertEqual(chk.OK, chk.worst([chk.OK, chk.OK]))

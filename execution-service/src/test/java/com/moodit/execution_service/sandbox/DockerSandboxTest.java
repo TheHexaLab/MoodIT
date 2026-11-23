@@ -528,6 +528,12 @@ class DockerSandboxTest {
         }
         // Date absente (champ non rempli par le démon) : on s'abstient.
         assertThat(DockerSandbox.removable(container("exited", 0))).isFalse();
+        // Borne exacte : supprimable à ORPHAN_GRACE_MS pile, pas une milliseconde avant.
+        long created = 1_700_000_000L;
+        assertThat(DockerSandbox.removable(container("exited", created),
+                created * 1000L + DockerSandbox.ORPHAN_GRACE_MS)).isTrue();
+        assertThat(DockerSandbox.removable(container("exited", created),
+                created * 1000L + DockerSandbox.ORPHAN_GRACE_MS - 1)).isFalse();
         // Le délai couvre le plus long mur possible, journaux compris.
         assertThat(DockerSandbox.ORPHAN_GRACE_MS).isGreaterThan(15 * 60_000L + 30_000L);
     }

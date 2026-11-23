@@ -22,10 +22,25 @@ public record EvaluateRequest(
         @NotEmpty @Size(max = 100) List<@Valid TestCaseInput> testCases,
         /** Temps limite d'exécution demandé par le prof (ms) ; {@code null} → défaut serveur.
          *  Borné côté {@link com.moodit.execution_service.sandbox.RunnerExec} (MAX_RUN_TIMEOUT_MS). */
-        Integer timeoutMs) {
+        Integer timeoutMs,
+        /**
+         * Code de départ de la question, écrit par l'ENSEIGNANT ; {@code null} s'il n'y en a pas.
+         * Une fonction ou une classe qu'il déclare est celle que l'énoncé impose : elle peut porter
+         * le nom d'une intégrée du langage ({@code sum}, {@code max}, {@code len}…) sans être
+         * refusée comme « Nom réservé » (cf. CodeAssembler#notImposed). Jamais fourni par
+         * l'étudiant : core le lit dans la question, et la route publique est réservée aux
+         * éditeurs de quiz.
+         */
+        @Size(max = 100_000) String startCode) {
 
     /** Constructeur de compatibilité (sans timeout → défaut serveur). */
     public EvaluateRequest(String language, String version, String code, List<TestCaseInput> testCases) {
-        this(language, version, code, testCases, null);
+        this(language, version, code, testCases, null, null);
+    }
+
+    /** Constructeur de compatibilité (sans code de départ). */
+    public EvaluateRequest(String language, String version, String code, List<TestCaseInput> testCases,
+            Integer timeoutMs) {
+        this(language, version, code, testCases, timeoutMs, null);
     }
 }

@@ -511,9 +511,11 @@ class ExecutionServiceTest {
         // tentative supprimée) ou le nom tronqué au NUL — jamais une note expliquée.
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
-        char nul = (char) 0;
+        // U+0001 : un autre caractère « ignorable » de Java. Le NUL, lui, est refusé plus tôt, pour
+        // tout le code soumis et dans tous les langages (nulRejection, #23).
+        char control = (char) 1;
         char zeroWidthSpace = (char) 0x200B;
-        for (String className : List.of("A" + nul + "B", "S" + "a".repeat(90) + nul + "b",
+        for (String className : List.of("A" + control + "B", "S" + "a".repeat(90) + control + "b",
                 "A" + zeroWidthSpace + "B")) {
             List<TestResult> results = routed.evaluate(oneTest("Java",
                     "public class " + className + " { static int f() { return 1; } }",
@@ -521,8 +523,12 @@ class ExecutionServiceTest {
             assertThat(results).hasSize(1);
             assertThat(results.get(0).passed()).isFalse();
             assertThat(results.get(0).detail()).contains("caractère de contrôle ou invisible")
-                    .doesNotContain(String.valueOf(nul));
+                    .doesNotContain(String.valueOf(control));
         }
+        List<TestResult> nul = routed.evaluate(oneTest("Java",
+                "public class A" + (char) 0 + "B { static int f() { return 1; } }", "return true;"));
+        assertThat(nul.get(0).passed()).isFalse();
+        assertThat(nul.get(0).detail()).contains("caractère nul");
         verifyNoInteractions(docker);
     }
 

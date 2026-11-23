@@ -599,9 +599,171 @@ class ReadCappedTest(unittest.TestCase):
             text = supervisor.read_capped(f.name, cap=1024)
             self.assertIn("tete-visible", text)
             self.assertIn("[MOODIT] jeton=42", text)
-            self.assertIn("tronquée au milieu", text)
+            # Texte exact lu par execution-service (ExecutionService.SUPERVISOR_TRUNCATION_MARKER) :
+            # un dump SQL de phase 1 tronqué est refusé, au lieu d'être noté amputé de son milieu.
+            self.assertIn("(sortie tronquée au milieu", text)
         finally:
             os.unlink(f.name)
+
+
+class InheritanceTest(unittest.TestCase):
+    """Revue #246 : une méthode héritée et non redéfinie manquait au bouchon (Java, C#, C++) —
+    `new Carre(3).aire()` ne compilait pas, 0 pour l'étudiant qui hérite au lieu de redéfinir."""
+
+    def test_inherit_instance_methods(self):
+        apis = {"Forme": ([["int"]], [("int", "aire", []), ("int", "cote", ["int"])]),
+                "Carre": ([["int"]], [("int", "cote", ["int"])]),
+                "Cube": ([["int"]], []),
+                "A": ([], [("int", "a", [])]), "B": ([], [])}
+        parents = {"Carre": "Forme", "Cube": "Carre", "Forme": None, "A": "B", "B": "A",
+                   "Seule": "Inconnue"}
+        merged = supervisor.inherit_instance_methods(apis, parents)
+        # Redéfinie : celle de la classe, une seule fois ; héritée : ajoutée après les siennes.
+        self.assertEqual([("int", "cote", ["int"]), ("int", "aire", [])], merged["Carre"])
+        # Sur deux niveaux.
+        self.assertEqual([("int", "cote", ["int"]), ("int", "aire", [])], merged["Cube"])
+        self.assertEqual([("int", "aire", []), ("int", "cote", ["int"])], merged["Forme"])
+        # Chaîne circulaire : s'arrête, sans boucle infinie.
+        self.assertEqual([("int", "a", [])], merged["B"])
+        # Mère hors du code soumis : rien à ajouter.
+        self.assertNotIn("Seule", merged)
+
+    def test_java_superclass(self):
+        self.assertEqual("Forme", supervisor.java_superclass(
+            'Compiled from "S.java"\nclass Carre extends Forme {\n  Carre(int);\n}\n'))
+        self.assertEqual("Outer.Base", supervisor.java_superclass(
+            "public final class Outer$Inner extends Outer$Base implements X {\n}\n"))
+        self.assertIsNone(supervisor.java_superclass("class Forme {\n  int aire();\n}\n"))
+
+    def test_csharp_inherited_methods(self):
+        src = ("class Forme { protected int c; public Forme(int c) { this.c = c; }"
+               " public int Aire() { return c * c; } }\n"
+               "class Carre : Forme, System.IComparable { public Carre(int c) : base(c) {}"
+               " public int CompareTo(object o) { return 0; } }\n")
+        _ctors, methods = supervisor.cs_object_api(src, "Carre")
+        self.assertIn(("int", "Aire", []), methods)
+        self.assertIn("Carre", supervisor.cs_object_classes(src))
+
+    def test_cpp_inherited_methods_public_base_only(self):
+        src = ("class Forme { public: Forme(int c) : c(c) {} int aire() { return c * c; }"
+               " protected: int c; };\n"
+               "class Carre : public Forme { public: Carre(int c) : Forme(c) {} };\n"
+               "class Cachee : Forme { public: Cachee(int c) : Forme(c) {} };\n"
+               "struct Ouverte : Forme { Ouverte(int c) : Forme(c) {} };\n")
+        api = {name: methods for name, _ctors, methods in supervisor.cpp_object_api(src)}
+        self.assertEqual([("int", "aire", [])], api["Carre"])
+        self.assertEqual([("int", "aire", [])], api["Ouverte"])
+        # Héritage privé (défaut d'une `class`) : aire() n'est pas appelable de l'extérieur.
+        self.assertNotIn("Cachee", api)
+
+    def test_cpp_derived_declaration_hides_every_base_overload_of_that_name(self):
+        # `aire(int)` dans Carre masque `aire()` de Forme (règle C++) : l'hériter quand même
+        # faisait générer au serveur `->aire()`, qui ne compile pas — 0 sur une réponse juste.
+        src = ("class Forme { public: Forme(int c) : c(c) {} int aire() { return c * c; }"
+               " int cote() { return c; } int f() { return 1; } protected: int c; };\n"
+               "class Carre : public Forme { public: Carre(int c) : Forme(c) {}"
+               " int aire(int k) { return k * cote(); } int g = f(); };\n"
+               "class Rond : public Forme { public: Rond(int c) : Forme(c) {}"
+               " using Forme::aire; int aire(int k) { return k; } };\n"
+               "class Cache : public Forme { public: Cache(int c) : Forme(c) {}"
+               " private: void cote(std::string s) {} };\n")
+        api = {name: {(n, tuple(t)) for _r, n, t in methods}
+               for name, _ctors, methods in supervisor.cpp_object_api(src)}
+        self.assertNotIn(("aire", ()), api["Carre"])
+        self.assertIn(("aire", ("int",)), api["Carre"])
+        # Un appel dans un corps (`cote()`) ou un champ initialisé (`g = f()`) ne déclare rien.
+        self.assertIn(("cote", ()), api["Carre"])
+        self.assertIn(("f", ()), api["Carre"])
+        # `using Forme::aire;` rend les surcharges de la base visibles.
+        self.assertIn(("aire", ()), api["Rond"])
+        # Une déclaration privée, même non transportable, masque aussi.
+        self.assertNotIn(("cote", ()), api["Cache"])
+
+    def test_cpp_abstract_base_lends_its_methods(self):
+        src = ("class Forme { public: virtual int aire() = 0; int double_aire() { return 2 * aire(); } };\n"
+               "class Carre : public Forme { public: Carre(int c) : c(c) {} int aire() { return c * c; }"
+               " private: int c; };\n")
+        api = {name: methods for name, _ctors, methods in supervisor.cpp_object_api(src)}
+        self.assertNotIn("Forme", api)
+        self.assertEqual({("int", "aire", ()), ("int", "double_aire", ())},
+                         {(r, n, tuple(t)) for r, n, t in api["Carre"]})
+
+
+class RemoveTreeTest(unittest.TestCase):
+    """Revue #246 : shutil.rmtree, récursif sous le Python des images, levait RecursionError sur
+    une arborescence profonde que le code soumis crée en quelques millisecondes — le superviseur
+    mourait sans JSON (502 « sans verdict » à la demande)."""
+
+    def _deep(self, root, depth):
+        # Comme le code soumis : mkdir puis chdir, niveau par niveau (os.makedirs est lui-même
+        # récursif, et un chemin absolu dépasserait PATH_MAX).
+        os.mkdir(root)
+        here = os.getcwd()
+        try:
+            os.chdir(root)
+            for _ in range(depth):
+                os.mkdir("d")
+                os.chdir("d")
+            with open("f", "w") as f:
+                f.write("x")
+        finally:
+            os.chdir(here)
+
+    @unittest.skipUnless(os.name == "posix", "chemins profonds POSIX ; couvert en CI (Linux)")
+    def test_deep_tree_removed_without_raising(self):
+        for remover in (supervisor.remove_tree, supervisor._remove_tree_iterative):
+            with self.subTest(remover=remover.__name__):
+                root = tempfile.mkdtemp()
+                try:
+                    self._deep(os.path.join(root, "t"), 1500)
+                    remover(os.path.join(root, "t"))
+                    self.assertFalse(os.path.lexists(os.path.join(root, "t")))
+                finally:
+                    supervisor.remove_tree(root)
+
+    @unittest.skipUnless(os.name == "posix", "chemins profonds POSIX ; couvert en CI (Linux)")
+    def test_walk_tree_reaches_every_level_without_recursion(self):
+        # os.walk est récursif avant Python 3.12 : un `package a.a.a…` de mille segments, que
+        # javac déploie en dossiers, lui faisait lever RecursionError dans set_owner_mode_tree.
+        root = tempfile.mkdtemp()
+        try:
+            self._deep(os.path.join(root, "t"), 1500)
+            levels = list(supervisor.walk_tree(os.path.join(root, "t")))
+            self.assertEqual(1501, len(levels))
+            self.assertEqual(["f"], levels[-1][2])
+            self.assertEqual([], list(supervisor.walk_tree(os.path.join(root, "absent"))))
+        finally:
+            supervisor.remove_tree(root)
+
+    @unittest.skipUnless(os.name == "posix", "liens symboliques POSIX ; couvert en CI (Linux)")
+    def test_walk_tree_lists_links_without_following_them(self):
+        root = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(root, "cible", "dedans"))
+            os.makedirs(os.path.join(root, "t", "sous"))
+            os.symlink(os.path.join(root, "cible"), os.path.join(root, "t", "lien"))
+            walked = {r: (sorted(d), sorted(o)) for r, d, o in supervisor.walk_tree(os.path.join(root, "t"))}
+            self.assertEqual((["sous"], ["lien"]), walked[os.path.join(root, "t")])
+            self.assertNotIn(os.path.join(root, "t", "lien"), walked)
+        finally:
+            supervisor.remove_tree(root)
+
+    @unittest.skipUnless(os.name == "posix", "liens symboliques POSIX ; couvert en CI (Linux)")
+    def test_link_is_removed_not_followed_and_missing_path_is_fine(self):
+        root = tempfile.mkdtemp()
+        try:
+            target = os.path.join(root, "cible")
+            os.makedirs(target)
+            with open(os.path.join(target, "garde"), "w") as f:
+                f.write("x")
+            link = os.path.join(root, "lien")
+            os.symlink(target, link)
+            supervisor.remove_tree(link)
+            self.assertFalse(os.path.lexists(link))
+            self.assertTrue(os.path.exists(os.path.join(target, "garde")))
+            supervisor.remove_tree(os.path.join(root, "absent"))   # ne lève pas
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 class SubstitutePlaceholdersTest(unittest.TestCase):

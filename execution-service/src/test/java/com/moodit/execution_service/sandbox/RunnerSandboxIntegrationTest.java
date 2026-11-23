@@ -534,6 +534,24 @@ class RunnerSandboxIntegrationTest {
                     return 0
                 }
 
+                // TÉMOIN POSITIF : la même sonde, déposée dans $TMPDIR (sous /box, exec), DOIT
+                // s'exécuter. Sans lui, une régression qui interdirait TOUT exec au code soumis
+                // laisserait le premier cas vert sans plus rien mesurer de noexec.
+                func ailleurs(n int) int {
+                    sh, err := os.ReadFile("/bin/sh")
+                    if err != nil {
+                        return 0
+                    }
+                    path := os.Getenv("TMPDIR") + "/moodit_exec_probe"
+                    if err := os.WriteFile(path, sh, 0o700); err != nil {
+                        return 0
+                    }
+                    if err := exec.Command(path, "-c", "exit 0").Run(); err != nil {
+                        return 0
+                    }
+                    return n * 2
+                }
+
                 // TÉMOIN, comme pour la sonde réseau : un programme qui ne compile plus rend
                 // lui aussi un cas faux.
                 func temoin(n int) int { return n * 2 }
@@ -542,8 +560,13 @@ class RunnerSandboxIntegrationTest {
                 """;
         List<TestResult> r = evaluator.evaluate("Go", probe, List.of(
                 new TestCaseInput("exécution depuis /tmp", GO_HARNESS, 1),
-                new TestCaseInput("témoin", "return temoin(5) == 10", 1)), null);
+                new TestCaseInput("témoin", "return temoin(5) == 10", 1),
+                new TestCaseInput("exécution depuis $TMPDIR", "return ailleurs(5) == 10", 1)), null);
         assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(2).passed())
+                .withFailMessage("la même sonde doit s'exécuter hors de /tmp, sinon le refus "
+                        + "ne prouve rien de noexec : %s", r.get(2))
+                .isTrue();
         assertThat(r.get(1).passed())
                 .withFailMessage("le témoin doit réussir, sinon la sonde noexec ne prouve rien "
                         + "(le programme n'a pas compilé ou n'a pas tourné) : %s", r.get(1))

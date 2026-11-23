@@ -30,6 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -68,6 +69,22 @@ class ExecutionServiceEdgeCasesTest {
 
     private void pistonRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
         piston(files -> new RunnerExec.Result(null, runFn.apply(files), null));
+    }
+
+    @Test
+    void code_with_a_nul_byte_is_refused_before_any_container_in_every_language() {
+        // #23 : sqlite3 lit son programme ligne par ligne et s'arrête au NUL ; une chaîne fermée
+        // pour le découpeur Java restait ouverte, et la suite sortait de la vue de la réponse.
+        String forge = "SELECT 'a" + (char) 0 + "\n';\n.print X\n--'";
+        for (String language : List.of("SQL", "Python", "Java", "Bash")) {
+            List<TestResult> r = service.evaluate(new EvaluateRequest(language, null, forge,
+                    List.of(new TestCaseInput("a", "SELECT 1;", 2), new TestCaseInput("b", "SELECT 1;", 3))));
+            assertThat(r).extracting(TestResult::name, TestResult::weight, TestResult::passed)
+                    .containsExactly(org.assertj.core.groups.Tuple.tuple("a", 2, false),
+                            org.assertj.core.groups.Tuple.tuple("b", 3, false));
+            assertThat(r).allSatisfy(t -> assertThat(t.detail()).contains("caractère nul"));
+        }
+        verifyNoInteractions(runner);
     }
 
     private TestResult single(String language, String code, String harness) {
@@ -522,6 +539,24 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base trop volumineux");
         verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void sql_modification_dump_tronque_par_le_superviseur_est_refuse() {
+        // #23 : au-delà de son plafond en octets, le superviseur garde la tête et la queue de la
+        // sortie. Les sentinelles survivent, le dump a perdu son milieu (la ligne fautive avec) :
+        // la phase 2 ne doit pas noter cet état partiel.
+        pistonRun(f -> isPhase1(f)
+                ? stage(dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES('漢\n"
+                        + "… (sortie tronquée au milieu : 1200055 octets)\n漢');\n"), "", 0, null, null)
+                : stage(sqlFenced(f, "1"), "", 0, null, null));
+
+        TestResult t = single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS);
+
+        assertThat(t.passed()).isFalse();
+        assertThat(t.detail()).isEqualTo("État de la base trop volumineux");
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+        assertThat(ExecutionService.SUPERVISOR_TRUNCATION_MARKER).isEqualTo("(sortie tronquée au milieu");
     }
 
     @Test

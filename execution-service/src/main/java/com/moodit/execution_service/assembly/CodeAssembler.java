@@ -63,14 +63,25 @@ public class CodeAssembler {
     public record Assembled(String runtime, List<RunnerExec.File> files) {}
 
     public Assembled assemble(String language, String studentCode, String harnessCode, String nonce) {
+        return assemble(language, studentCode, harnessCode, nonce, null);
+    }
+
+    /**
+     * Comme {@link #assemble(String, String, String, String)}, avec le code de départ de
+     * l'enseignant ({@code null} s'il n'y en a pas) : un nom qu'il déclare n'est pas refusé comme
+     * « Nom réservé » (cf. {@link #notImposed}).
+     */
+    public Assembled assemble(String language, String studentCode, String harnessCode, String nonce,
+            String startCode) {
         String code = studentCode == null ? "" : studentCode;
         String harness = harnessCode == null ? "" : harnessCode;
+        String start = startCode == null ? "" : startCode;
         return switch (canon(language)) {
-            case "python" -> assemblePython(code, harness, nonce);
-            case "javascript" -> assembleJsRpc(code, harness, nonce, false);
-            case "typescript" -> assembleJsRpc(code, harness, nonce, true);
+            case "python" -> assemblePython(code, harness, nonce, start);
+            case "javascript" -> assembleJsRpc(code, harness, nonce, false, start);
+            case "typescript" -> assembleJsRpc(code, harness, nonce, true, start);
             case "php" -> assemblePhpRpc(code, harness, nonce);
-            case "bash" -> assembleBashRpc(code, harness, nonce);
+            case "bash" -> assembleBashRpc(code, harness, nonce, start);
             // Langages COMPILÉS (#116) : notés par le RUNNER DOCKER (sandbox/DockerEvaluator),
             // jamais assemblés ici — ExecutionService route avant d'arriver au switch.
             case "go", "rust", "c", "c++", "csharp", "java" -> throw new UnsupportedLanguageException(
@@ -177,32 +188,52 @@ public class CodeAssembler {
      *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
      * </ul>
      */
-    private Assembled assemblePython(String studentCode, String harnessCode, String nonce) {
+    /** Mandataire Python d'une fonction soumise : l'appel part par RPC. */
+    private static String pyFunctionProxy(String f) {
+        return "def " + f + "(*a):\n"
+                + "    return __moodit_rpc({\"op\": \"call\", \"name\": \"" + f
+                + "\", \"args\": list(a)})[\"value\"]\n";
+    }
+
+    /**
+     * Mandataire Python d'une classe soumise : l'objet vit chez l'étudiant, le noteur n'en tient
+     * qu'une poignée. Dans un corps de classe, un identifiant `__x` subit le name mangling
+     * (→ `_Classe__x`) : le RPC est donc référencé par globals()["..."] (clé non manglée).
+     */
+    private static String pyClassProxy(String c) {
+        return "class " + c + ":\n"
+                + "    def __init__(self, *a):\n"
+                + "        object.__setattr__(self, \"__moodit_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \""
+                + c + "\", \"args\": list(a)})[\"handle\"])\n"
+                + "    def __getattr__(self, name):\n"
+                + "        h = object.__getattribute__(self, \"__moodit_h\")\n"
+                + "        def _call(*a):\n"
+                + "            return globals()[\"__moodit_rpc\"]({\"op\": \"method\", \"handle\": h, \"name\": name, \"args\": list(a)})[\"value\"]\n"
+                + "        return _call\n";
+    }
+
+    /**
+     * Nom factice des mandataires d'exemple comptés dans l'infrastructure : préfixé __moodit,
+     * il ne coïncide avec aucun nom soumis (ils sont écartés), seuls comptent les outils que le
+     * texte FIXE du mandataire emploie (`list`, `object`, `globals`, `Proxy`…).
+     */
+    private static final String SAMPLE_PROXY_NAME = "__moodit_exemple";
+
+    private Assembled assemblePython(String studentCode, String harnessCode, String nonce,
+            String startCode) {
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(PY_DEF, studentCode)) {
             if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
             if (!harnessMentions(harnessCode, f)) continue;   // mandataire inutile, cf. la méthode
             names.add(f);
-            proxies.append("def ").append(f).append("(*a):\n")
-                    .append("    return __moodit_rpc({\"op\": \"call\", \"name\": \"").append(f)
-                    .append("\", \"args\": list(a)})[\"value\"]\n");
+            proxies.append(pyFunctionProxy(f));
         }
         for (String c : matchAll(PY_CLASS, studentCode)) {
             if (c.startsWith("__moodit")) continue;
             if (!harnessMentions(harnessCode, c)) continue;
             names.add(c);
-            // NB : dans un corps de classe, un identifiant `__x` subit le name mangling Python
-            // (→ `_Classe__x`). On référence donc le RPC via globals()["..."] (clé string, non manglée).
-            proxies.append("class ").append(c).append(":\n")
-                    .append("    def __init__(self, *a):\n")
-                    .append("        object.__setattr__(self, \"__moodit_h\", globals()[\"__moodit_rpc\"]({\"op\": \"new\", \"class\": \"")
-                    .append(c).append("\", \"args\": list(a)})[\"handle\"])\n")
-                    .append("    def __getattr__(self, name):\n")
-                    .append("        h = object.__getattribute__(self, \"__moodit_h\")\n")
-                    .append("        def _call(*a):\n")
-                    .append("            return globals()[\"__moodit_rpc\"]({\"op\": \"method\", \"handle\": h, \"name\": name, \"args\": list(a)})[\"value\"]\n")
-                    .append("        return _call\n");
+            proxies.append(pyClassProxy(c));
         }
         // Tous les identifiants internes sont préfixés __moodit_ → aucune collision avec un symbole étudiant.
         String grader = "import os as __moodit_os\n"
@@ -216,7 +247,7 @@ public class CodeAssembler {
                 // `def len` ou `class abs` remplaçait, dans le harnais, la fonction intégrée du
                 // même nom par le code soumis (`abs(f(x) - 3) < 1e-9` passait avec un `abs`
                 // qui renvoie 0). Même règle que les noms réservés des langages compilés.
-                + "__moodit_shadow = [__n for __n in " + pythonStringList(names)
+                + "__moodit_shadow = [__n for __n in " + SHADOW_SLOT
                 + " if hasattr(__moodit_builtins, __n)]\n"
                 + "if __moodit_shadow:\n"
                 + "    __moodit_sys.stderr.write(" + pythonStringLiteral(SHADOW_PREFIX)
@@ -253,6 +284,12 @@ public class CodeAssembler {
                 + "if __moodit_r:\n    __moodit_sys.stderr.write(\"" + nonce + "\")\n"
                 + "try:\n    __moodit_p.stdin.close()\nexcept Exception:\n    pass\n"
                 + "__moodit_sys.exit(0 if __moodit_r else 1)\n";
+        // Le texte FIXE des mandataires (list, object, globals) compte aussi : un `def list`
+        // imposé ferait s'appeler lui-même le mandataire de toute fonction.
+        String pyInfra = graderInfrastructure(grader, proxies.toString(), indent(harnessCode, "    "))
+                + pyFunctionProxy(SAMPLE_PROXY_NAME) + pyClassProxy(SAMPLE_PROXY_NAME);
+        grader = fillShadowSlot(grader, pythonStringList(notImposed(names, startCode, pyInfra,
+                PY_DEF, PY_CLASS)));
         // Boucle RPC dans une FONCTION → ses variables ne polluent pas les globals (symboles étudiant).
         // Les fonctions INTÉGRÉES dont la boucle a besoin sont prises dans `builtins`, AVANT le
         // code soumis : celui-ci s'exécute dans le même module, et une fonction d'aide `print`,
@@ -307,6 +344,66 @@ public class CodeAssembler {
     static boolean harnessMentions(String harnessCode, String name) {
         return Pattern.compile("(?<![\\w$])" + Pattern.quote(name) + "(?![\\w$])")
                 .matcher(harnessCode == null ? "" : harnessCode).find();
+    }
+
+    /**
+     * Noms soumis au refus « Nom réservé » : ceux du code soumis que le code de départ de
+     * l'ENSEIGNANT ne déclare pas. Une fonction que l'énoncé impose sous le nom d'une intégrée
+     * ({@code def sum}, {@code function parseInt}, {@code test()}) est la fonction notée : le
+     * harnais qui l'appelle veut le code soumis, et la refuser notait 0 une réponse juste (#22).
+     * Le refus ne garde son sens que pour un nom AJOUTÉ par l'étudiant, qui détournerait une
+     * intégrée dont le harnais se sert ({@code abs(f(x) - 3) < 1e-9} avec un {@code abs} qui
+     * renvoie 0). Le code de départ vient de la question, jamais de l'étudiant.
+     */
+    static java.util.Set<String> notImposed(java.util.Collection<String> names, String startCode,
+            String graderInfrastructure, Pattern... declarations) {
+        java.util.Set<String> imposed = new java.util.HashSet<>();
+        for (Pattern declaration : declarations) {
+            Matcher m = declaration.matcher(startCode);
+            while (m.find()) {
+                for (int g = 1; g <= m.groupCount(); g++) {
+                    // Groupes alternatifs (JS_CALLABLE : `function f` OU `const f =`) : un seul
+                    // est rempli, l'autre vaut null.
+                    if (m.group(g) != null) {
+                        imposed.add(m.group(g));
+                    }
+                }
+            }
+        }
+        // Un nom que le noteur EMPLOIE lui-même (print, isinstance en Python ; Proxy, JSON,
+        // Buffer en JavaScript ; head, od, tr, printf en Bash) reste refusé, imposé ou non : son
+        // mandataire remplacerait l'outil dans la boucle RPC, qui s'appellerait elle-même à
+        // l'infini ou lèverait — 0 pour tous, délai dépassé au lieu d'un refus expliqué. Le
+        // rejeu d'avant déploiement (deploy/check-compiled-harnesses.py) signale la question.
+        imposed.removeIf(name -> harnessMentions(graderInfrastructure, name));
+        java.util.Set<String> checked = new java.util.LinkedHashSet<>(names);
+        checked.removeAll(imposed);
+        return checked;
+    }
+
+    /** Emplacement de la liste (ou de la vérification) des noms refusés dans un gabarit de noteur. */
+    private static final String SHADOW_SLOT = "__moodit_shadow_slot__";
+
+    /**
+     * Code PROPRE au noteur : le gabarit sans les mandataires (noms soumis) ni le harnais (texte
+     * de l'enseignant), ni l'emplacement des noms refusés. C'est ce texte qui dit quels outils du
+     * langage la boucle RPC emploie.
+     */
+    static String graderInfrastructure(String template, String proxies, String harness) {
+        String infra = template.replace(SHADOW_SLOT, "");
+        if (!proxies.isEmpty()) {
+            infra = infra.replace(proxies, "\n");
+        }
+        if (!harness.isEmpty()) {
+            infra = infra.replace(harness, "\n");
+        }
+        return infra;
+    }
+
+    /** Remplace l'emplacement (unique, en tête du gabarit) par son contenu. */
+    private static String fillShadowSlot(String template, String content) {
+        int at = template.indexOf(SHADOW_SLOT);
+        return template.substring(0, at) + content + template.substring(at + SHADOW_SLOT.length());
     }
 
     /** Liste de chaînes littérale (Python ou JavaScript) ; les noms viennent de motifs {@code \w}. */
@@ -368,7 +465,20 @@ public class CodeAssembler {
      * fd du sous-processus. Le nonce est émis par le noteur, où aucun code étudiant ne tourne
      * (même réserve que Python : UID partagé, cf. {@link #assemblePython}).
      */
-    private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript) {
+    /** Mandataire JavaScript d'une fonction soumise. */
+    private static String jsFunctionProxy(String f) {
+        return "function " + f + "(...a){ return __moodit_rpc({op:'call',name:'" + f + "',args:a}).value; }\n";
+    }
+
+    /** Mandataire JavaScript d'une classe soumise (objet tenu par poignée). */
+    private static String jsClassProxy(String c) {
+        return "const " + c + " = new Proxy(function(){}, { construct(_t,args){"
+                + " const h=__moodit_rpc({op:'new',cls:'" + c + "',args}).handle;"
+                + " return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n";
+    }
+
+    private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript,
+            String startCode) {
         // TS : fichiers .ts, transpilés côte à côte par le runner (tsc --noCheck) en .js
         // (student_server.js, grader.js). `// @ts-nocheck` neutralise aussi les erreurs de type
         // à la transpilation (on veut exécuter, pas typer).
@@ -390,13 +500,10 @@ public class CodeAssembler {
         callables.removeIf(n -> !harnessMentions(harnessCode, n));
         classes.removeIf(n -> !harnessMentions(harnessCode, n));
         for (String f : callables) {
-            proxies.append("function ").append(f).append("(...a){ return __moodit_rpc({op:'call',name:'")
-                    .append(f).append("',args:a}).value; }\n");
+            proxies.append(jsFunctionProxy(f));
         }
         for (String c : classes) {
-            proxies.append("const ").append(c).append(" = new Proxy(function(){}, { construct(_t,args){")
-                    .append(" const h=__moodit_rpc({op:'new',cls:'").append(c).append("',args}).handle;")
-                    .append(" return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n");
+            proxies.append(jsClassProxy(c));
         }
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>(callables);
         names.addAll(classes);
@@ -407,7 +514,7 @@ public class CodeAssembler {
                 // hissé, remplaçait dans le harnais la fonction du même nom par le code soumis
                 // (`Number(f()) === 3` passait avec un `Number` qui renvoie 3). EN TÊTE, avant
                 // tout usage d'un nom que le mandataire hissé pourrait déjà masquer.
-                + "const __moodit_shadow=" + pythonStringList(names) + ".filter(function(n){"
+                + "const __moodit_shadow=" + SHADOW_SLOT + ".filter(function(n){"
                 + " return (n in [].constructor.constructor('return this')()) || [\"require\",\"module\",\"exports\",\"__filename\","
                 + "\"__dirname\",\"globalThis\"].indexOf(n)>=0; });\n"
                 + "if(__moodit_shadow.length){ const __moodit_msg=" + pythonStringLiteral(SHADOW_PREFIX)
@@ -452,6 +559,11 @@ public class CodeAssembler {
                 + "if(__moodit_r) process.stderr.write(\"" + nonce + "\");\n"
                 + "try{ __moodit_child.stdin.end(); }catch(e){}\n"
                 + "process.exit(__moodit_r?0:1);\n";
+        // Le texte FIXE des mandataires (`Proxy` pour une classe) compte dans l'infrastructure.
+        String jsInfra = graderInfrastructure(grader, proxies.toString(), harnessCode)
+                + jsFunctionProxy(SAMPLE_PROXY_NAME) + jsClassProxy(SAMPLE_PROXY_NAME);
+        grader = fillShadowSlot(grader, pythonStringList(notImposed(names, startCode, jsInfra,
+                JS_CALLABLE, JS_CLASS)));
         // Le serveur partage le MODULE du code soumis, et en JavaScript tout nom se masque : une
         // fonction soumise est hissée en tête du module, une `const` y ouvre une zone morte.
         // Deux règles, donc :
@@ -609,27 +721,28 @@ public class CodeAssembler {
      * propriété « verdict non falsifiable » ne vaut que pour les six langages compilés avec un
      * harnais booléen.
      */
-    private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce) {
+    /** Mandataire Bash d'une fonction soumise. */
+    private static String bashProxy(String f) {
+        return f + "() { __moodit_rpc " + f + " \"$@\"; }\n";
+    }
+
+    private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce,
+            String startCode) {
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
         for (String f : matchAll(BASH_FUNC, studentCode)) {
             if (f.startsWith("__moodit")) continue;
             if (!harnessMentions(harnessCode, f)) continue;   // cf. harnessMentions
             names.add(f);
-            proxies.append(f).append("() { __moodit_rpc ").append(f).append(" \"$@\"; }\n");
+            proxies.append(bashProxy(f));
         }
         // REFUS d'un nom qui masque une commande : en bash, une fonction passe avant les
         // commandes internes et les programmes du PATH. Le mandataire `test() { … }` remplaçait
         // donc, dans le harnais, le `test` de `test "$(f)" = 9` par le code soumis — de même
         // `expr`, `grep`, `bc`… Vérifié AVANT de définir les mandataires, par `type -t` dans
         // l'image même : la liste est exactement celle des commandes que le harnais peut appeler.
-        String shadowCheck = names.isEmpty() ? "" : "for __moodit_n in " + String.join(" ", names)
-                + "; do if [ -n \"$(type -t \"$__moodit_n\")\" ]; then printf '%s%s%s\\n' "
-                + shellSingleQuote(SHADOW_PREFIX) + " \"$__moodit_n\" "
-                + shellSingleQuote(" » est réservé : il masque une commande de bash ou du "
-                        + "système, que le harnais peut appeler. Renommer cette fonction, puis "
-                        + "resoumettre.")
-                + " >&2; exit 1; fi; done\n";
+        // Vérification construite APRÈS le gabarit : elle dépend de ce que l'infrastructure du
+        // noteur emploie (cf. notImposed). Le gabarit porte SHADOW_SLOT à sa place.
         // CADRAGE PAR IDENTIFIANT : la valeur rendue est la ligne « <id>|valeur », et seule
         // celle-ci est retenue. Un `echo` de premier niveau du code étudiant ne vaut donc plus
         // réponse — c'était la forge naïve (imprimer l'attendu, ne rien imprimer dans sa
@@ -681,11 +794,22 @@ public class CodeAssembler {
                 // Décodage en bash pur (pas de xxd dans l'image) : deux hexas → un octet,
                 // puis le saut de ligne que la ligne unique du protocole avait absorbé.
                 + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
-                + shadowCheck
+                + SHADOW_SLOT
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
                 + "if __moodit_harness; then printf '%s' '" + nonce + "' >&2; exit 0; else exit 1; fi\n"
                 + "}\n";
+        java.util.Set<String> checked = notImposed(names, startCode,
+                graderInfrastructure(grader, proxies.toString(), harnessCode)
+                        + bashProxy(SAMPLE_PROXY_NAME), BASH_FUNC);
+        String shadowCheck = checked.isEmpty() ? "" : "for __moodit_n in " + String.join(" ", checked)
+                + "; do if [ -n \"$(type -t \"$__moodit_n\")\" ]; then printf '%s%s%s\\n' "
+                + shellSingleQuote(SHADOW_PREFIX) + " \"$__moodit_n\" "
+                + shellSingleQuote(" » est réservé : il masque une commande de bash ou du "
+                        + "système, que le harnais peut appeler. Renommer cette fonction, puis "
+                        + "resoumettre.")
+                + " >&2; exit 1; fi; done\n";
+        grader = fillShadowSlot(grader, shadowCheck);
         return new Assembled("bash", List.of(
                 new RunnerExec.File("grader.sh", grader),
                 new RunnerExec.File("solution.sh", studentCode)));

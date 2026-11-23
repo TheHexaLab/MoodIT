@@ -141,7 +141,37 @@ public class ExecutionService {
         return "MOODIT_OK_" + HexFormat.of().formatHex(bytes);
     }
 
+    /**
+     * Ligne que le superviseur insère à la place du milieu d'une sortie trop longue
+     * ({@code read_capped} / {@code copy_capped} de {@code supervisor.py}).
+     */
+    static final String SUPERVISOR_TRUNCATION_MARKER = "(sortie tronquée au milieu";
+
+    /**
+     * Verdicts de refus si le code soumis contient un octet NUL, sinon {@code null}. Refusé avant
+     * tout conteneur, dans tous les langages : les programmes générés le reçoivent tel quel, et
+     * leurs lecteurs ne le traitent pas comme Java. Le shell {@code sqlite3} lit son programme
+     * ligne par ligne et s'arrête au NUL — la fin de la ligne disparaît, la suivante s'y colle :
+     * une chaîne que le découpeur Java voyait fermée restait ouverte, et le texte qui suivait
+     * sortait de la vue qui confine la réponse, avant le harnais (verdict forgé, #23). Aucun
+     * code légitime n'en contient.
+     */
+    static List<TestResult> nulRejection(String code, List<TestCaseInput> cases) {
+        if (code == null || code.indexOf(0) < 0) {
+            return null;
+        }
+        return cases.stream()
+                .map(c -> new TestResult(c.name(), c.effectiveWeight(), false,
+                        "Le code soumis contient un caractère nul (octet 0), refusé à la correction : "
+                                + "le retirer, puis resoumettre."))
+                .toList();
+    }
+
     public List<TestResult> evaluate(EvaluateRequest request) {
+        List<TestResult> nul = nulRejection(request.code(), request.testCases());
+        if (nul != null) {
+            return nul;
+        }
         // Langages COMPILÉS (#116) : notés dans un CONTENEUR RUNNER jetable (superviseur root,
         // harnais du prof compilé dans un programme SÉPARÉ sous son propre UID, code soumis seul
         // dans un autre, verdict = le nonce du cas sur le stderr du noteur). Un conteneur = une
@@ -247,7 +277,7 @@ public class ExecutionService {
             }
             // Un nonce DIFFÉRENT par harnais : imprévisible d'un test à l'autre.
             results.add(runOne(request.language(), request.code(), testCase, newNonce(),
-                    request.timeoutMs()));
+                    request.timeoutMs(), request.startCode()));
         }
         return results;
     }
@@ -280,7 +310,7 @@ public class ExecutionService {
     }
 
     private TestResult runOne(String language, String code, TestCaseInput testCase,
-            String nonce, Integer timeoutMs) {
+            String nonce, Integer timeoutMs, String startCode) {
         int weight = testCase.effectiveWeight();
 
         // SQL en mode MODIFICATION (harnais avec « -- @student ») : exécution ISOLÉE en deux phases
@@ -289,7 +319,8 @@ public class ExecutionService {
             return runSqlIsolated(code, testCase, nonce, weight, timeoutMs);
         }
 
-        CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(), nonce);
+        CodeAssembler.Assembled assembled = assembler.assemble(language, code, testCase.harnessCode(),
+                nonce, startCode);
         RunnerExec.Result result = execute(assembled.runtime(), assembled.files(), null, timeoutMs);
 
         // Échec de compilation (ex. TypeScript) → test échoué, message = stderr de compilation.
@@ -349,7 +380,13 @@ public class ExecutionService {
         if (dump == null) {
             return new TestResult(testCase.name(), weight, false, "État de la base introuvable après ton code");
         }
-        if (dump.length() > maxSqlDumpChars) {
+        // Sortie TRONQUÉE par le superviseur (au-delà de son plafond en OCTETS, il garde la tête et
+        // la queue) : les deux sentinelles survivent, mais le dump a perdu son milieu, et la
+        // phase 2 aurait noté un état partiel — une ligne fautive retirée par la coupe passait
+        // pour supprimée (#23). La borne en caractères ci-dessous ne le voyait pas : des
+        // caractères de 3 octets franchissent le plafond en octets bien avant elle. Refusé fermé ;
+        // un code soumis qui imprime lui-même le marqueur ne pénalise que lui.
+        if (dump.length() > maxSqlDumpChars || run1.stdout().contains(SUPERVISOR_TRUNCATION_MARKER)) {
             return new TestResult(testCase.name(), weight, false, "État de la base trop volumineux");
         }
         // Liste blanche = tables déclarées par le prof ; découple le filtrage des internes de sqlite.

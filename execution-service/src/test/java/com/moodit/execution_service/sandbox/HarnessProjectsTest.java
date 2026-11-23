@@ -16,9 +16,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class HarnessProjectsTest {
 
     /**
-     * Harnais au format FRAMEWORK : c'est lui qui exerce l'ancienne disposition (un seul
-     * processus). Un harnais BOOLÉEN, lui, part sur le chemin non falsifiable — deux processus,
-     * deux UID — et produit une disposition différente, couverte par ses propres tests.
+     * Harnais au format FRAMEWORK (vraie classe de test). Ce format n'est plus noté : ExecutionService
+     * le refuse avant tout conteneur (DockerEvaluator.frameworkHarnessRejection). Ces tests ne s'en
+     * servent que pour la DISPOSITION des fichiers (structure, canaris, job.json), qui ne dépend pas
+     * du contenu du harnais ; le chemin noté — deux processus, deux UID — a ses propres tests.
      */
     private static final Map<String, String> FRAMEWORK_HARNESS = Map.of(
             "Java", "@Test void t() { }",

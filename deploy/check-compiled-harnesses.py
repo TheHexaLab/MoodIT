@@ -26,9 +26,13 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
 Les questions INTERPRÉTÉES à mandataires (Python, JavaScript, TypeScript, Bash) sont rejouées
 aussi, pour un seul contrôle : depuis #116, une fonction ou une classe que le harnais nomme et
 qui porte le nom d'une intégrée du langage (`sum`, `max`, `Number`, `test`…) est REFUSÉE
-(« Nom réservé »), alors qu'elle se notait avant. Une question dont l'énoncé impose un tel nom
-note 0 à tout le monde : BLOQUANT, à renommer dans l'énoncé, le code de départ et les harnais.
-Tout autre verdict y vaut OK — le format de ces harnais n'a pas changé.
+(« Nom réservé ») — sauf si le CODE DE DÉPART de la question la déclare : c'est alors celle que
+l'énoncé impose, notée comme avant (#22). Le code de départ part donc avec la demande, comme
+dans la correction. Un refus malgré lui sort BLOQUANT (garde-fou) ; une question sans code de
+départ sort À VÉRIFIER : si son énoncé impose un tel nom, lui donner un code de départ qui le
+déclare. De même pour un cas dont le harnais n'emploie AUCUN nom déclaré par le code de départ
+(gabarit laissé tel quel) : le rejeu ne peut pas voir le refus que recevra l'étudiant. Tout autre
+verdict y vaut OK — le format de ces harnais n'a pas changé.
 
 Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER, 1 sinon, 2 si l'inventaire est impossible.
 Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
@@ -60,6 +64,36 @@ COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
 PROXIED_LANGUAGES = ("Python", "JavaScript", "TypeScript", "Bash")
 # Début du refus écrit par CodeAssembler (SHADOW_PREFIX), suivi du nom.
 RESERVED_NAME = "Nom réservé : « "
+
+# Déclarations que le noteur lit dans un code (mêmes motifs que CodeAssembler : PY_DEF/PY_CLASS,
+# JS_CALLABLE/JS_CLASS, BASH_FUNC). Un nom que le code de départ déclare n'est jamais refusé.
+_JS_EXPORT = r"(?:export\s+(?:default\s+)?)?"
+DECLARATIONS = {
+    "Python": (r"(?m)^(?:async\s+)?def\s+([A-Za-z_]\w*)", r"(?m)^class\s+([A-Za-z_]\w*)"),
+    "JavaScript": (r"(?m)^" + _JS_EXPORT + r"(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)",
+                   r"(?m)^" + _JS_EXPORT + r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=",
+                   r"(?m)^" + _JS_EXPORT + r"(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)"),
+    "Bash": (r"(?m)^(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)",),
+}
+DECLARATIONS["TypeScript"] = DECLARATIONS["JavaScript"]
+
+
+def declared_names(language, start_code):
+    """Noms que le code de départ déclare, lus comme le noteur. FONCTION PURE (testée)."""
+    names = set()
+    for pattern in DECLARATIONS.get(language, ()):
+        names.update(re.findall(pattern, start_code or ""))
+    return names
+
+
+def harness_uses_start_code(language, start_code, harness):
+    """Le harnais emploie-t-il un nom que le code de départ déclare ? FONCTION PURE (testée).
+
+    Non : le code de départ ne déclare pas la fonction notée (gabarit `def solution()` laissé tel
+    quel, ou code de départ vide). Si l'énoncé impose un nom d'intégrée (`max`, `sum`), la réponse
+    de l'étudiant sera refusée (« Nom réservé ») sans que le rejeu du code de départ le montre."""
+    return any(re.search(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])", harness or "")
+               for name in declared_names(language, start_code))
 
 # Préfixes et marqueurs écrits par le superviseur (docker/runners/common/supervisor.py) : le texte
 # du compilateur ne vient qu'APRÈS eux, le code soumis ne peut pas les produire.
@@ -195,9 +229,10 @@ def classify(detail, passed, start_code=""):
 def classify_proxied(detail, passed):
     """Classe le verdict d'UN cas d'une question interprétée à mandataires. PURE (testée).
 
-    Un seul contrôle : le refus « Nom réservé », rendu avant toute exécution du harnais dès que
-    le code (ici le code de départ) déclare un symbole que le harnais nomme et qui masque une
-    intégrée. Il est déterministe, et vaudra pour toute réponse qui suit l'énoncé."""
+    Un seul contrôle : le refus « Nom réservé », rendu avant toute exécution du harnais. Le code
+    de départ partant avec la demande, un nom qu'il déclare n'est jamais refusé : un refus ici
+    est un garde-fou (noteur d'une autre version), déterministe, qui vaudrait pour toute réponse
+    qui suit l'énoncé."""
     if not passed and RESERVED_NAME in (detail or ""):
         return BLOCKING
     return OK
@@ -263,6 +298,9 @@ def evaluate(base_url, token, question):
     body = {
         "language": question["language"],
         "code": question["start_code"],
+        # Comme core à la correction : un nom que le code de départ déclare est celui que
+        # l'énoncé impose, et n'est pas refusé comme « Nom réservé » (#22).
+        "startCode": question["start_code"],
         "testCases": [{"name": c["name"], "harnessCode": c["harnessCode"],
                        "weight": c["weight"]} for c in question["cases"]],
     }
@@ -289,6 +327,14 @@ def check_question(base_url, token, question):
         # script s'arrêtait là, sans rejouer les questions suivantes ni fermer les quiz bloquants.
         return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
     lines, statuses = [], []
+    if question["language"] in PROXIED_LANGUAGES:
+        for case in question["cases"]:
+            if not harness_uses_start_code(question["language"], question["start_code"],
+                                           case["harnessCode"]):
+                statuses.append(TO_CHECK)
+                lines.append("cas %s « %s » : le harnais n'emploie aucune fonction du code de "
+                             "départ ; si l'énoncé impose un nom d'intégrée (max, sum…), le "
+                             "déclarer dans le code de départ" % (case["id"], case["name"]))
     for case, result in zip(question["cases"], results):
         if question["language"] in PROXIED_LANGUAGES:
             status = classify_proxied(result.get("detail"), bool(result.get("passed")))

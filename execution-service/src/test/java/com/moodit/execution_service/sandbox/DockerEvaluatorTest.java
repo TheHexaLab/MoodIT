@@ -18,8 +18,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * Traduction FAIL-CLOSED du JSON du superviseur en verdicts (#116) : un cas sans verdict, un JSON
- * cassé ou une erreur du superviseur ne deviennent jamais un « réussi » ; les événements de
- * détection sont annexés au détail du cas visé.
+ * cassé, un verdict de canaris absent ou inconnu, ou une erreur du superviseur ne deviennent
+ * jamais un « réussi ». Les événements du superviseur sont journalisés, jamais annexés aux
+ * verdicts (aucun ne porte d'index de cas).
  */
 class DockerEvaluatorTest {
 
@@ -457,8 +458,9 @@ class DockerEvaluatorTest {
         // n'atteste que les canaris avaient été jugés. Panne (502), sur les deux chemins. Panne
         // de PLATEFORME, non comptée contre l'étudiant : le superviseur émet toujours ce champ
         // avec ses verdicts, son absence vient d'une image d'une autre version que le service.
+        // « aucun » : verdict d'un job SANS canaris, or chaque job en porte deux — non jugés.
         for (String verdict : List.of("", ",\"canaries\":\"OK\"", ",\"canaries\":null",
-                ",\"canaries\":true")) {
+                ",\"canaries\":true", ",\"canaries\":\"aucun\"")) {
             supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
                     + "{\"index\":1,\"passed\":true}],\"events\":[]" + verdict + "}");
             assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
@@ -470,7 +472,7 @@ class DockerEvaluatorTest {
                     .as(verdict).isInstanceOf(SandboxException.class);
         }
         // Témoins : les verdicts sans accusation laissent passer les notes du superviseur.
-        for (String verdict : List.of("ok", "aucun", "indetermines")) {
+        for (String verdict : List.of("ok", "indetermines")) {
             supervisorReturns("{\"v\":1,\"results\":[{\"index\":0,\"passed\":true},"
                     + "{\"index\":1,\"passed\":false}],\"events\":[],\"canaries\":\"" + verdict + "\"}");
             List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);

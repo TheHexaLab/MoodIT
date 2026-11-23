@@ -311,6 +311,59 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void function_the_statement_names_like_a_builtin_is_graded() {
+        // #22 : « Écris sum(l) » — la fonction imposée porte le nom d'une intégrée. Le code de
+        // départ de l'enseignant la déclare : elle est notée comme avant #116, au lieu d'un
+        // refus « Nom réservé » et d'un 0 sur une réponse juste. Un `abs` AJOUTÉ par l'étudiant
+        // pour détourner le harnais reste refusé.
+        requireRuntime("python");
+        String start = "def sum(l):\n    pass\n";
+        String harness = "return abs(sum([1, 2, 3]) - 6) < 1e-9";
+        assertThat(passesWithStart("Python", "def sum(l):\n    t = 0\n    for x in l:\n"
+                + "        t += x\n    return t", harness, start)).isTrue();
+        assertThat(passesWithStart("Python", "def sum(l):\n    return 0", harness, start)).isFalse();
+        assertThat(passesWithStart("Python", "def abs(x):\n    return 0\ndef sum(l):\n    return 0",
+                harness, start)).isFalse();
+        requireRuntime("javascript");
+        assertThat(passesWithStart("JavaScript", "function parseInt(s){ return Number(s) * 2; }",
+                "return parseInt('4') === 8;", "function parseInt(s) {\n}\n")).isTrue();
+        requireRuntime("bash");
+        assertThat(passesWithStart("Bash", "test() { echo $(( $1 * $1 )); }",
+                "[ \"$(test 3)\" = 9 ]", "test() {\n  :\n}")).isTrue();
+        // Un nom imposé que le noteur emploie lui-même (`head` dans sa boucle RPC) reste refusé,
+        // avec le message : sans ce refus, le mandataire s'appelait lui-même jusqu'au délai.
+        List<TestResult> head = service.evaluate(new EvaluateRequest("Bash", null,
+                "head() { echo 1; }", List.of(new TestCaseInput("t", "[ \"$(head)\" = 1 ]", 1)),
+                null, "head() {\n  :\n}"));
+        assertThat(head.get(0).passed()).isFalse();
+        assertThat(head.get(0).detail()).contains("réservé").contains("head");
+    }
+
+    @Test
+    void sql_answer_with_a_nul_byte_cannot_forge_the_verdict() {
+        // #23 : sqlite3 lit son programme ligne par ligne et s'arrête au NUL. La chaîne que le
+        // découpeur Java voyait fermée restait ouverte, et la suite sortait de la vue de la
+        // réponse : une vue temporaire `t` détournait le harnais (verdict 1 sur réponse fausse).
+        requireRuntime("sqlite3");
+        String harness = "CREATE TABLE t(x); INSERT INTO t VALUES (2);\n"
+                + "SELECT (SELECT count(*) FROM (SELECT * FROM solution EXCEPT SELECT x FROM t)) = 0"
+                + " AND (SELECT count(*) FROM (SELECT x FROM t EXCEPT SELECT * FROM solution)) = 0;";
+        String forged = "SELECT 'a" + (char) 0 + "\n';\n.print X\nCREATE TEMP VIEW t AS SELECT 'a' AS x;\n"
+                + "CREATE TEMP TRIGGER tr INSTEAD OF INSERT ON t BEGIN SELECT 1; END;\n--'";
+        assertThat(passes("SQL", forged, harness)).isFalse();
+        assertThat(detail("SQL", forged, harness)).contains("caractère nul");
+        // Témoins : réponse juste notée juste, réponse fausse notée fausse.
+        assertThat(passes("SQL", "SELECT 2", harness)).isTrue();
+        assertThat(passes("SQL", "SELECT 3", harness)).isFalse();
+    }
+
+    private boolean passesWithStart(String language, String code, String harness, String start) {
+        List<TestResult> res = service.evaluate(new EvaluateRequest(language, null, code,
+                List.of(new TestCaseInput("t", harness, 1)), null, start));
+        return !res.isEmpty() && res.stream().allMatch(TestResult::passed);
+    }
+
+    @Test
     void bash_proxy_returns_the_status_of_the_real_call() {
         // Le mandataire renvoyait toujours 0 : `est_pair 3` était vrai pour toute réponse, et
         // une réponse juste qui renvoie 1 pour un impair était notée fausse.

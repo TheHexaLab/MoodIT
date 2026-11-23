@@ -801,6 +801,67 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void inherited_method_is_graded_in_java_csharp_and_cpp() {
+        // Revue #246 : le bouchon ne portait que les méthodes DÉCLARÉES par la classe. L'étudiant
+        // qui hérite `aire()` de `Forme` au lieu de la redéfinir dans `Carre` recevait « le
+        // harnais ne compile pas », donc 0, quand la solution du prof (qui redéfinit) passait.
+        gradedThenWrong("Java", "return new Carre(3).aire() == 9 && new Carre(4).cote() == 4;", """
+                class Forme {
+                    protected final int c;
+                    Forme(int c) { this.c = c; }
+                    public int aire() { return c * c; }
+                }
+                class Carre extends Forme {
+                    Carre(int c) { super(c); }
+                    public int cote() { return c; }
+                }
+                public class Solution {
+                    public static void main(String[] args) { }
+                }
+                """, "c * c", "c + c");
+        gradedThenWrong("C#", "return new Carre(3).Aire() == 9;", """
+                public class Forme {
+                    protected int c;
+                    public Forme(int c) { this.c = c; }
+                    public int Aire() { return c * c; }
+                }
+                public class Carre : Forme {
+                    public Carre(int c) : base(c) { }
+                }
+                """, "c * c", "c + c");
+        gradedThenWrong("C++", "Carre k(3); return k.aire() == 9;", """
+                class Forme {
+                public:
+                    Forme(int c) : c(c) {}
+                    int aire() { return c * c; }
+                protected:
+                    int c;
+                };
+                class Carre : public Forme {
+                public:
+                    Carre(int c) : Forme(c) {}
+                };
+                """, "c * c", "c + c");
+        // Règle C++ : `aire(int)` dans la dérivée MASQUE `aire()` de la base. Le serveur généré
+        // ne doit pas l'appeler sur `Carre` — sinon il ne compile plus, et une réponse juste
+        // (qui surcharge dans la dérivée) recevait « Échec de compilation ».
+        gradedThenWrong("C++", "Carre k(3); Forme f(2); return k.aire(2) == 18 && f.aire() == 4;", """
+                class Forme {
+                public:
+                    Forme(int c) : c(c) {}
+                    int aire() { return c * c; }
+                protected:
+                    int c;
+                };
+                class Carre : public Forme {
+                public:
+                    Carre(int c) : Forme(c) {}
+                    int aire(int k) { return k * c * c; }
+                };
+                """, "k * c * c", "k + c");
+    }
+
+    @Test
     void submitted_code_that_crashes_fails_in_the_six_compiled_languages() {
         // Critère de #116 : une exception ou un panic du code soumis échoue, dans CHAQUE langage
         // compilé. Le témoin plante seulement sur 999 et réussit ; la variante plante sur
@@ -1893,6 +1954,9 @@ class RpcGradingIntegrationTest {
 
                     public static int doubler(int n) {
                         System.out.println("{\\"ok\\":true,\\"value\\":10}");
+                        // Ce qui serait trouvé est gardé en mémoire, pas écrit sur stderr : le
+                        // détail rendu doit rester celui du HARNAIS (assertion plus bas).
+                        StringBuilder trouves = new StringBuilder();
                         Pattern p = Pattern.compile("[0-9]{13}");
                         try (RandomAccessFile mem = new RandomAccessFile("/proc/self/mem", "r")) {
                             for (String l : Files.readAllLines(Paths.get("/proc/self/maps"))) {
@@ -1907,7 +1971,7 @@ class RpcGradingIntegrationTest {
                                     mem.readFully(t);
                                     Matcher m = p.matcher(new String(t,
                                             java.nio.charset.StandardCharsets.ISO_8859_1));
-                                    while (m.find()) { System.err.println(m.group()); }
+                                    while (m.find()) { trouves.append(m.group()); }
                                 } catch (Exception ignore) { }
                             }
                         } catch (Exception ignore) { }
@@ -1916,10 +1980,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
-        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
-        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
-        assertThat(r.detail() == null ? "" : r.detail())
-                .doesNotContain("Échec de compilation");
+        // Le refus doit venir du HARNAIS qui a tourné et rendu faux — pas d'un code d'attaque
+        // qui ne compile plus, d'un serveur mort ou d'une erreur du noteur : sans cette
+        // assertion, le test resterait vert en ayant cessé de mesurer la forge.
+        assertThat(r.detail() == null ? "" : r.detail()).contains(HARNESS_FALSE);
     }
 
     @Test

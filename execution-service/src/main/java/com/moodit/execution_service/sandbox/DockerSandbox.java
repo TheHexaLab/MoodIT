@@ -365,11 +365,16 @@ public class DockerSandbox {
      * aussi la fenêtre create → start d'une autre instance. Date inconnue : on s'abstient.
      */
     static boolean removable(com.github.dockerjava.api.model.Container container) {
+        return removable(container, System.currentTimeMillis());
+    }
+
+    /** Même règle à l'instant {@code nowMs} donné (borne exacte testable sans horloge). */
+    static boolean removable(com.github.dockerjava.api.model.Container container, long nowMs) {
         Long createdSeconds = container.getCreated();
         if (createdSeconds == null || createdSeconds <= 0) {
             return false;
         }
-        return System.currentTimeMillis() - createdSeconds * 1000L >= ORPHAN_GRACE_MS;
+        return nowMs - createdSeconds * 1000L >= ORPHAN_GRACE_MS;
     }
 
     public boolean imagePresent(String image) {
