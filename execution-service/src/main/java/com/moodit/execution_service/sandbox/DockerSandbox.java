@@ -173,7 +173,8 @@ public class DockerSandbox {
      * démon, Docker jette des messages quand son tampon est plein et le verdict relu est troué.
      * Taille : le superviseur borne ce qu'il émet (1,2 Mo par flux en mode exec, 64 Kio par cas
      * en notation, cas plafonnés à 100 : quelques Mio), et l'enveloppe du pilote multiplie au
-     * pire par 6 (un caractère de contrôle ou {@code <} devient {@code \u00XX}) ; 128 Mo laisse
+     * pire par 6 (un caractère de contrôle ou {@code <} devient un échappement Unicode de six
+     * caractères) ; 128 Mo laisse
      * la marge. Une régression du superviseur au-delà de {@link #LOG_CAP_BYTES} par flux reste
      * vue par le plafond de lecture.
      */
