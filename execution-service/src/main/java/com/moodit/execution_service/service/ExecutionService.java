@@ -442,7 +442,7 @@ public class ExecutionService {
                     return null;
                 }
                 s = i;
-            } else if (s >= 0 && e < 0 && line.equals(end)) {
+            } else if (s >= 0 && e == -1 && line.equals(end)) {
                 e = i;
             }
         }
