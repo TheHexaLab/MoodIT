@@ -394,6 +394,15 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void pythonStringLiteral_echappe_tout_ce_qui_sortirait_du_litteral() {
+        // Valable en Python comme en JavaScript : barre oblique inverse, guillemet, saut de
+        // ligne, contrôles et non-ASCII échappés ; l'ASCII imprimable (espace à ~) tel quel.
+        assertThat(CodeAssembler.pythonStringLiteral("a\\b\"c\nd\te\u001f é~ "))
+                .isEqualTo("\"a\\\\b\\\"c\\nd\\u0009e\\u001f \\u00e9~ \"");
+        assertThat(CodeAssembler.pythonStringLiteral("\u007f")).isEqualTo("\"\\u007f\"");
+    }
+
+    @Test
     void isShellTerminatorLine_bornes_exactes() {
         // Lignes coupées pile en fin de chaîne : aucun accès au-delà du dernier caractère.
         assertThat(CodeAssembler.isShellTerminatorLine("   ")).isFalse();

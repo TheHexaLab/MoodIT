@@ -128,9 +128,7 @@ public class ExecutionService {
     private static final ThreadLocal<long[]> INTERRUPTED_NS = ThreadLocal.withInitial(() -> new long[1]);
 
     private static boolean interrupted(RunnerExec.Result result) {
-        if (result == null) {
-            return false;
-        }
+        // Jamais null : RunnerExec.execute rend un résultat ou lève (sortie illisible, muette).
         RunnerExec.Stage compile = result.compile();
         RunnerExec.Stage run = result.run();
         return (compile != null && compile.signal() != null) || (run != null && run.signal() != null);

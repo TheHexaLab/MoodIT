@@ -21,6 +21,8 @@ export interface QuizViewLabels {
   loadError: string;
   /** Message d'erreur de soumission (porté par le hook). */
   submitError: string;
+  /** Soumission refusée par le serveur sans motif lisible : renvoyer telle quelle ne sert à rien. */
+  submitRejected: string;
   /** Message d'erreur quand la vérification du code est indisponible (503) : la tentative
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
@@ -69,6 +71,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   loading: 'Chargement du quiz…',
   loadError: 'Impossible de charger le quiz. Réessayez.',
   submitError: 'La soumission a échoué. Réessayez.',
+  submitRejected: 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
   codeVerificationUnavailable:
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:

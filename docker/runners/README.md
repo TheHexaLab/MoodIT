@@ -210,7 +210,16 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   sorties vont dans des tubes et des fichiers, jamais sur le stderr du PID 1. Au mur, le démon est
   interrogé avant de conclure : un conteneur déjà arrêté (démon qui n'a jamais notifié la fin) est
   lu normalement ; un état absent ou sans indicateur de marche compte comme « encore en marche »
-  (rien ne prouve qu'il est arrêté). Deux fermetures côté core empêchent le code soumis de provoquer un échec non
+  (rien ne prouve qu'il est arrêté). Les journaux du conteneur, qui portent le verdict, sont en
+  json-file à options FIXÉES (`DockerSandbox.LOG_OPTS` : un seul fichier de 128 Mo, écriture
+  bloquante) : le démon ne complète une configuration qu'avec ses log-opts pour les clés
+  absentes. Un `max-size` bas réglé sur l'hôte ne gardait que les dernières lignes (mesuré : 11
+  lignes relues sur 2000 à `max-size=1k`), perdant la ligne témoin et le début du JSON ; et en
+  `mode: non-blocking`, Docker jette des messages quand son tampon est plein. Dans les deux cas,
+  une sortie trouée comptée « sans verdict ». 128 Mo couvrent ce que le superviseur émet
+  (quelques Mio au plus) même multiplié par 6 par l'échappement du pilote. Mesuré avec les
+  options fixées, par `docker logs` sur les dix images : 2000 lignes sur 2000, et 20 Mio intacts
+  (le service, lui, refuse au-delà de 16 Mio par flux : `NoVerdictException`). Deux fermetures côté core empêchent le code soumis de provoquer un échec non
   compté : un code de plus de 100 000 caractères (la borne d'execution-service) est refusé à la
   soumission (400, tentative non consommée) au lieu de recevoir un 400 à la correction ; et le
   résultat d'une tentative n'est lisible qu'une fois corrigée (`done`) — il porte le corrigé des

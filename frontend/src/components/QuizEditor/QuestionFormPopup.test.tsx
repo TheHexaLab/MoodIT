@@ -349,6 +349,9 @@ describe('QuestionFormBody', () => {
     const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
     expect(input.value).toBe('8');
     fireEvent.change(input, { target: { value: '' } });
+    // Quitter le champ vide ne le remplit pas d'une borne : il reste vide (défaut du sandbox).
+    fireEvent.blur(input);
+    expect(input.value).toBe('');
     fireEvent.click(saveButton(t.add));
     expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBeUndefined();
   });

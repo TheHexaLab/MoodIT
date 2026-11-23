@@ -319,7 +319,7 @@ public class CodeAssembler {
      * Littéral chaîne entre guillemets doubles, valable en Python comme en JavaScript : barre
      * oblique inverse, guillemet, sauts de ligne et tout caractère non ASCII sont échappés.
      */
-    private static String pythonStringLiteral(String text) {
+    static String pythonStringLiteral(String text) {
         StringBuilder out = new StringBuilder("\"");
         for (char ch : text.toCharArray()) {
             switch (ch) {

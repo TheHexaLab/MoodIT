@@ -423,3 +423,20 @@ export class ExecutionBusyError extends Error {
     this.name = 'ExecutionBusyError';
   }
 }
+
+/** Corps de soumission refusé par le gateway (HTTP 413, au-delà de 1 Mo). */
+export const SUBMISSION_TOO_LARGE_MESSAGE =
+  'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.';
+
+/**
+ * Soumission REFUSÉE par le serveur (HTTP 400, ou 413 au gateway) : réponse mal formée, ou code soumis au-delà de
+ * la taille acceptée (#116). Rien n'est enregistré et la tentative n'est pas consommée ; le
+ * message du serveur dit quoi corriger (« Question 2 : le code soumis dépasse … »). Un message
+ * générique « réessayez » faisait renvoyer la même réponse, refusée à chaque fois.
+ */
+export class SubmissionRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SubmissionRejectedError';
+  }
+}

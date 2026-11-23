@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useQuizAttempt } from './useQuizAttempt';
-import { isAnswered } from './quizAttempt';
+import { isAnswered, SubmissionRejectedError } from './quizAttempt';
 import type { AttemptOutcome, AttemptSummary, QuizResult } from './quizAttempt';
 import type { Quiz } from '../../../types/domain';
 
@@ -170,6 +170,39 @@ describe('setAnswer + touched', () => {
 });
 
 // ───────────────────────────── Submit async (voie WS) ─────────────────────────────
+
+describe('submit refusé par le serveur', () => {
+  it.each([
+    ['400 motivé → message du serveur, refus', new SubmissionRejectedError('Question 2 : code trop long.'),
+      'Question 2 : code trop long.', true],
+    ['400 sans message → message de refus', new SubmissionRejectedError(''), 'REFUSE', true],
+    ['autre échec (réseau, 409, 5xx) → message générique, pas un refus', new Error('boom'), 'POST_KO', false],
+  ])('%s, rien en vol', async (_cas, error, expected, rejected) => {
+    const onFetchQuiz = vi.fn(async () => makeQuiz());
+    const onFetchAttempts = vi.fn(async () => [] as AttemptSummary[]);
+    const onSubmitQuiz = vi.fn(async () => {
+      throw error;
+    });
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz, onFetchAttempts, onSubmitQuiz, submitErrorMessage: 'POST_KO',
+        submitRejectedMessage: 'REFUSE',
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => { await result.current.submit(); });
+
+    expect(result.current.submitError).toBe(expected);
+    expect(result.current.submitRejected).toBe(rejected);
+    // Fermer le popup efface aussi le refus.
+    act(() => result.current.dismissSubmitError());
+    expect(result.current.submitError).toBeNull();
+    expect(result.current.submitRejected).toBe(false);
+    expect(result.current.phase).toBe('taking');
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+  });
+});
 
 describe('submit asynchrone via WebSocket', () => {
   it('succès (ok:true) → summary + result via onFetchAttemptResult', async () => {

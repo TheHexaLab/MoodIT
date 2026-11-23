@@ -88,6 +88,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     attemptOutcome,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
+    submitRejectedMessage: t.submitRejected,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
   });
@@ -154,7 +155,8 @@ const QuizView: React.FC<QuizViewProps> = ({
         <ErrorPopup
           content={attempt.submitError}
           onClose={attempt.dismissSubmitError}
-          onRetry={attempt.submit}
+          // Refus du serveur : renvoyer les mêmes réponses serait refusé de nouveau.
+          onRetry={attempt.submitRejected ? undefined : attempt.submit}
           labels={{ title: t.errorTitle }}
         />
       )}

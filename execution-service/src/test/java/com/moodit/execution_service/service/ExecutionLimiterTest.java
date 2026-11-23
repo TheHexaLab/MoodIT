@@ -167,6 +167,31 @@ class ExecutionLimiterTest {
     }
 
     @Test
+    void place_de_son_cote_obtenue_mais_aucune_place_globale_refuse_et_rend_la_premiere() throws Exception {
+        // Une seule place : la correction interne la tient. L'appel public obtient la place de
+        // SON côté, pas la place globale → refus, et sa place de côté est rendue.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 5000, 5);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> internal = occupy(pool, release,
+                    s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "public"))
+                    .isInstanceOf(ExecutionBusyException.class)
+                    .hasMessage(ExecutionBusyException.SANDBOX_BUSY);
+
+            release.countDown();
+            assertThat(internal.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            // Place publique rendue au refus : l'appel suivant passe.
+            assertThat(limiter.withSandboxSlot(() -> "ensuite")).isEqualTo("ensuite");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void appel_interne_attend_plus_longtemps_qu_un_appel_public() throws Exception {
         // Attente publique nulle, attente interne longue : seule la correction interne patiente.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 5000, 5);

@@ -12,6 +12,7 @@ import {
   type QuestionAnswer,
   type QuizResult,
   type SubmitQuizHandler,
+  SubmissionRejectedError,
   initAnswers,
   mergeAnswers,
   toSubmission,
@@ -143,6 +144,11 @@ interface UseQuizAttemptParams {
   /** Message d'erreur affiché si la soumission échoue (label, surchargeable). */
   submitErrorMessage?: string;
   /**
+   * Message affiché quand le serveur REFUSE la soumission sans dire pourquoi (400 illisible) :
+   * renvoyer la même réponse ne servirait à rien (label, surchargeable).
+   */
+  submitRejectedMessage?: string;
+  /**
    * Message affiché si la vérification du code est indisponible (503) : la tentative n'a pas été
    * enregistrée, l'étudiant peut renvoyer (label, surchargeable).
    */
@@ -180,6 +186,11 @@ export interface QuizAttemptApi {
 
   submitting: boolean;
   submitError: string | null;
+  /**
+   * L'erreur de soumission est un REFUS du serveur (400, 413) : renvoyer les mêmes réponses
+   * serait refusé de nouveau, l'écran ne propose donc pas « Réessayer ».
+   */
+  submitRejected: boolean;
   /** Efface l'erreur de soumission (fermeture du popup). */
   dismissSubmitError: () => void;
   /**
@@ -244,6 +255,7 @@ export function useQuizAttempt({
   attemptOutcome,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
+  submitRejectedMessage = 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
   codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
 }: UseQuizAttemptParams): QuizAttemptApi {
@@ -258,6 +270,7 @@ export function useQuizAttempt({
   const [result, setResult] = useState<QuizResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitRejected, setSubmitRejected] = useState(false);
   const [reconciling, setReconciling] = useState(false);
 
   const [attempts, setAttempts] = useState<AttemptSummary[]>([]);
@@ -554,6 +567,7 @@ export function useQuizAttempt({
 
   const submit = useCallback(async () => {
     setSubmitError(null);
+    setSubmitRejected(false);
     setSubmitting(true);
     const usingServer = Boolean(onSubmitQuiz);
     const attemptsBefore = attempts.length;
@@ -581,15 +595,24 @@ export function useQuizAttempt({
         setCurrentAttemptId(graded.attemptId ?? null);
         setPhase('summary');
       }
-    } catch {
+    } catch (e) {
       // Échec du POST lui-même (réseau, 409 déjà soumis / en cours, 5xx) : rien « en vol ».
       if (usingServer) clearPending(initialQuiz.id);
       if (!mountedRef.current) return;
-      setSubmitError(submitErrorMessage);
+      // Refus (400, 413) : le message du serveur dit quoi corriger, « réessayez » non.
+      if (e instanceof SubmissionRejectedError) {
+        setSubmitRejected(true);
+        setSubmitError(e.message || submitRejectedMessage);
+      } else {
+        setSubmitError(submitErrorMessage);
+      }
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-  }, [quiz, initialQuiz.id, answers, attempts.length, onSubmitQuiz, submitErrorMessage, reconcilePending]);
+  }, [
+    quiz, initialQuiz.id, answers, attempts.length, onSubmitQuiz, submitErrorMessage,
+    submitRejectedMessage, reconcilePending,
+  ]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */
   const retry = useCallback(() => {
@@ -658,7 +681,11 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
-      dismissSubmitError: () => setSubmitError(null),
+      submitRejected,
+      dismissSubmitError: () => {
+        setSubmitError(null);
+        setSubmitRejected(false);
+      },
       reconciling,
       attempts,
       currentAttemptId,
@@ -688,6 +715,7 @@ export function useQuizAttempt({
       result,
       submitting,
       submitError,
+      submitRejected,
       reconciling,
       attempts,
       currentAttemptId,

@@ -166,6 +166,20 @@ public class DockerSandbox {
      */
     static final int LOG_CAP_BYTES = 16 * 1024 * 1024;
 
+    /**
+     * Options du pilote json-file, FIXÉES par conteneur : elles priment sur les log-opts du démon,
+     * qui ne complète que les clés absentes. Un seul fichier (rien n'est perdu par rotation) de
+     * 128 Mo au plus, et l'écriture BLOQUANTE : en {@code non-blocking}, réglage courant d'un
+     * démon, Docker jette des messages quand son tampon est plein et le verdict relu est troué.
+     * Taille : le superviseur borne ce qu'il émet (1,2 Mo par flux en mode exec, 64 Kio par cas
+     * en notation, cas plafonnés à 100 : quelques Mio), et l'enveloppe du pilote multiplie au
+     * pire par 6 (un caractère de contrôle ou {@code <} devient {@code \u00XX}) ; 128 Mo laisse
+     * la marge. Une régression du superviseur au-delà de {@link #LOG_CAP_BYTES} par flux reste
+     * vue par le plafond de lecture.
+     */
+    static final Map<String, String> LOG_OPTS =
+            Map.of("max-size", "128m", "max-file", "1", "mode", "blocking");
+
     private final String dockerHost;
     private final long memoryBytes;
     private final long pidsLimit;
@@ -448,11 +462,13 @@ public class DockerSandbox {
                             Capability.SYS_RESOURCE)
                     .withOomScoreAdj(SUPERVISOR_OOM_SCORE_ADJ)
                     .withSecurityOpts(List.of("no-new-privileges"))
-                    // Le verdict est lu par `docker logs` : pilote json-file IMPOSÉ, sans
-                    // rotation (le conteneur est supprimé juste après). Hérité du démon, un
-                    // pilote « none », « syslog »… ou un max-size bas rendait la sortie illisible
-                    // ou tronquée — 502 sur toutes les notations.
-                    .withLogConfig(new LogConfig(LogConfig.LoggingType.JSON_FILE, Map.of()))
+                    // Le verdict est lu par `docker logs` : pilote json-file IMPOSÉ, et sa taille
+                    // aussi (LOG_OPTS). Hérité du démon, un pilote « none », « syslog »… rendait
+                    // la sortie illisible — 502 sur toutes les notations ; et le démon complète
+                    // une configuration json-file avec SES log-opts pour chaque clé absente : un
+                    // max-size bas réglé sur l'hôte tronquait la sortie, et une sortie tronquée
+                    // après la ligne témoin est comptée « sans verdict » contre l'étudiant.
+                    .withLogConfig(new LogConfig(LogConfig.LoggingType.JSON_FILE, LOG_OPTS))
                     .withAutoRemove(false);
             CreateContainerResponse created = docker.createContainerCmd(image)
                     .withHostConfig(hostConfig)

@@ -133,7 +133,9 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   conteneur (`DockerSandbox.IPC_SYSCTLS`) : `kernel.shm_rmid_forced=1` (un segment de mémoire
   partagée disparaît dès qu'il n'est plus attaché, donc avec le processus soumis),
   `kernel.msgmni=0` (aucune file de messages) et `kernel.sem` avec semmni à 0 (aucun jeu de
-  sémaphores).
+  sémaphores). Journaux du conteneur (le verdict y passe) : json-file à options fixées
+  (`DockerSandbox.LOG_OPTS`, un fichier de 128 Mo, écriture bloquante), pour qu'un `max-size` bas
+  ou un `mode: non-blocking` réglé sur le démon ne troue pas le verdict.
 - **Le superviseur n'est jamais tué par l'OOM** : sans lui, le conteneur meurt sans JSON (502 de
   cause `sans_verdict` si le superviseur avait écrit sa ligne témoin de prise en charge du code
   soumis, `indisponible` sinon ; core plafonne les `sans_verdict` à 3 par étudiant et par quiz,

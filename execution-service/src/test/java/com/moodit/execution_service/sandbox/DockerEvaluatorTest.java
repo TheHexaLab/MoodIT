@@ -230,6 +230,18 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void pre_container_rejections_ignore_languages_that_are_not_compiled() {
+        // Format framework et noms réservés : propres aux compilés. Un langage interprété (ou
+        // inconnu) n'est pas leur affaire — aucun refus, la notation suit son propre chemin.
+        List<TestCaseInput> cases = List.of(new TestCaseInput("a", "@Test void t() {}", 1));
+        for (String language : new String[] {"Python", "SQL", "cobol"}) {
+            assertThat(DockerEvaluator.frameworkHarnessRejection(language, cases)).as(language).isNull();
+            assertThat(DockerEvaluator.reservedNameRejection(language, "class Main {}", cases))
+                    .as(language).isNull();
+        }
+    }
+
+    @Test
     void supervisor_stderr_is_logged_up_to_1000_characters() {
         // Le stderr du superviseur entre dans le journal tronqué à 1000 caractères : complet
         // jusqu'à la borne, coupé avec « … » au-delà.

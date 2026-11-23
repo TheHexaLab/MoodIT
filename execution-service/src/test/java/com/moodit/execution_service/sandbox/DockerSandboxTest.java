@@ -448,6 +448,74 @@ class DockerSandboxTest {
     }
 
     @Test
+    void orphan_sweep_skips_recent_containers_and_survives_a_failed_removal() {
+        // Un conteneur récent (notation peut-être en cours) n'est pas touché ; un échec de
+        // suppression n'arrête pas le balayage des suivants et n'est pas compté.
+        com.github.dockerjava.api.DockerClient docker =
+                org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var list = org.mockito.Mockito.mock(com.github.dockerjava.api.command.ListContainersCmd.class);
+        org.mockito.Mockito.when(docker.listContainersCmd()).thenReturn(list);
+        org.mockito.Mockito.when(list.withShowAll(true)).thenReturn(list);
+        org.mockito.Mockito.when(list.withLabelFilter(
+                org.mockito.ArgumentMatchers.<Map<String, String>>any())).thenReturn(list);
+        org.mockito.Mockito.when(list.withStatusFilter(
+                org.mockito.ArgumentMatchers.<java.util.Collection<String>>any())).thenReturn(list);
+        long old = (System.currentTimeMillis() - DockerSandbox.ORPHAN_GRACE_MS - 60_000) / 1000;
+        long now = System.currentTimeMillis() / 1000;
+        var recent = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(recent.getId()).thenReturn("recent");
+        org.mockito.Mockito.when(recent.getCreated()).thenReturn(now);
+        var stuck = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(stuck.getId()).thenReturn("coince");
+        org.mockito.Mockito.when(stuck.getCreated()).thenReturn(old);
+        var orphan = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Container.class);
+        org.mockito.Mockito.when(orphan.getId()).thenReturn("vieux");
+        org.mockito.Mockito.when(orphan.getCreated()).thenReturn(old);
+        org.mockito.Mockito.when(list.exec()).thenReturn(java.util.List.of(recent, stuck, orphan));
+        var removeStuck = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        org.mockito.Mockito.when(docker.removeContainerCmd("coince")).thenReturn(removeStuck);
+        org.mockito.Mockito.when(removeStuck.withForce(true)).thenReturn(removeStuck);
+        org.mockito.Mockito.when(removeStuck.exec()).thenThrow(new RuntimeException("démon occupé"));
+        var removeOrphan = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        org.mockito.Mockito.when(docker.removeContainerCmd("vieux")).thenReturn(removeOrphan);
+        org.mockito.Mockito.when(removeOrphan.withForce(true)).thenReturn(removeOrphan);
+
+        assertThat(new DockerSandbox(docker, 512, 64, 1.0).removeOrphans()).isEqualTo(1);
+        org.mockito.Mockito.verify(docker, org.mockito.Mockito.never()).removeContainerCmd("recent");
+        org.mockito.Mockito.verify(removeOrphan).exec();
+    }
+
+    @Test
+    void interruption_while_reading_logs_is_unavailable_and_keeps_the_flag() {
+        // Arrêt du service pendant la lecture des journaux : l'attente lève InterruptedException.
+        // Panne (jamais « sans verdict »), drapeau d'interruption rétabli, conteneur supprimé.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var logs = docker.logContainerCmd("cid");
+        org.mockito.Mockito.doAnswer(inv -> {
+            com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame> cb =
+                    inv.getArgument(0);
+            cb.onStart(() -> { });
+            Thread.currentThread().interrupt();
+            return cb;
+        }).when(logs).exec(org.mockito.ArgumentMatchers.any());
+
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new DockerSandbox(docker, 512, 64, 1.0)
+                            .run("img", Map.of("job.json", "{}"), 5000))
+                    .isInstanceOf(SandboxException.class)
+                    .isNotInstanceOf(NoVerdictException.class)
+                    .hasMessageContaining("interrompue")
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+        org.mockito.Mockito.verify(remove).exec();
+    }
+
+    @Test
     void runner_container_swept_only_after_grace_period() {
         // Récent, il appartient peut-être à une notation en cours : « created » (fenêtre
         // create → start d'une autre instance) comme TERMINÉ (fenêtre fin → lecture des
@@ -647,6 +715,16 @@ class DockerSandboxTest {
                 Map.entry("kernel.shm_rmid_forced", "1"),
                 Map.entry("kernel.msgmni", "0"),
                 Map.entry("kernel.sem", "1 1 1 0"));
+
+        // Journaux : json-file IMPOSÉ avec sa taille. Le démon complète une configuration avec
+        // ses propres log-opts pour chaque clé absente : un max-size bas sur l'hôte tronquait le
+        // verdict, compté ensuite « sans verdict » contre l'étudiant.
+        assertThat(hostConfig.getLogConfig().getType())
+                .isEqualTo(com.github.dockerjava.api.model.LogConfig.LoggingType.JSON_FILE);
+        // Écriture bloquante : en non-blocking (réglage courant d'un démon), Docker jette des
+        // messages quand son tampon est plein, et le verdict relu est troué.
+        assertThat(hostConfig.getLogConfig().getConfig()).containsOnly(
+                Map.entry("max-size", "128m"), Map.entry("max-file", "1"), Map.entry("mode", "blocking"));
     }
 
     @Test

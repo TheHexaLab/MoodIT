@@ -17,7 +17,11 @@ vi.mock('../../helpers/api.ts', () => ({
 }));
 
 import { apiFetch } from '../../helpers/api.ts';
-import { ExecutionBusyError } from '../../components/MainPanel/QuizView/quizAttempt.ts';
+import {
+  ExecutionBusyError,
+  SUBMISSION_TOO_LARGE_MESSAGE,
+  SubmissionRejectedError,
+} from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import {
   fetchPrograms,
   fetchCourses,
@@ -347,6 +351,44 @@ describe('submitQuiz', () => {
     await expect(
       submitQuiz({ quizId: 5, answers: [] })
     ).rejects.toThrow('Échec de la soumission du quiz');
+  });
+
+  it.each([
+    ['texte brut de core', 'Question 2 : le code soumis dépasse 100000 caractères.\n',
+      'Question 2 : le code soumis dépasse 100000 caractères.'],
+    // Corps JSON = erreur générique de Spring (anglais, technique) : jamais montrée à l'étudiant.
+    ['erreur JSON de Spring', '{"status":400,"detail":"Failed to read request"}', ''],
+    ['JSON illisible', '{pas du json', ''],
+    ['corps vide', '', ''],
+  ])('400 (%s) → SubmissionRejectedError avec le message lisible', async (_cas, body, message) => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => body,
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as Error).message).toBe(message);
+  });
+
+  it('413 du gateway (corps trop gros) → SubmissionRejectedError à message fixe', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(413));
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as Error).message).toBe(SUBMISSION_TOO_LARGE_MESSAGE);
+  });
+
+  it('400 dont le corps ne se lit pas → SubmissionRejectedError sans message', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => {
+        throw new Error('flux coupé');
+      },
+    } as unknown as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as Error).message).toBe('');
   });
 });
 

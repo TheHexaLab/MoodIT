@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-libra
 import QuizView from './QuizView';
 import type { Course, CourseChannel, Quiz } from '../../../types/domain';
 import type { AttemptSummary, QuizResult, SubmitQuizHandler } from './quizAttempt';
+import { SubmissionRejectedError } from './quizAttempt';
 
 /**
  * Coquille de la vue quiz (côté étudiant) : en-tête, barre de progression, corps
@@ -171,6 +172,27 @@ describe('QuizView — pied de navigation', () => {
     const submit = screen.getByRole('button', { name: /Soumettre/ });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     expect(submit.getAttribute('title')).toContain('déjà soumis');
+  });
+
+  it.each([
+    ['refus du serveur → son message, sans « Réessayer »',
+      new SubmissionRejectedError('Question 2 : le code soumis dépasse 100000 caractères.'),
+      'Question 2 : le code soumis dépasse 100000 caractères.', false],
+    ['échec ordinaire → message générique, avec « Réessayer »', new Error('réseau'),
+      'La soumission a échoué. Réessayez.', true],
+  ])('%s', async (_cas, error, message, retryOffered) => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw error;
+    });
+    renderView({ onSubmitQuiz });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
+    expect(Boolean(screen.queryByRole('button', { name: 'Réessayer' }))).toBe(retryOffered);
   });
 
   it('« Soumettre » actif quand la tentative n’est pas consommée', async () => {
