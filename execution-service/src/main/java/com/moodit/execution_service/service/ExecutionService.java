@@ -329,8 +329,11 @@ public class ExecutionService {
      */
     private TestResult runSqlIsolated(String code, TestCaseInput testCase,
             String nonce, int weight, Integer timeoutMs) {
-        // Phase 1 — bac à sable.
-        CodeAssembler.Assembled p1 = assembler.assembleSqlPhase1(code, testCase.harnessCode(), nonce);
+        // Phase 1 — bac à sable. Son nonce n'est PAS celui du verdict (#23) : le code soumis tourne
+        // dans ce programme, et même s'il parvenait à y lire les sentinelles du dump, il n'en
+        // tirerait rien qui vaille en phase 2.
+        String dumpNonce = newNonce();
+        CodeAssembler.Assembled p1 = assembler.assembleSqlPhase1(code, testCase.harnessCode(), dumpNonce);
         RunnerExec.Stage run1 = execute("sqlite3", p1.files(), null, timeoutMs).run();
         if (run1 == null || run1.signal() != null) {
             return new TestResult(testCase.name(), weight, false,
@@ -342,7 +345,7 @@ public class ExecutionService {
                     firstNonBlank(run1.stderr(), run1.message(), "Erreur SQL (ton code)"));
         }
         String dump = linesBetween(run1.stdout(),
-                CodeAssembler.sqlDumpStart(nonce), CodeAssembler.sqlDumpEnd(nonce));
+                CodeAssembler.sqlDumpStart(dumpNonce), CodeAssembler.sqlDumpEnd(dumpNonce));
         if (dump == null) {
             return new TestResult(testCase.name(), weight, false, "État de la base introuvable après ton code");
         }
@@ -400,7 +403,8 @@ public class ExecutionService {
 
     /**
      * Valeur du verdict SQL : dernière ligne non vide STRICTEMENT entre les deux sentinelles (chaîne
-     * vide si aucune — ex. verdict NULL). {@code null} si les sentinelles sont absentes.
+     * vide si aucune — ex. verdict NULL). {@code null} si les sentinelles sont absentes ou si celle
+     * de début est en double (cf. {@link #linesBetween}).
      */
     private static String sqlVerdict(String stdout, String nonce) {
         String block = linesBetween(stdout, CodeAssembler.sqlVerdictStart(nonce), CodeAssembler.sqlVerdictEnd(nonce));
@@ -417,9 +421,12 @@ public class ExecutionService {
     }
 
     /**
-     * Texte STRICTEMENT entre la 1ʳᵉ ligne == {@code start} et la 1ʳᵉ ligne == {@code end} qui suit
-     * (bornes exclues). {@code null} si l'une des sentinelles manque. Sert à isoler le dump (phase 1)
-     * et le verdict (phase unique / phase 2) de tout ce que l'étudiant a pu afficher autour.
+     * Texte STRICTEMENT entre la ligne == {@code start} et la 1ʳᵉ ligne == {@code end} qui suit
+     * (bornes exclues). {@code null} si l'une des sentinelles manque, ou si {@code start} figure
+     * sur PLUS D'UNE ligne (#23) : le programme n'en imprime qu'une, une seconde ne peut venir que
+     * d'une sortie forgée, et choisir l'une ou l'autre reviendrait à parier sur l'ordre. Sert à
+     * isoler le dump (phase 1) et le verdict (phase unique / phase 2) de tout ce que l'étudiant a
+     * pu afficher autour.
      */
     private static String linesBetween(String output, String start, String end) {
         if (output == null) {
@@ -430,13 +437,13 @@ public class ExecutionService {
         int e = -1;
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i].strip();
-            if (s < 0) {
-                if (line.equals(start)) {
-                    s = i;
+            if (line.equals(start)) {
+                if (s >= 0) {
+                    return null;
                 }
-            } else if (line.equals(end)) {
+                s = i;
+            } else if (s >= 0 && e < 0 && line.equals(end)) {
                 e = i;
-                break;
             }
         }
         if (s < 0 || e < 0) {

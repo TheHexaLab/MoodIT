@@ -401,6 +401,26 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(single("SQL", "SELECT 1", "SELECT 0; SELECT 1;").passed()).isTrue();
     }
 
+    @Test
+    void sql_sentinelle_de_debut_en_double_fait_echouer_le_verdict() {
+        // #23 : le programme n'imprime qu'un bloc. Un second, avant ou après le vrai, vient d'une
+        // sortie forgée : le verdict n'est lu dans aucun des deux.
+        pistonRun(f -> stage(sqlFenced(f, "1") + sqlFenced(f, "1"), "", 0, null, null));
+        TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
+        assertThat(t.passed()).isFalse();
+        assertThat(t.detail()).isEqualTo("Verdict du harnais introuvable (sortie corrompue ?)");
+
+        // Début seul en double, sans seconde fin : même refus.
+        pistonRun(f -> stage(CodeAssembler.sqlVerdictStart(nonceIn(f)) + "\n" + sqlFenced(f, "1"),
+                "", 0, null, null));
+        assertThat(single("SQL", "SELECT 1", "SELECT 1;").passed()).isFalse();
+
+        // Une fin en double, elle, ne gêne pas : le bloc s'arrête à la première.
+        pistonRun(f -> stage(sqlFenced(f, "1") + CodeAssembler.sqlVerdictEnd(nonceIn(f)) + "\n",
+                "", 0, null, null));
+        assertThat(single("SQL", "SELECT 1", "SELECT 1;").passed()).isTrue();
+    }
+
     // ── SQL modification : chemins d'échec des deux phases ─────────────────────
 
     private static final String MUTATION_HARNESS =
@@ -454,6 +474,42 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("État de la base introuvable après ton code");
         verify(runner, times(1)).execute(anyString(), any(), any(), any());
+
+        // Début du dump en double (#23) : sortie forgée, le dump n'est pas relu, pas de phase 2.
+        pistonRun(f -> isPhase1(f)
+                ? stage(CodeAssembler.sqlDumpStart(nonceIn(f)) + "\n" + dump(f, "CREATE TABLE t(n INT);\n"),
+                        "", 0, null, null)
+                : stage(sqlFenced(f, "1"), "", 0, null, null));
+        assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
+                .isEqualTo("État de la base introuvable après ton code");
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void sql_modification_le_nonce_du_dump_n_est_pas_celui_du_verdict() {
+        // #23 : le code soumis tourne en phase 1 ; rien de ce qui s'y trouve ne vaut en phase 2.
+        List<String> nonces = new ArrayList<>();
+        pistonRun(f -> {
+            nonces.add(nonceIn(f));
+            return isPhase1(f)
+                    ? stage(dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"), "", 0, null, null)
+                    : stage(sqlFenced(f, "1"), "", 0, null, null);
+        });
+
+        assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).passed()).isTrue();
+        assertThat(nonces).hasSize(2).doesNotContain("").doesNotHaveDuplicates();
+
+        // Le verdict encadré par le nonce du DUMP ne compte pas.
+        String[] dumpNonce = new String[1];
+        pistonRun(f -> {
+            if (isPhase1(f)) {
+                dumpNonce[0] = nonceIn(f);
+                return stage(dump(f, "CREATE TABLE t(n INT);\n"), "", 0, null, null);
+            }
+            return stage(CodeAssembler.sqlVerdictStart(dumpNonce[0]) + "\n1\n"
+                    + CodeAssembler.sqlVerdictEnd(dumpNonce[0]) + "\n", "", 0, null, null);
+        });
+        assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).passed()).isFalse();
     }
 
     @Test

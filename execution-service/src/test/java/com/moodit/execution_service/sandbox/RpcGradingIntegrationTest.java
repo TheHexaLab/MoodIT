@@ -801,6 +801,72 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void submitted_code_that_crashes_fails_in_the_six_compiled_languages() {
+        // Critère de #116 : une exception ou un panic du code soumis échoue, dans CHAQUE langage
+        // compilé. Le témoin plante seulement sur 999 et réussit ; la variante plante sur
+        // l'appel du harnais. Elle doit échouer à l'EXÉCUTION : un échec de compilation ferait
+        // passer ce test sans rien mesurer.
+        record Crash(String lang, String harness, String code) { }
+        List<Crash> crashes = List.of(
+                new Crash("Go", "return doubler(5) == 10", """
+                        package main
+
+                        func doubler(n int) int {
+                        \tif n == 999 {
+                        \t\tpanic("boum")
+                        \t}
+                        \treturn n * 2
+                        }
+
+                        func main() {}
+                        """),
+                new Crash("Rust", "doubler(5) == 10", """
+                        fn doubler(n: i32) -> i32 {
+                            if n == 999 { panic!("boum"); }
+                            n * 2
+                        }
+
+                        fn main() {}
+                        """),
+                new Crash("C", "return doubler(5) == 10;", """
+                        int doubler(int n) {
+                            if (n == 999) { __builtin_trap(); }
+                            return n * 2;
+                        }
+                        """),
+                new Crash("C++", "return doubler(5) == 10;", """
+                        int doubler(int n) {
+                            if (n == 999) { throw 42; }
+                            return n * 2;
+                        }
+                        """),
+                new Crash("C#", "return Solution.doubler(5) == 10;", """
+                        class Solution {
+                            public static int doubler(int n) {
+                                if (n == 999) { throw new System.InvalidOperationException("boum"); }
+                                return n * 2;
+                            }
+                        }
+                        """),
+                new Crash("Java", "return Solution.doubler(5) == 10;", """
+                        class Solution {
+                            static int doubler(int n) {
+                                if (n == 999) { throw new IllegalStateException("boum"); }
+                                return n * 2;
+                            }
+                        }
+                        """));
+        for (Crash c : crashes) {
+            TestResult ok = note(c.lang(), c.harness(), c.code());
+            assertThat(ok.passed()).as(c.lang() + " : témoin " + ok.detail()).isTrue();
+            TestResult crash = note(c.lang(), c.harness(), c.code().replace("999", "5"));
+            assertThat(crash.passed()).as(c.lang() + " : plantage").isFalse();
+            assertThat(crash.detail()).as(c.lang() + " : plantage")
+                    .isNotBlank().doesNotContainIgnoringCase("compilation");
+        }
+    }
+
+    @Test
     void csharp_namespace_helper_nested_class_and_method_named_Double() {
         String h = "return Solution.Double(4) == 8;";
         String code = """
@@ -1309,6 +1375,33 @@ class RpcGradingIntegrationTest {
                 int dist(int a) { return abs(index(a)); }
                 int moitie(int a) { return div(a, 2); }
                 """, "a / b", "0");
+    }
+
+    @Test
+    void c_and_cpp_keyword_macros_do_not_reach_the_grader() {
+        // #22 : quand le code soumis précédait le harnais dans le même programme, une macro sur un
+        // mot-clé réécrivait le harnais. La réponse fausse ci-dessous (`n * 3`) passerait si l'une
+        // de ces macros atteignait le noteur : `if` neutralisé, il ne reste que `doubler(0) == 0`,
+        // vrai ; `return` détourné, il renvoie 1. Le noteur est un autre programme : la macro ne
+        // touche que le programme soumis, ce que fixe la RAISON de chaque échec (sans elle, un
+        // échec quelconque, du noteur compris, ferait passer ce test).
+        String h = "if (doubler(5) != 10) return 0;\nreturn doubler(0) == 0;";
+        for (String language : List.of("C", "C++")) {
+            assertThat(note(language, h, "int doubler(int n) { return n * 2; }\n").passed())
+                    .as(language + " : témoin juste").isTrue();
+            // `return` : c'est le programme SOUMIS (etu_build) qui ne compile plus.
+            TestResult ret = note(language, h,
+                    "#define return return 1 ||\nint doubler(int n) { return n * 3; }\n");
+            assertThat(ret.passed()).as(language + " : return").isFalse();
+            assertThat(ret.detail()).as(language + " : return")
+                    .contains("etu_build").doesNotContain("noteur");
+            // `if` : le programme soumis compile, le noteur le questionne, et c'est le programme
+            // soumis, détraqué par sa propre macro, qui ne répond plus.
+            TestResult cond = note(language, h,
+                    "#define if(c) if (0)\nint doubler(int n) { return n * 3; }\n");
+            assertThat(cond.passed()).as(language + " : if").isFalse();
+            assertThat(cond.detail()).as(language + " : if").contains("appel refuse par le code soumis");
+        }
     }
 
     @Test
