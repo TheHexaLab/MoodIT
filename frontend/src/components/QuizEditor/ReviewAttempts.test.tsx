@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from '@testing-library/react';
 import { QuizEditor } from './QuizEditor';
 import { ReviewAttemptsBody } from './ReviewAttemptsBody';
 import { defaultQuizEditorLabels } from './quizEditorLabels';
@@ -91,6 +91,10 @@ describe('QuizEditor — tentatives à revoir', () => {
     await waitFor(() => expect(screen.queryByText('Éva Test')).toBeNull());
     expect(onRegradeAttempt).toHaveBeenCalledWith(1, 81);
     expect(screen.getByText('Bob Test')).toBeTruthy();
+    // Le focus passe à la ligne voisine au lieu de sortir de la fenêtre.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText(reviewT.regradeAria('Bob Test', 1)))
+    );
 
     // Retour à la liste : un « à revoir » de moins.
     fireEvent.click(screen.getByLabelText(/retour/i));
@@ -124,23 +128,61 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.getByText(listT.reviewBadge(1))).toBeTruthy();
   });
 
-  it('relance refusée → popup d\'erreur, la ligne reste', async () => {
+  it('relance refusée → popup d\'erreur, la liste se recale sur le serveur', async () => {
     const onRegradeAttempt = vi.fn(async () => {
       throw new Error('409');
     });
+    // Le serveur ne la compte plus (relancée par un autre enseignant) : la ligne part, la
+    // pastille aussi.
+    const onFetchReviewAttempts = vi
+      .fn<(quizId: number) => Promise<ReviewAttempt[]>>()
+      .mockResolvedValueOnce([EVA])
+      .mockResolvedValue([]);
     render(
       <QuizEditor
         courseId={42}
         quizzes={[makeQuiz({ reviewAttemptCount: 1 })]}
         onClose={vi.fn()}
-        handlers={{ onFetchReviewAttempts: vi.fn(async () => [EVA]), onRegradeAttempt }}
+        handlers={{ onFetchReviewAttempts, onRegradeAttempt }}
       />
     );
     fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 1)));
     fireEvent.click(await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2)));
 
     await screen.findByText(editorT.regradeError);
-    expect(screen.getByText('Éva Test')).toBeTruthy();
+    await screen.findByText(reviewT.empty);
+    expect(onFetchReviewAttempts).toHaveBeenCalledTimes(2);
+    // Le bouton cliqué a disparu avec le rechargement : fermer l'erreur rend le focus à
+    // l'introduction, dans la fenêtre, et non à <body>.
+    const errorDialog = screen.getByText(editorT.regradeError).closest(
+      '[role="dialog"], [role="alertdialog"]'
+    ) as HTMLElement;
+    fireEvent.click(within(errorDialog).getByRole('button', { name: 'Fermer' }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText(reviewT.intro)));
+  });
+
+  it('retour à la liste avant la réponse de la relance → la pastille n\'est pas décomptée une fois de trop', async () => {
+    let resolveRegrade!: () => void;
+    const onRegradeAttempt = vi.fn(
+      () => new Promise<void>((resolve) => { resolveRegrade = resolve; })
+    );
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
+        onClose={vi.fn()}
+        handlers={{ onFetchReviewAttempts: vi.fn(async () => [EVA, BOB]), onRegradeAttempt }}
+      />
+    );
+    fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 2)));
+    fireEvent.click(await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2)));
+    fireEvent.click(screen.getByLabelText(/retour/i));
+    expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
+
+    await act(async () => {
+      resolveRegrade();
+    });
+    expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
   });
 });
 
@@ -179,10 +221,45 @@ describe('ReviewAttemptsBody', () => {
   });
 });
 
+describe('ReviewAttemptsBody — focus et relance unique', () => {
+  it('dernière ligne relancée → focus sur l\'introduction ; une seule relance à la fois', async () => {
+    let resolveRegrade!: () => void;
+    const onRegrade = vi.fn(() => new Promise<void>((resolve) => { resolveRegrade = resolve; }));
+    render(
+      <ReviewAttemptsBody
+        quizId={7}
+        onFetch={async () => [EVA]}
+        onRegrade={onRegrade}
+        onRegraded={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+    const button = await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2));
+    fireEvent.click(button);
+    // Toujours focalisable pendant la relance (aria-disabled), et un second clic ne relance pas.
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(button);
+    expect(onRegrade).toHaveBeenCalledTimes(1);
+
+    resolveRegrade();
+    await screen.findByText(reviewT.empty);
+    expect(document.activeElement).toBe(screen.getByText(reviewT.intro));
+  });
+});
+
 describe('reviewAttemptsLabels', () => {
-  it('sous-ligne : date si connue, pluriel des échecs', () => {
+  it('sous-ligne : date si connue, pluriel des échecs, compte nul omis', () => {
     expect(reviewT.attemptSub(null, 1)).toBe('1 échec sans verdict');
     expect(reviewT.attemptSub('pas une date', 3)).toBe('3 échecs sans verdict');
     expect(reviewT.attemptSub('2026-09-02T08:30:00Z', 2)).toMatch(/^Soumise le .* · 2 échecs/);
+    // Compte remis à zéro par une autre tentative corrigée : pas de « 0 échec sans verdict ».
+    expect(reviewT.attemptSub(null, 0)).toBe('');
+    expect(reviewT.attemptSub('2026-09-02T08:30:00Z', 0)).toMatch(/^Soumise le [^·]*$/);
+  });
+
+  it('nom accessible de la pastille : commence par son texte visible', () => {
+    expect(listT.reviewAria('Quiz A', 2).startsWith(listT.reviewBadge(2))).toBe(true);
+    expect(listT.reviewAria('Quiz A', 1).startsWith(listT.reviewBadge(1))).toBe(true);
   });
 });

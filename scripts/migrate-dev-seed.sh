@@ -12,7 +12,7 @@
 # l'établissement usherbrooke.ca, un programme/cours, des comptes de démo et le quiz de code
 # multi-langages (harnais des compilés au format booléen non falsifiable, cf. V2_3).
 #
-# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé ses migrations V1→V5). Ce script ne
+# Pré-requis : le SCHÉMA est déjà appliqué (la pile a lancé toutes les migrations de db/migration). Ce script ne
 # migre PAS — il SÈME. Usage dev uniquement ; la prod réelle reste volontairement vierge.
 #
 # Usage :
@@ -38,7 +38,7 @@ fi
 # Garde d'idempotence : la table establishment existe-t-elle, et est-elle vide ?
 count="$(pg -tAc 'SELECT count(*) FROM establishment' 2>/dev/null | tr -d '[:space:]')" || count=""
 if [ -z "$count" ]; then
-  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (V1→V5) ? Lance la pile." >&2
+  echo "✗ Lecture de « establishment » impossible — le schéma est-il migré (db/migration) ? Lance la pile." >&2
   exit 1
 fi
 if [ "$count" != "0" ] && [ "${FORCE:-0}" != "1" ]; then

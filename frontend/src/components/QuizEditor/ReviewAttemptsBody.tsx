@@ -38,6 +38,19 @@ export function ReviewAttemptsBody({
   const [attempts, setAttempts] = useState<ReviewAttempt[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
+  // Focus à poser après le retrait d'une ligne relancée : le bouton de la ligne voisine, sinon
+  // l'introduction. Sans lui, le focus tombait sur <body>, hors de la fenêtre modale.
+  // Lu par ref (pas un état) : posé avec le retrait de la ligne, consommé au rendu qui suit.
+  const focusAfterRef = useRef<number | 'intro' | null>(null);
+  const buttonRefs = useRef(new Map<number, HTMLButtonElement>());
+  const introRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const focusAfter = focusAfterRef.current;
+    if (focusAfter == null) return;
+    focusAfterRef.current = null;
+    const target = focusAfter === 'intro' ? introRef.current : buttonRefs.current.get(focusAfter);
+    target?.focus();
+  }, [attempts]);
   // Rappels du parent lus par ref : définis en ligne, ils changent à chaque rendu du parent, et le
   // chargement ne doit dépendre que du quiz.
   const fetchRef = useRef(onFetch);
@@ -78,13 +91,27 @@ export function ReviewAttemptsBody({
   };
 
   const regrade = async (attempt: ReviewAttempt) => {
+    // Une relance à la fois : les boutons restent focalisables (aria-disabled), d'où ce garde.
+    if (regrading != null) return;
     setRegrading(attempt.attemptId);
     try {
       await onRegrade(quizId, attempt.attemptId);
-      setAttempts((list) => (list ?? []).filter((a) => a.attemptId !== attempt.attemptId));
+      const list = attempts ?? [];
+      const index = list.findIndex((a) => a.attemptId === attempt.attemptId);
+      const neighbour = list[index + 1] ?? list[index - 1];
+      focusAfterRef.current =
+        neighbour && neighbour.attemptId !== attempt.attemptId ? neighbour.attemptId : 'intro';
+      setAttempts(list.filter((a) => a.attemptId !== attempt.attemptId));
       onRegraded(attempt.attemptId);
     } catch {
+      // Focus sur l'introduction AVANT le message d'erreur : la fenêtre d'erreur mémorise
+      // l'élément focalisé à son ouverture pour le lui rendre, et le bouton cliqué disparaît
+      // avec le rechargement ci-dessous — le focus serait tombé sur <body>, hors de la fenêtre.
+      introRef.current?.focus();
       onError('regrade');
+      // Refus (409 : déjà relancée par un autre enseignant, ou plus à revoir) : la liste et la
+      // pastille se recalent sur le serveur, au lieu de garder une ligne qui renverrait 409.
+      reload();
     } finally {
       setRegrading(null);
     }
@@ -92,7 +119,9 @@ export function ReviewAttemptsBody({
 
   return (
     <div className={styles.field}>
-      <p className={styles.fieldHint}>{t.intro}</p>
+      <p className={styles.fieldHint} ref={introRef} tabIndex={-1}>
+        {t.intro}
+      </p>
       <div className={styles.list}>
         {attempts == null && !failed && (
           <div className={styles.listLoading} role="status" aria-live="polite" aria-busy="true">
@@ -124,7 +153,13 @@ export function ReviewAttemptsBody({
               className={styles.addLinkButton}
               aria-label={t.regradeAria(attempt.studentName, attempt.attemptNo)}
               aria-busy={regrading === attempt.attemptId}
-              disabled={regrading != null}
+              // aria-disabled et non disabled : un bouton désactivé perd le focus, qui sortait
+              // alors de la fenêtre modale.
+              aria-disabled={regrading != null}
+              ref={(el) => {
+                if (el) buttonRefs.current.set(attempt.attemptId, el);
+                else buttonRefs.current.delete(attempt.attemptId);
+              }}
               onClick={() => void regrade(attempt)}
             >
               {regrading === attempt.attemptId ? <Spinner size={15} /> : t.regrade}

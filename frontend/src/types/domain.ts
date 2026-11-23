@@ -447,6 +447,8 @@ export interface QuizResponse {
   allowRetry?: boolean;
   questionCount?: number;
   createdAt?: string;
+  /** Tentatives « à revoir » (correction sans verdict), sur la route `/manage` seulement. */
+  reviewAttemptCount?: number;
 }
 
 /** Cours renvoyé par l'endpoint enrollments (CourseForumsDTO) : forums + quiz embarqués. */

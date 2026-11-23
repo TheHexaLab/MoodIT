@@ -364,14 +364,18 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             // Le temps limite de la QUESTION doit arriver tel quel à l'exécution (épinglé par
             // eq(30_000) plus bas : un null silencieux passerait avec any()).
             codeQ.setExecTimeoutMs(30_000);
+            // Le code de départ aussi (#22) : il dit à execution-service quel nom l'énoncé impose.
+            codeQ.setStartCode("def sum(l):\n    pass");
             // Harnais triés par id (31 puis 32) → verdicts alignés sur cet ordre.
-            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), eq(30_000))).thenReturn(List.of(true, false));
+            when(executionClient.evaluate(eq("python"), eq("print(1)"), any(), eq(30_000),
+                    eq("def sum(l):\n    pass"))).thenReturn(List.of(true, false));
 
             service.gradeAttempt(ATTEMPT_ID);
 
             ArgumentCaptor<List<ExecutionClient.Harness>> harnesses = ArgumentCaptor.forClass(List.class);
             // Une seule question exécutée : celle sans harnais et la question à choix sont ignorées.
-            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), eq(30_000));
+            verify(executionClient, times(1)).evaluate(eq("python"), eq("print(1)"), harnesses.capture(), eq(30_000),
+                    eq("def sum(l):\n    pass"));
             assertThat(harnesses.getValue()).containsExactly(
                     new ExecutionClient.Harness("cas A", "assert cas A", 2),
                     new ExecutionClient.Harness("cas B", "assert cas B", 1));
@@ -397,11 +401,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void sansLangage_langageNull() {
             codeQ.setLanguage(null);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
-            verify(executionClient).evaluate(eq(null), eq("print(1)"), any(), any());
+            verify(executionClient).evaluate(eq(null), eq("print(1)"), any(), any(), any());
             verify(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
         }
 
@@ -409,7 +413,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Correction interrompue par l'arrêt de core → tentative LAISSÉE pending (reprise au démarrage)")
         void correctionInterrompue_laissePending() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any()))
+            when(executionClient.evaluate(any(), any(), any(), any(), any()))
                     .thenThrow(new com.moodit.core_service.exception.GradingInterruptedException());
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -427,7 +431,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Sandbox indisponible (null) → pending SUPPRIMÉ et push quiz:attempt-failed")
         void sandboxIndisponible_supprimeEtNotifie() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -437,6 +441,37 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             verify(realtimePublisher, never()).quizAttemptGraded(anyLong(), anyLong(), anyLong());
             verifyNoInteractions(submissionTestCaseRepository);
             assertThat(attempt.getStatus()).isEqualTo("pending");
+        }
+
+        @Test
+        @DisplayName("Relance qui échoue sur un quiz avec reprise, compte remis à zéro → REMISE à revoir, pas supprimée")
+        void relanceEchouee_revientARevoir() {
+            // Une autre tentative corrigée entre-temps a effacé le compte (aucun GradingFailure) :
+            // seul le marqueur de relance garde la tentative.
+            attempt.setRegrade(true);
+            quiz.setAllowRetry(true);
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
+            when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo(QuizService.REVIEW);
+            verify(attemptRepository, never()).delete(any(Attempt.class));
+            verify(realtimePublisher).quizAttemptFailed(3L, 4L, ATTEMPT_ID, QuizService.REVIEW);
+        }
+
+        @Test
+        @DisplayName("Relance qui aboutit → tentative 'done' et marqueur de relance retiré")
+        void relanceReussie_retireLeMarqueur() {
+            attempt.setRegrade(true);
+            when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, false));
+
+            service.gradeAttempt(ATTEMPT_ID);
+
+            assertThat(attempt.getStatus()).isEqualTo("done");
+            assertThat(attempt.isRegrade()).isFalse();
         }
 
         @Test
@@ -486,7 +521,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Nombre de verdicts incohérent → traité comme une indisponibilité (suppression)")
         void verdictsIncoherents_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true));
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -499,7 +534,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Erreur inattendue pendant l'exécution → pending supprimé quand même")
         void erreurInattendue_supprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -514,7 +549,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))
                     .thenThrow(new IllegalStateException("BD indisponible"));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -529,7 +564,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))   // contexte
                     .thenReturn(Optional.empty());      // finalisation, puis lookup de l'échec
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, true));
 
             service.gradeAttempt(ATTEMPT_ID);
 
@@ -556,7 +591,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Finalisée par une autre passe pendant l'exécution → aucune écriture, aucun push, pas de suppression")
         void finaliseeParUneAutrePasse_ignoree() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenAnswer(inv -> {
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenAnswer(inv -> {
                 attempt.setStatus("done"); // l'autre passe a committé pendant le sandbox
                 return List.of(true, true);
             });
@@ -573,7 +608,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void echecApresFinalisationParLAutre_rienNestSupprime() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             // Clé (submission, test_case) déjà écrite par l'autre passe.
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, true));
             when(submissionTestCaseRepository.save(any()))
                     .thenThrow(new DataIntegrityViolationException("pk"));
             // Relue sous verrou : l'autre passe l'a finalisée.
@@ -590,7 +625,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Push WS en échec après correction → la tentative corrigée n'est PAS supprimée")
         void pushEchoue_tentativeConservee() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true, true));
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, true));
             doThrow(new IllegalStateException("WS fermé"))
                     .when(realtimePublisher).quizAttemptGraded(3L, 4L, ATTEMPT_ID);
 
@@ -621,7 +656,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         private void failsWithoutVerdict() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any()))
+            when(executionClient.evaluate(any(), any(), any(), any(), any()))
                     .thenThrow(new CodeVerificationNoVerdictException());
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
         }
@@ -686,7 +721,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Sandbox INDISPONIBLE sous le plafond → supprimée, rien n'est compté")
         void indisponible_neComptePas() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
                     .thenReturn(Optional.of(failures(2)));
@@ -702,7 +737,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @DisplayName("Plafond déjà atteint (relance de l'enseignant) : même une panne garde la tentative")
         void plafondAtteint_toutEchecGarde() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
                     .thenReturn(Optional.of(failures(3)));
@@ -720,7 +755,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void plafondAtteint_avecReprise_pannesSupprime() {
             quiz.setAllowRetry(true);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
-            when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+            when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
                     .thenReturn(Optional.of(failures(3)));
@@ -837,11 +872,32 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             service.regradeAttempt(4, 81);
 
             assertThat(review.getStatus()).isEqualTo("pending");
+            // Marqueur de relance : un nouvel échec la remettra à revoir (cf. failGrading).
+            assertThat(review.isRegrade()).isTrue();
             verify(attemptRepository).saveAndFlush(review);
             verify(eventPublisher).publishEvent(new AttemptSubmittedEvent(81, false));
             ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
             verify(auditLogService).record(eq("QUIZ_REGRADE"), eq("QUIZ"), eq(4), summary.capture(), any());
             assertThat(summary.getValue()).contains("tentative 2").contains("Éva Test").contains("Quiz 4");
+        }
+
+        @Test
+        @DisplayName("Historique pendant une relance : la tentative reste « à revoir », une correction ordinaire en cours n'y est pas")
+        void historique_pendantUneRelance() {
+            review.setStatus("pending");
+            review.setRegrade(true);
+            Attempt ordinaryPending = attempt(83, quiz, eva, 3, "pending");
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(4, 3))
+                    .thenReturn(List.of(review, ordinaryPending));
+
+            assertThat(service.getMyAttempts(4, EMAIL))
+                    .singleElement()
+                    .satisfies(a -> {
+                        assertThat(a.getId()).isEqualTo(81);
+                        assertThat(a.getStatus()).isEqualTo(QuizService.REVIEW);
+                        assertThat(a.getEarned()).isNull();
+                    });
         }
 
         @Test

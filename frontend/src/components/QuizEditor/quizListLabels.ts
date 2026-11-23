@@ -21,7 +21,10 @@ export interface QuizListLabels {
   create: string;
   /** Pastille des tentatives « à revoir » d'un quiz (#116). */
   reviewBadge: (count: number) => string;
-  /** aria-label de cette pastille (ouvre la liste des tentatives à revoir). */
+  /**
+   * aria-label de cette pastille (ouvre la liste des tentatives à revoir). Commence par le texte
+   * visible (« 2 à revoir ») : une commande vocale qui le prononce doit trouver le bouton.
+   */
   reviewAria: (title: string, count: number) => string;
 }
 
@@ -36,6 +39,5 @@ export const defaultQuizListLabels: QuizListLabels = {
   deleteAria: (title) => `Supprimer ${title}`,
   create: 'Créer un quiz',
   reviewBadge: (count) => `${count} à revoir`,
-  reviewAria: (title, count) =>
-    `${count} tentative${count > 1 ? 's' : ''} à revoir pour ${title}`,
+  reviewAria: (title, count) => `${count} à revoir : tentative${count > 1 ? 's' : ''} de ${title}`,
 };

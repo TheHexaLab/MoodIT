@@ -25,6 +25,50 @@ interface QuizSummaryProps {
   labels?: Partial<QuizSummaryLabels>;
 }
 
+interface AttemptBarProps {
+  attempts: AttemptSummary[];
+  currentAttemptId: number | null;
+  onSelectAttempt: (attemptId: number) => void;
+  labels?: Partial<QuizSummaryLabels>;
+}
+
+/**
+ * Barre de sélection des tentatives (rien sous deux tentatives). Partagée par le récapitulatif
+ * et par le message d'une tentative « à revoir » (#116) : sans elle, l'étudiant qui ouvrait une
+ * tentative à revoir ne pouvait plus revenir à ses autres tentatives.
+ */
+export function AttemptBar({
+  attempts,
+  currentAttemptId,
+  onSelectAttempt,
+  labels,
+}: AttemptBarProps): React.ReactElement | null {
+  if (attempts.length < 2) return null;
+  const t = { ...defaultQuizSummaryLabels, ...labels };
+  return (
+    <div className={styles.attemptBar}>
+      <span className={styles.attemptBarLabel}>{t.attemptsLabel}</span>
+      <div className={styles.attemptChips}>
+        {attempts.map((a) => (
+          <button
+            type="button"
+            key={a.id}
+            className={[styles.attemptChip, a.id === currentAttemptId ? styles.attemptChipActive : '']
+              .filter(Boolean)
+              .join(' ')}
+            aria-pressed={a.id === currentAttemptId}
+            onClick={() => onSelectAttempt(a.id)}
+          >
+            {a.earned == null
+              ? t.attemptChipReview(a.attemptNo)
+              : t.attemptChip(a.attemptNo, a.earned, a.max)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Écran récapitulatif post-soumission : score global (pourcentage), volumétrie, et
  * détail cliquable par question (chaque ligne ouvre la révision correspondante).
@@ -95,30 +139,12 @@ export function QuizSummary({
         )}
       </div>
 
-      {attempts.length > 1 && (
-        <div className={styles.attemptBar}>
-          <span className={styles.attemptBarLabel}>{t.attemptsLabel}</span>
-          <div className={styles.attemptChips}>
-            {attempts.map((a) => (
-              <button
-                type="button"
-                key={a.id}
-                className={[
-                  styles.attemptChip,
-                  a.id === currentAttemptId ? styles.attemptChipActive : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => onSelectAttempt(a.id)}
-              >
-                {a.earned == null
-                  ? t.attemptChipReview(a.attemptNo)
-                  : t.attemptChip(a.attemptNo, a.earned, a.max)}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <AttemptBar
+        attempts={attempts}
+        currentAttemptId={currentAttemptId}
+        onSelectAttempt={onSelectAttempt}
+        labels={labels}
+      />
 
       <hr className={styles.summaryDivider} />
 

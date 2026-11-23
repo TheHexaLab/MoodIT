@@ -128,7 +128,7 @@ class QuizServiceSubmitIT {
   @DisplayName("Correction indisponible → tentative pending SUPPRIMÉE (rien ne subsiste, renvoi possible)")
   void grade_whenExecutionUnavailable_deletesAttempt() {
     // Sandbox injoignable → l'ExecutionClient renvoie null.
-    when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(null);
+    when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
 
     // Soumission : persiste la tentative 'pending' + la réponse (async, rend l'id).
     Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
@@ -155,7 +155,7 @@ class QuizServiceSubmitIT {
   @DisplayName("Correction réussie → verdicts persistés, tentative 'done' et question Code notée")
   void grade_whenExecutionSucceeds_persistsVerdictsAndGrades() {
     // Le harnais unique passe.
-    when(executionClient.evaluate(any(), any(), any(), any())).thenReturn(List.of(true));
+    when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true));
 
     Integer attemptId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
     // Contexte frais : le job async relit la tentative dans une nouvelle transaction.
@@ -187,7 +187,7 @@ class QuizServiceSubmitIT {
   @Test
   @DisplayName("Plafond (#116, S4) : 3 échecs sans verdict → tentative gardée à revoir, relance → notée, compte remis à zéro")
   void noVerdictCap_keepsAttemptForReview_thenRegradeGrades() {
-    when(executionClient.evaluate(any(), any(), any(), any()))
+    when(executionClient.evaluate(any(), any(), any(), any(), any()))
         .thenThrow(new com.moodit.core_service.exception.CodeVerificationNoVerdictException());
     // Les données de départ doivent être committées : chaque correction tourne dans ses propres
     // transactions, comme en prod.
@@ -241,7 +241,7 @@ class QuizServiceSubmitIT {
     // Relance par l'enseignant, puis correction qui aboutit.
     // doReturn : un when(...) rappellerait la méthode, encore stubbée pour lever.
     org.mockito.Mockito.doReturn(List.of(true))
-        .when(executionClient).evaluate(any(), any(), any(), any());
+        .when(executionClient).evaluate(any(), any(), any(), any(), any());
     quizService.regradeAttempt(quizId, reviewId);
     TestTransaction.start();
     assertThat(count("SELECT count(*) FROM attempt WHERE status = 'pending'")).isEqualTo(1L);
@@ -255,6 +255,73 @@ class QuizServiceSubmitIT {
     assertThat(count("SELECT count(*) FROM grading_failure")).isZero();
     assertThat(quizService.getAttemptResult(reviewId, USER_EMAIL).getEarned()).isEqualTo(10.0);
     assertThat(quizService.getAttemptsToReview(quizId)).isEmpty();
+    TestTransaction.end();
+  }
+
+  @Test
+  @DisplayName("Relance (#116, S4) : à revoir pendant la relance, et de retour à revoir si elle échoue, même compte remis à zéro")
+  void regradeThatFails_comesBackToReview_evenAfterTheCountWasReset() {
+    // Quiz AVEC reprise : une autre tentative corrigée entre-temps remet le compte à zéro.
+    em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
+    when(executionClient.evaluate(any(), any(), any(), any(), any()))
+        .thenThrow(new com.moodit.core_service.exception.CodeVerificationNoVerdictException());
+    TestTransaction.flagForCommit();
+    TestTransaction.end();
+    committed = true;
+
+    Integer reviewId = null;
+    for (int failure = 1; failure <= 3; failure++) {
+      TestTransaction.start();
+      reviewId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+      TestTransaction.flagForCommit();
+      TestTransaction.end();
+      quizService.gradeAttempt(reviewId);
+    }
+    Integer regradedId = reviewId;
+
+    // Nouvelle tentative, corrigée normalement : le compte d'échecs repart de zéro.
+    org.mockito.Mockito.doReturn(List.of(true))
+        .when(executionClient).evaluate(any(), any(), any(), any(), any());
+    TestTransaction.start();
+    Integer gradedId = quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL);
+    TestTransaction.flagForCommit();
+    TestTransaction.end();
+    quizService.gradeAttempt(gradedId);
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM grading_failure")).isZero();
+    TestTransaction.end();
+
+    // Relance : pendant la correction, l'étudiant voit toujours la tentative à revoir.
+    quizService.regradeAttempt(quizId, regradedId);
+    TestTransaction.start();
+    assertThat(quizService.getMyAttempts(quizId, USER_EMAIL))
+        .extracting(a -> a.getId(), a -> a.getStatus(), a -> a.getEarned())
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple(regradedId, QuizService.REVIEW, null),
+            org.assertj.core.groups.Tuple.tuple(gradedId, "done", 10.0));
+    TestTransaction.end();
+
+    // La relance échoue (sandbox indisponible) : la tentative revient à revoir, elle n'est pas
+    // supprimée.
+    org.mockito.Mockito.doReturn(null)
+        .when(executionClient).evaluate(any(), any(), any(), any(), any());
+    quizService.gradeAttempt(regradedId);
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'review'")).isEqualTo(1L);
+    assertThat(quizService.getAttemptsToReview(quizId))
+        .singleElement()
+        .satisfies(r -> assertThat(r.attemptId()).isEqualTo(regradedId));
+    TestTransaction.end();
+
+    // Seconde relance, qui aboutit : notée, et le marqueur de relance retombe.
+    org.mockito.Mockito.doReturn(List.of(true))
+        .when(executionClient).evaluate(any(), any(), any(), any(), any());
+    quizService.regradeAttempt(quizId, regradedId);
+    quizService.gradeAttempt(regradedId);
+    TestTransaction.start();
+    assertThat(count("SELECT count(*) FROM attempt WHERE status = 'done'")).isEqualTo(2L);
+    assertThat(count("SELECT count(*) FROM attempt WHERE regrade = TRUE")).isZero();
+    assertThat(quizService.getAttemptResult(regradedId, USER_EMAIL).getEarned()).isEqualTo(10.0);
     TestTransaction.end();
   }
 

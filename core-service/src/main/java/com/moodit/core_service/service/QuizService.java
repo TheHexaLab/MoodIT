@@ -392,7 +392,8 @@ public class QuizService {
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
-            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses, Integer timeoutMs) {}
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses, Integer timeoutMs,
+            String startCode) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -566,6 +567,9 @@ public class QuizService {
      * doit pas effacer la tentative qu'il a sous les yeux. Sur un quiz AVEC reprise, une panne
      * supprime la tentative comme d'habitude (l'étudiant resoumet ; la garder ne ferait que
      * charger l'enseignant). Une correction aboutie remet le compte à zéro (cf. finalizeAttempt).
+     * Une tentative RELANCÉE par l'enseignant ({@link Attempt#isRegrade()}) revient à revoir quel
+     * que soit l'échec et quel que soit le compte : sur un quiz avec reprise, une autre tentative
+     * corrigée entre-temps a pu le remettre à zéro.
      */
     private void failGrading(Integer attemptId, RuntimeException cause) {
         boolean noVerdict = cause instanceof CodeVerificationNoVerdictException;
@@ -599,7 +603,10 @@ public class QuizService {
                 .filter(a -> "pending".equals(a.getStatus()))
                 .map(a -> {
                     int failures = noVerdictFailuresAfter(a, noVerdict);
-                    boolean capped = failures >= maxNoVerdictFailures
+                    // Une relance revient TOUJOURS à revoir : son compte a pu être remis à zéro
+                    // par une autre tentative corrigée entre-temps (quiz avec reprise).
+                    boolean capped = a.isRegrade()
+                            || failures >= maxNoVerdictFailures
                             && (noVerdict || !Boolean.TRUE.equals(a.getQuiz().getAllowRetry()));
                     if (capped) {
                         a.setStatus(REVIEW);
@@ -687,6 +694,7 @@ public class QuizService {
                 throw new AttemptNotReviewableException();
             }
             attempt.setStatus("pending");
+            attempt.setRegrade(true);
             try {
                 attemptRepository.saveAndFlush(attempt);
             } catch (DataIntegrityViolationException e) {
@@ -742,7 +750,7 @@ public class QuizService {
                     .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
                     .toList();
             tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs,
-                    question.getExecTimeoutMs()));
+                    question.getExecTimeoutMs(), question.getStartCode()));
         }
         return tasks;
     }
@@ -757,7 +765,8 @@ public class QuizService {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
             List<Boolean> verdicts =
-                    executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs());
+                    executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs(),
+                            task.startCode());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -799,6 +808,7 @@ public class QuizService {
             }
         }
         attempt.setStatus("done");
+        attempt.setRegrade(false);
         attemptRepository.save(attempt);
         // Correction ABOUTIE : les échecs sans verdict passés de l'étudiant sur ce quiz ne
         // comptent plus (#116, S4) — le plafond vise une série d'échecs, pas un cumul à vie.
@@ -827,19 +837,30 @@ public class QuizService {
                 // Les tentatives en cours de correction ("pending") ne font pas partie de l'historique.
                 // Une tentative « à revoir » (#116, S4) en fait partie : elle consomme la tentative
                 // unique, et l'étudiant doit le voir — sans note, puisqu'aucun verdict n'existe.
-                .filter(a -> "done".equals(a.getStatus()) || REVIEW.equals(a.getStatus()))
+                // Pendant une relance de l'enseignant, elle reste « à revoir » pour l'étudiant :
+                // l'exclure lui rendait un formulaire vierge, et sa soumission recevait un 409.
+                .filter(a -> "done".equals(a.getStatus()) || awaitsTeacher(a))
                 .map(a -> {
                     QuizResultDTO r = computeAttemptResult(a);
-                    boolean review = REVIEW.equals(a.getStatus());
+                    boolean review = awaitsTeacher(a);
                     return new AttemptSummaryDTO(
                             a.getId(),
                             a.getAttemptNo(),
                             review ? null : r.getEarned(),
                             r.getMax(),
                             a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC),
-                            a.getStatus());
+                            review ? REVIEW : a.getStatus());
                 })
                 .toList();
+    }
+
+    /**
+     * La tentative attend-elle l'enseignant ? À revoir, ou en cours de relance (elle redevient à
+     * revoir si la relance échoue, cf. {@link #failGrading}). Une tentative relancée n'est jamais
+     * {@code "done"} : finalizeAttempt retire le marqueur en la corrigeant.
+     */
+    private static boolean awaitsTeacher(Attempt attempt) {
+        return REVIEW.equals(attempt.getStatus()) || attempt.isRegrade();
     }
 
     /**
@@ -1245,6 +1266,7 @@ public class QuizService {
             Question q = new Question();
             q.setQuiz(quiz);
             q.setPrompt(qd.getPrompt());
+            requireExecutableSizes(qd, index);
             q.setStartCode(qd.getStartCode());
             q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
@@ -1289,10 +1311,45 @@ public class QuizService {
         return (capped + 999) / 1000 * 1000;
     }
 
+    /** Bornes d'execution-service ({@code EvaluateRequest}, {@code TestCaseInput}), en miroir. */
+    static final int MAX_TEST_CASES = 100;
+    static final int MAX_HARNESS_CHARS = 50_000;
+    static final int MAX_TEST_CASE_NAME_CHARS = 500;
+
+    /**
+     * Refus À L'ÉCRITURE de ce qu'execution-service refuserait à chaque correction : code de
+     * départ (transmis depuis #22), nombre de harnais, taille d'un harnais ou de son nom. Accepté
+     * ici, chaque correction recevait un 400 : la tentative était supprimée avec un « correction
+     * échouée » générique, et plus personne ne pouvait être noté sur ce quiz, sans que
+     * l'enseignant le sache. {@code index} part de 0.
+     */
+    private static void requireExecutableSizes(QuestionDTO qd, int index) {
+        String where = "Question " + (index + 1) + " : ";
+        if (qd.getStartCode() != null && qd.getStartCode().length() > MAX_CODE_CHARS) {
+            throw new InvalidQuizException(where + "le code de départ dépasse " + MAX_CODE_CHARS
+                    + " caractères.");
+        }
+        List<TestCaseDTO> cases = qd.getTestCases() == null ? List.of() : qd.getTestCases();
+        if (cases.size() > MAX_TEST_CASES) {
+            throw new InvalidQuizException(where + "au plus " + MAX_TEST_CASES + " harnais.");
+        }
+        for (TestCaseDTO td : cases) {
+            if (td.getHarnessCode() != null && td.getHarnessCode().length() > MAX_HARNESS_CHARS) {
+                throw new InvalidQuizException(where + "un harnais dépasse " + MAX_HARNESS_CHARS
+                        + " caractères.");
+            }
+            if (td.getName() != null && td.getName().length() > MAX_TEST_CASE_NAME_CHARS) {
+                throw new InvalidQuizException(where + "un nom de harnais dépasse "
+                        + MAX_TEST_CASE_NAME_CHARS + " caractères.");
+            }
+        }
+    }
+
     /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */
     private void applyQuestionFields(Question q, QuestionDTO qd, int index, Quiz quiz) {
         q.setQuiz(quiz);
         q.setPrompt(qd.getPrompt());
+        requireExecutableSizes(qd, index);
         q.setStartCode(qd.getStartCode());
         q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);

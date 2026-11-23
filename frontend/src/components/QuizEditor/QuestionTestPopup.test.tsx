@@ -139,12 +139,26 @@ describe('QuestionTestBody — correction Code via l’API', () => {
     expect(input.language).toBe('Python');
     expect(input.languageId).toBe(1);
     expect(input.code).toBe('def f(): pass');
+    expect(input.startCode).toBe('def f(): pass');
     expect(input.testCases.map((tc: { name: string }) => tc.name)).toEqual(['h1', 'h2']);
 
     // 4 × (1 / 4) = 1 point.
     expect(await screen.findByText('1 / 4 pts')).toBeTruthy();
     expect(screen.getByText('h1')).toBeTruthy();
     expect(screen.getByText('h2')).toBeTruthy();
+  });
+
+  it('envoie le code de départ de la QUESTION et son temps limite, pas le code saisi', async () => {
+    // Le code saisi part de code de départ : sans le modifier, le test ne distinguait pas les deux.
+    const onEvaluateCode = vi.fn().mockResolvedValue([{ name: 'h1', passed: true, weight: 1 }]);
+    renderBody({ ...codingDraft(), execTimeoutMs: 7000 }, { onEvaluateCode });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'def f(): return 1' } });
+    fireEvent.click(correctButton());
+
+    const input = onEvaluateCode.mock.calls[0][0];
+    expect(input.code).toBe('def f(): return 1');
+    expect(input.startCode).toBe('def f(): pass');
+    expect(input.execTimeoutMs).toBe(7000);
   });
 
   it('arrondit le score au dixième', async () => {

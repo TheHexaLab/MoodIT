@@ -192,6 +192,7 @@ function toQuizMeta(q: QuizResponse): Quiz {
     isDaily: q.isDaily,
     allowRetry: q.allowRetry,
     questionCount: q.questionCount,
+    reviewAttemptCount: q.reviewAttemptCount,
   };
 }
 
@@ -335,6 +336,8 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     language: input.language,
     code: input.code,
     timeoutMs: input.execTimeoutMs,
+    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare.
+    startCode: input.startCode,
     testCases: input.testCases.map((t) => ({
       name: t.name,
       harnessCode: t.harnessCode,

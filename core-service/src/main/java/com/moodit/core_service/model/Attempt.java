@@ -47,6 +47,15 @@ public class Attempt {
     @Column(name = "status", nullable = false, length = 16)
     private String status = "done";
 
+    /**
+     * Correction RELANCÉE par l'enseignant (#116, S4) : la tentative venait de {@code "review"}.
+     * Tant qu'elle est vraie, un nouvel échec la remet à revoir au lieu de la supprimer, et
+     * l'étudiant la voit toujours « à revoir » dans son historique. Retombe à {@code false} quand
+     * la correction aboutit.
+     */
+    @Column(name = "regrade", nullable = false)
+    private boolean regrade;
+
     @CreationTimestamp(source = SourceType.DB)
     @Column(name = "submitted_at", updatable = false)
     private LocalDateTime submittedAt;

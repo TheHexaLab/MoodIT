@@ -176,6 +176,7 @@ const quizDetailResponse = {
       orderIndex: 0,
       language: null,
       startCode: null,
+      execTimeoutMs: 5000,
       answers: [{ id: 500, content: 'A', isCorrect: true }],
       dragItems: [{ id: 600, content: 'D', correctOrder: 1, groupName: 'G' }],
       groups: ['G'],
@@ -206,6 +207,7 @@ describe('fetchQuiz', () => {
           orderIndex: 0,
           language: null,
           startCode: null,
+          execTimeoutMs: 5000,
           answers: [{ id: 500, content: 'A', isCorrect: true }],
           dragItems: [{ id: 600, content: 'D', correctOrder: 1, groupName: 'G' }],
           groups: ['G'],
@@ -296,6 +298,17 @@ describe('fetchQuizzes', () => {
     mockedApiFetch.mockResolvedValueOnce(res([]));
     await fetchQuizzes(9);
     expect(callArgs()[0]).toBe('/api/courses/9/quizzes/manage');
+  });
+
+  it('garde le nombre de tentatives à revoir, sans quoi la pastille ne s’affiche jamais', async () => {
+    mockedApiFetch.mockResolvedValueOnce(
+      res([
+        { id: 1, title: 'A', reviewAttemptCount: 2 },
+        { id: 2, title: 'B', reviewAttemptCount: 0 },
+      ])
+    );
+    const out = await fetchQuizzes(9);
+    expect(out.map((q) => q.reviewAttemptCount)).toEqual([2, 0]);
   });
 
   it('throw quand la réponse est en erreur', async () => {
@@ -478,6 +491,18 @@ describe('evaluateCode', () => {
     });
     const [, init] = callArgs();
     expect(JSON.parse(init?.body as string).timeoutMs).toBe(5000);
+  });
+
+  it('transmet le code de départ (startCode), qui dit quel nom l’énoncé impose', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([{ name: 't', passed: true, weight: 1 }]));
+    await evaluateCode({
+      language: 'Python',
+      code: 'def sum(l): return 6',
+      startCode: 'def sum(l):\n    pass',
+      testCases: [{ id: 1, name: 't', harnessCode: 'return sum([1]) == 6', weight: 1 }],
+    });
+    const [, init] = callArgs();
+    expect(JSON.parse(init?.body as string).startCode).toBe('def sum(l):\n    pass');
   });
 
   it('throw quand la réponse est en erreur', async () => {

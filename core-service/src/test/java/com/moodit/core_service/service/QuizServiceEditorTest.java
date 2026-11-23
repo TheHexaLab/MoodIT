@@ -319,6 +319,47 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                     .containsExactly(null, 60_000, 30_000, null, 2_000, 1_000, 60_000);
         }
 
+        @Test
+        @DisplayName("Code de départ, harnais trop longs ou trop nombreux → refusés à l'écriture (execution-service les refuserait à chaque correction)")
+        void tailles_executables_bornees() {
+            java.util.function.BiFunction<String, List<TestCaseDTO>, QuizDetailDTO> quizWith =
+                    (start, cases) -> QuizDetailDTO.builder().title("T").questions(List.of(
+                            QuestionDTO.builder().qType("multiple_choice").startCode(start).testCases(cases)
+                                    .answers(List.of(AnswerDTO.builder().content("A").isCorrect(true).build()))
+                                    .build()))
+                            .build();
+            java.util.function.BiFunction<String, String, TestCaseDTO> tc =
+                    (name, harness) -> TestCaseDTO.builder().name(name).harnessCode(harness).weight(1).build();
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+
+            assertThatThrownBy(() -> service.createQuiz(1, quizWith.apply("x".repeat(100_001), List.of())))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : le code de départ dépasse 100000 caractères.");
+            List<TestCaseDTO> tooMany = java.util.stream.IntStream.range(0, 101)
+                    .mapToObj(i -> tc.apply("c" + i, "return true;")).toList();
+            assertThatThrownBy(() -> service.createQuiz(1, quizWith.apply(null, tooMany)))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : au plus 100 harnais.");
+            assertThatThrownBy(() -> service.createQuiz(1,
+                    quizWith.apply(null, List.of(tc.apply("c", "x".repeat(50_001))))))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : un harnais dépasse 50000 caractères.");
+            assertThatThrownBy(() -> service.createQuiz(1,
+                    quizWith.apply(null, List.of(tc.apply("n".repeat(501), "return true;")))))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : un nom de harnais dépasse 500 caractères.");
+            verify(quizRepository, never()).save(any());
+
+            // Aux bornes exactes : accepté.
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+            List<TestCaseDTO> atLimit = new java.util.ArrayList<>(java.util.stream.IntStream.range(0, 99)
+                    .mapToObj(i -> tc.apply("c" + i, "return true;")).toList());
+            atLimit.add(tc.apply("n".repeat(500), "x".repeat(50_000)));
+            service.createQuiz(1, quizWith.apply("x".repeat(100_000), atLimit));
+            verify(quizRepository).save(any(Quiz.class));
+        }
+
         /** Remise en ordre (2e question du quiz) dont les éléments portent ces correctOrder. */
         private QuizDetailDTO orderingQuiz(Integer... orders) {
             List<DragItemDTO> items = new java.util.ArrayList<>();
@@ -647,6 +688,20 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                     .build()))
                     .isInstanceOf(InvalidQuizException.class)
                     .hasMessageContaining("Question 1");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Mise à jour avec un code de départ trop long → refusée, rien n'est enregistré")
+        void codeDeDepartTropLong_refuse() {
+            when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
+
+            assertThatThrownBy(() -> service.updateQuiz(5, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(1).qType("single_choice")
+                            .startCode("x".repeat(100_001)).build()))
+                    .build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : le code de départ dépasse 100000 caractères.");
             verify(quizRepository, never()).save(any());
         }
 

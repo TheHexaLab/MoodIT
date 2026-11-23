@@ -20,7 +20,7 @@ import {
 import { useQuizAttempt } from './useQuizAttempt';
 import { QuestionCard } from './QuestionCard';
 import { QuestionRenderer } from './questions/QuestionRenderer';
-import { QuizSummary } from './QuizSummary';
+import { AttemptBar, QuizSummary } from './QuizSummary';
 import { Spinner } from '../../Spinner/Spinner';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { defaultQuizViewLabels, type QuizViewLabelsBundle } from './quizViewLabels';
@@ -221,11 +221,19 @@ const QuizView: React.FC<QuizViewProps> = ({
     // Tentative à revoir par l'enseignant (#116) : ni note ni corrigé à montrer.
     if (phase === 'summary' && attempt.awaitingReview) {
       return (
-        <div className={styles.centeredState} role="status">
-          <p>
-            <strong>{t.awaitingReviewTitle}</strong>
-          </p>
-          <p>{t.awaitingReview}</p>
+        <div className={styles.centeredState}>
+          <div role="status">
+            <p>
+              <strong>{t.awaitingReviewTitle}</strong>
+            </p>
+            <p>{t.awaitingReview}</p>
+          </div>
+          <AttemptBar
+            attempts={attempt.attempts}
+            currentAttemptId={attempt.currentAttemptId}
+            onSelectAttempt={attempt.selectAttempt}
+            labels={labels?.summary}
+          />
         </div>
       );
     }

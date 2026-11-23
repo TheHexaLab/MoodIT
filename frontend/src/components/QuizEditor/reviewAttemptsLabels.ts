@@ -12,7 +12,10 @@ export interface ReviewAttemptsLabels {
   empty: string;
   /** Ligne : « Tentative N ». */
   attemptLabel: (attemptNo: number) => string;
-  /** Sous-ligne : date de soumission et nombre d'échecs sans verdict. */
+  /**
+   * Sous-ligne : date de soumission et nombre d'échecs sans verdict. Le compte est celui de
+   * l'étudiant sur ce quiz, remis à zéro par toute correction aboutie : à 0, il n'est pas affiché.
+   */
   attemptSub: (submittedAt: string | null, failures: number) => string;
   /** Bouton de relance. */
   regrade: string;
@@ -40,8 +43,9 @@ export const defaultReviewAttemptsLabels: ReviewAttemptsLabels = {
   attemptLabel: (attemptNo) => `Tentative ${attemptNo}`,
   attemptSub: (submittedAt, failures) => {
     const date = formatDate(submittedAt);
-    const count = `${failures} échec${failures > 1 ? 's' : ''} sans verdict`;
-    return date ? `Soumise le ${date} · ${count}` : count;
+    const count = failures > 0 ? `${failures} échec${failures > 1 ? 's' : ''} sans verdict` : '';
+    const when = date ? `Soumise le ${date}` : '';
+    return [when, count].filter(Boolean).join(' · ');
   },
   regrade: 'Relancer la correction',
   regradeAria: (studentName, attemptNo) =>

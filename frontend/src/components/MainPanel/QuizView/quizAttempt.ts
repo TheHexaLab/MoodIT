@@ -209,6 +209,11 @@ export interface CodeEvaluationInput {
   testCases: TestCase[];
   /** Temps limite d'exécution d'un harnais (ms) choisi par le prof ; absent → défaut sandbox. */
   execTimeoutMs?: number;
+  /**
+   * Code de départ de la question (#22) : une fonction qu'il déclare est celle que l'énoncé
+   * impose, et peut porter le nom d'une intégrée (`sum`, `max`) sans être refusée.
+   */
+  startCode?: string;
 }
 
 /**

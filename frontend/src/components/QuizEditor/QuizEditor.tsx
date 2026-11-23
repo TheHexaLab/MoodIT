@@ -97,6 +97,11 @@ export function QuizEditor({
   // évite d'afficher une liste vide « définitive » à la place du chargement.
   const [loadingQuizzes, setLoadingQuizzes] = useState(handlers.onFetchQuizzes != null);
   const [view, setView] = useState<View>({ kind: 'list' });
+  // Vue courante lue par les rappels asynchrones (réponse d'une relance arrivée après un retour).
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  });
   // Quiz dont le détail est en cours de chargement (clic sur le crayon) : pilote le
   // spinner du crayon dans la liste, le temps de `onFetchQuiz`.
   const [openingQuizId, setOpeningQuizId] = useState<number | null>(null);
@@ -385,8 +390,13 @@ export function QuizEditor({
     setView({ kind: 'list' });
   }
 
-  /** Une relance est partie : un « à revoir » de moins sur la pastille du quiz (#116). */
+  /**
+   * Une relance est partie : un « à revoir » de moins sur la pastille du quiz (#116). Seulement
+   * si la vue « à revoir » de ce quiz est encore affichée : revenu à la liste avant la réponse,
+   * l'enseignant a déjà un compte relu au serveur, que le décompte fausserait.
+   */
   function markRegraded(quizId: number) {
+    if (viewRef.current.kind !== 'review' || viewRef.current.quizId !== quizId) return;
     setQuizzes((list) =>
       list.map((q) =>
         q.id === quizId

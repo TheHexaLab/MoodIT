@@ -232,6 +232,38 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
     expect(screen.queryByText('Revoir mes réponses')).toBeNull();
     expect(screen.queryByText('Refaire le quiz')).toBeNull();
   });
+
+  it('garde la barre des tentatives sous le message : l’étudiant revient à ses autres tentatives', async () => {
+    const graded: QuizResult = {
+      earned: 2,
+      max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const { onFetchAttemptResult } = renderView({
+      attempts: [
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: null, max: 3, status: 'review' },
+      ],
+      attemptResult: graded,
+    });
+    // La dernière tentative est à revoir : message d'attente, ET la barre des deux tentatives.
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(screen.getByText('#2 · à revoir').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByText('#1 · 2/3'));
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+    expect(onFetchAttemptResult).toHaveBeenCalledWith(55, 8);
+
+    // Et retour à la tentative à revoir depuis le résumé.
+    fireEvent.click(screen.getByText('#2 · à revoir'));
+    expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy();
+  });
 });
 
 describe('QuizView — phase résumé & révision', () => {

@@ -309,6 +309,17 @@ public class ExecutionClient {
     }
 
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs) {
+        return evaluate(language, code, harnesses, timeoutMs, null);
+    }
+
+    /**
+     * Comme {@link #evaluate(String, String, List, Integer)}, avec le code de départ de la question
+     * ({@code null} s'il n'y en a pas). execution-service ne refuse pas comme « Nom réservé » une
+     * fonction que ce code déclare : c'est celle que l'énoncé impose, même nommée {@code sum} ou
+     * {@code max} (#22).
+     */
+    public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs,
+            String startCode) {
         // Défense en profondeur : la valeur vient de la BD (normalisée à l'écriture par
         // QuizService), mais une ligne aberrante ne doit ni gonfler le budget de lecture ni
         // atteindre execution-service telle quelle.
@@ -316,10 +327,18 @@ public class ExecutionClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("language", language == null ? "" : language);
         body.put("code", code == null ? "" : code);
-        body.put("testCases", harnesses.stream()
-                .map(h -> Map.of("name", h.name(), "harnessCode", h.harnessCode(), "weight", h.weight()))
-                .toList());
+        // Nom vide ou absent → « cas N » : execution-service exige un nom (@NotBlank), et Map.of
+        // levait sur un null. Dans les deux cas, chaque correction de la question échouait.
+        List<Map<String, Object>> cases = new java.util.ArrayList<>();
+        for (int i = 0; i < harnesses.size(); i++) {
+            Harness h = harnesses.get(i);
+            String name = h.name() == null || h.name().isBlank() ? "cas " + (i + 1) : h.name();
+            cases.add(Map.of("name", name, "harnessCode", h.harnessCode() == null ? "" : h.harnessCode(),
+                    "weight", h.weight()));
+        }
+        body.put("testCases", cases);
         if (timeout != null) body.put("timeoutMs", timeout);
+        if (startCode != null) body.put("startCode", startCode);
         long readTimeout = readTimeoutMs(language, workUnits(language, harnesses.size()), timeout);
         long retryDeadline = System.nanoTime() + Duration.ofMillis(unreachableRetryMs).toNanos();
         long delay = RETRY_FIRST_DELAY_MS;

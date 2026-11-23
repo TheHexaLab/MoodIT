@@ -124,6 +124,25 @@ describe('emptyQuestionDraft', () => {
   });
 });
 
+describe('temps limite d’exécution (execTimeoutMs)', () => {
+  it('fait l’aller-retour question → brouillon → question', () => {
+    // Oublié par l'un des deux mappings, le champ s'ouvrait vide en édition, et l'enregistrement
+    // remettait à null le temps limite de la question.
+    const q: Question = {
+      id: 7,
+      qType: 'coding',
+      prompt: 'énoncé',
+      totalScore: 3,
+      language: { id: 5, name: 'Java' },
+      execTimeoutMs: 12_000,
+      testCases: [],
+    };
+    const d = questionToDraft(q);
+    expect(d.execTimeoutMs).toBe(12_000);
+    expect(draftToQuestion(d, 7).execTimeoutMs).toBe(12_000);
+  });
+});
+
 describe('questionToDraft', () => {
   it('copie les champs et dérive languageId depuis language', () => {
     const q: Question = {

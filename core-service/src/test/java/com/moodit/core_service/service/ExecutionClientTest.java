@@ -401,6 +401,39 @@ class ExecutionClientTest {
     }
 
     @Test
+    @DisplayName("Harnais sans nom ou sans code : « cas N » et chaîne vide, au lieu d'un 400 ou d'une exception à chaque correction")
+    void evaluate_namesUnnamedHarnesses() throws IOException {
+        String url = startStub(200,
+                "[{\"name\":\"cas 1\",\"weight\":1,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas 2\",\"weight\":1,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"ok\",\"weight\":1,\"passed\":true,\"detail\":null}]", 0);
+        ExecutionClient client = client(url, 10_000, 20_000, 15_000);
+
+        assertThat(client.evaluate("Python", "code", List.of(
+                new ExecutionClient.Harness(null, null, 1),
+                new ExecutionClient.Harness("  ", "assert B", 1),
+                new ExecutionClient.Harness("ok", "assert C", 1)))).containsExactly(true, true, true);
+        assertThat(receivedBody.get())
+                .contains("\"name\":\"cas 1\"").contains("\"harnessCode\":\"\"")
+                .contains("\"name\":\"cas 2\"").contains("\"name\":\"ok\"");
+    }
+
+    @Test
+    @DisplayName("Le code de départ de la question part dans le corps HTTP (startCode), absent s'il n'y en a pas")
+    void evaluate_sendsStartCodeInBody() throws IOException {
+        String url = startStub(200,
+                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
+                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 0);
+        ExecutionClient client = client(url, 10_000, 20_000, 15_000);
+
+        client.evaluate("Python", "code", TWO_HARNESSES, null, "def sum(l):\n    pass");
+        assertThat(receivedBody.get()).contains("\"startCode\":\"def sum(l):\\n    pass\"");
+
+        client.evaluate("Python", "code", TWO_HARNESSES, null, null);
+        assertThat(receivedBody.get()).doesNotContain("startCode");
+    }
+
+    @Test
     @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
     void workUnits_sqlInTwoPhases() {
         assertThat(ExecutionClient.workUnits("Python", 3)).isEqualTo(3);
