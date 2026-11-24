@@ -114,6 +114,9 @@ function TestResults({
               {t.passed ? '+' : '−'}
               {t.weight}/{totalWeight}
             </span>
+            {/* Diagnostic du serveur (« Tester » seulement) : sans lui, un harnais refusé ne
+                montrait qu'une croix, sans dire quelle forme écrire. */}
+            {!t.passed && t.detail && <pre className={styles.testDetail}>{t.detail}</pre>}
           </div>
         ))}
       </div>

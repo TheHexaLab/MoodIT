@@ -1917,6 +1917,40 @@ def java_signatures(javap_output):
     return dedupe_signatures(hits)
 
 
+def trailing_defaults(params):
+    """Nombre de paramètres FINAUX à valeur par défaut (`int acc = 0`). FONCTION PURE (testée)."""
+    count = 0
+    for param_group in reversed([p for p in (params or "").split(",") if p.strip()]):
+        if "=" not in param_group:
+            break
+        count += 1
+    return count
+
+
+def with_default_arities(entries):
+    """[(retour, nom, types, nb de défauts)] → [(retour, nom, types)], avec pour chaque entrée
+    ses arités RÉDUITES (`somme(int, int = 0)` donne aussi `somme(int)`). FONCTION PURE (testée).
+
+    Le bouchon n'avait que l'arité complète : `somme(4)`, `Rect a;` sur `Rect(int l = 1, …)`, ne
+    compilaient pas dans le noteur — 0 sur une réponse juste, message qui accusait le harnais.
+    Le serveur appelle avec moins d'arguments, et la valeur par défaut s'applique chez
+    l'étudiant (aucun texte soumis n'entre dans le noteur). Une arité réduite qui heurterait une
+    déclaration explicite, ou celle d'une autre entrée, n'est pas ajoutée : l'appel serait
+    ambigu pour le compilateur du serveur."""
+    explicit = {(name, tuple(types)) for _r, name, types, _d in entries}
+    produced = collections.Counter(
+        (name, tuple(types[:len(types) - k]))
+        for _r, name, types, d in entries for k in range(1, d + 1))
+    result = []
+    for ret, name, types, defaults in entries:
+        result.append((ret, name, types))
+        for k in range(1, defaults + 1):
+            key = (name, tuple(types[:len(types) - k]))
+            if key not in explicit and produced[key] == 1:
+                result.append((ret, name, list(key[1])))
+    return result
+
+
 def dedupe_signatures(signatures):
     """Une signature (nom, types) une seule fois, la PREMIERE vue. PURE (testee).
 
@@ -3587,7 +3621,8 @@ def c_signatures(source, cpp=False):
         types = _c_param_types(params)
         if types is None:
             continue
-        hits.append((ret, ident, types))
+        hits.append((ret, ident, types, trailing_defaults(params) if cpp else 0))
+    hits = with_default_arities(hits)
     # Une fonction definie dans deux branches du preprocesseur (`#if … #else …`) etait vue deux
     # fois : deux bouchons identiques, « redefinition of moodit_f_… », 0 sur une reponse juste.
     # Une seule fois par NOM en C (pas de surcharge), par nom ET types en C++.
@@ -3705,7 +3740,7 @@ def cpp_object_api(source):
             bases[class_ident] = base.group(2)
         if base and (base.group(1) == "public" or (base.group(1) is None and is_struct)):
             parents[class_ident] = base.group(2)
-        ctors, method_list = [], []
+        ctors, method_list, ctor_entries = [], [], []
         declared_names, unhidden = set(), set()
         declares_ctor = False
         depths = _closings(src_text)[0]
@@ -3753,7 +3788,7 @@ def cpp_object_api(source):
             if ctor:
                 types = _c_param_types(ctor.group(1))
                 if types is not None:
-                    ctors.append(types)
+                    ctor_entries.append((None, class_ident, types, trailing_defaults(ctor.group(1))))
                 continue
             meth = re.match(r"(" + C_SCALAR_RET + r")\s+(\w+)\s*\(([^()]*)\)", bare_line)
             # `int operator()(int)` : un opérateur n'est pas une méthode nommée `operator` — le
@@ -3764,7 +3799,10 @@ def cpp_object_api(source):
             if meth:
                 types = _c_param_types(meth.group(3))
                 if types is not None:
-                    method_list.append((c_scalar_type(meth.group(1)), meth.group(2), types))
+                    method_list.append((c_scalar_type(meth.group(1)), meth.group(2), types,
+                                        trailing_defaults(meth.group(3))))
+        ctors = [types for _r, _n, types in with_default_arities(ctor_entries)]
+        method_list = with_default_arities(method_list)
         # AUCUN constructeur declare : C++ fournit le constructeur par defaut, comme Java et
         # C#. Sans lui, `Calculatrice c; c.additionner(2, 3)` n'etait pas notable. Pas pour une
         # classe DERIVEE : sa construction par defaut depend de celle de sa base, et un `K()`
@@ -3852,8 +3890,12 @@ def _c_param_types(params):
     constructeur, la classe entiere : une reponse juste etait notee 0."""
     types = []
     for param_group in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-        if any(c in param_group for c in "*[&"):
+        # Référence (`const int& x`, `int &x`) : le serveur passe une variable, qui s'y lie ; le
+        # type vu par l'appelant est le scalaire. Pas `&&` (une variable ne s'y lie pas), ni
+        # pointeur ni tableau.
+        if any(c in param_group for c in "*[") or "&&" in param_group:
             return None
+        param_group = param_group.replace("&", " ")
         pieces = [m for m in param_group.split("=")[0].split() if m != "const"]
         # Un type SEUL (parametre sans nom : `Rect(int, int);`, declaration dans la classe et
         # definition dehors — l'ecriture C++ la plus courante), ou un type et un NOM. Le type
@@ -5041,8 +5083,8 @@ def cs_signatures(source):
             continue
         types = _cs_param_types(params)
         if types is not None:
-            hits.append((ret, ident, types))
-    return dedupe_signatures(hits)
+            hits.append((ret, ident, types, trailing_defaults(params)))
+    return dedupe_signatures(with_default_arities(hits))
 
 
 def cs_send_args(types):
@@ -5286,7 +5328,10 @@ public static class MooditServer {
 
     static object[] Convertis(ParameterInfo[] attendus, string[] parts, int depart) {
         object[] donnes = new object[attendus.Length];
+        int fournis = parts.Length - depart;
         for (int i = 0; i < attendus.Length; i++) {
+            // Paramètre optionnel omis par l'appel : sa valeur par défaut, celle de l'étudiant.
+            if (i >= fournis) { donnes[i] = attendus[i].DefaultValue; continue; }
             string brut = parts[i + depart];
             Type pt = attendus[i].ParameterType;
             if (pt.IsByRef) { pt = pt.GetElementType(); }   // parametre `in` : int& -> int
@@ -5319,13 +5364,25 @@ public static class MooditServer {
     // La surcharge VISEE par le bouchon : memes types de parametres, dans l'ordre. Le nom et
     // l'arite seuls prenaient la premiere de meme arite, et une reponse juste pouvait etre
     // notee fausse des que le code soumis declarait F(int) et F(double).
+    // Moins d'arguments que de paramètres : seulement si les paramètres omis sont OPTIONNELS
+    // (`int acc = 0`) ; les candidats sont essayés par nombre de paramètres croissant
+    // (ParArite), donc une surcharge d'arité exacte passe avant une plus longue à défauts.
     static bool Signe(ParameterInfo[] attendus, string appel, int arite) {
-        if (attendus.Length != arite) { return false; }
+        if (arite > attendus.Length) { return false; }
+        for (int i = arite; i < attendus.Length; i++) {
+            if (!attendus[i].IsOptional) { return false; }
+        }
         int p = appel.IndexOf('(');
-        if (p < 0) { return true; }
-        string[] noms = new string[attendus.Length];
-        for (int i = 0; i < attendus.Length; i++) { noms[i] = NomType(attendus[i].ParameterType); }
+        if (p < 0) { return arite == attendus.Length; }
+        string[] noms = new string[arite];
+        for (int i = 0; i < arite; i++) { noms[i] = NomType(attendus[i].ParameterType); }
         return string.Join(",", noms) == appel.Substring(p + 1, appel.Length - p - 2);
+    }
+
+    static T[] ParArite<T>(T[] candidats) where T : MethodBase {
+        global::System.Array.Sort(candidats,
+                (a, b) => a.GetParameters().Length.CompareTo(b.GetParameters().Length));
+        return candidats;
     }
 
     /** Valeur de retour sur le fil : une chaîne part encodée. */
@@ -5357,9 +5414,9 @@ public static class MooditServer {
                 if (nom == "new") {
                     Type cible2 = global::MooditCibles.PRINCIPALE;
                     bool construit = false;
-                    foreach (var c in cible2.GetConstructors(
+                    foreach (var c in ParArite(cible2.GetConstructors(
                             BindingFlags.Public | BindingFlags.NonPublic
-                            | BindingFlags.Instance)) {
+                            | BindingFlags.Instance))) {
                         if (!Signe(c.GetParameters(), parts[2], parts.Length - 3)) { continue; }
                         OBJETS.Add(c.Invoke(Convertis(c.GetParameters(), parts, 3)));
                         construit = true;
@@ -5377,9 +5434,9 @@ public static class MooditServer {
                     object instance = OBJETS[int.Parse(parts[2])];
                     string nomMethode = Base(parts[3]);
                     MethodInfo cible3 = null;
-                    foreach (MethodInfo m in instance.GetType().GetMethods(
+                    foreach (MethodInfo m in ParArite(instance.GetType().GetMethods(
                             BindingFlags.Public | BindingFlags.NonPublic
-                            | BindingFlags.Instance)) {
+                            | BindingFlags.Instance))) {
                         if (m.Name == nomMethode && Signe(m.GetParameters(), parts[3], parts.Length - 4)) {
                             cible3 = m;
                             break;
@@ -5395,8 +5452,8 @@ public static class MooditServer {
                 // Toutes les classes du code soumis, principale d'abord : meme perimetre
                 // que l'extraction et que le bouchon, qui aplatit leurs statiques.
                 foreach (Type __t in global::MooditCibles.TOUTES) {
-                    foreach (MethodInfo m in __t.GetMethods(
-                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
+                    foreach (MethodInfo m in ParArite(__t.GetMethods(
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))) {
                         if (m.Name == Base(nom) && Signe(m.GetParameters(), nom, parts.Length - 2)) {
                             cible = m;
                             break;
@@ -5446,12 +5503,16 @@ def cs_object_api(source, klass):
     # re.M est INDISPENSABLE : le gabarit est ancre en debut de LIGNE (sans quoi un
     # `new Rectangle(3, 4)` passerait pour une declaration), et sans ce drapeau `^` ne
     # vaudrait que pour le debut du fichier — aucun constructeur ne serait trouve.
+    ctor_entries = []
     for params in re.findall(CS_CTOR_TPL % re.escape(klass), source or "", re.M):
         types = param_types_of(params)
-        # Une SEULE fois par liste de types : le gabarit lit aussi le constructeur STATIQUE
-        # (`static Compteur()`), qui doublait `public Compteur()` — deux constructeurs sans
-        # parametre dans le bouchon, que mcs refusait (CS0111) sur une reponse juste.
-        if types is not None and types not in ctors:
+        if types is not None:
+            ctor_entries.append((None, klass, types, trailing_defaults(params)))
+    # Une SEULE fois par liste de types : le gabarit lit aussi le constructeur STATIQUE
+    # (`static Compteur()`), qui doublait `public Compteur()` — deux constructeurs sans
+    # parametre dans le bouchon, que mcs refusait (CS0111) sur une reponse juste.
+    for _r, _n, types in with_default_arities(ctor_entries):
+        if types not in ctors:
             ctors.append(types)
     # AUCUN constructeur declare : C# fournit le constructeur par defaut, comme Java.
     # Seulement pour une classe DECLAREE dans le code soumis.
@@ -5538,8 +5599,9 @@ def _cs_instance_members(src_text):
             continue
         types = _cs_param_types(m.group(3))
         if types is not None:
-            members.setdefault(klass, []).append((m.group(1), m.group(2), types))
-    return members
+            members.setdefault(klass, []).append(
+                (m.group(1), m.group(2), types, trailing_defaults(m.group(3))))
+    return {klass: with_default_arities(found) for klass, found in members.items()}
 
 
 def _digit_separator(src_text, i, token_start):
@@ -6313,7 +6375,6 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin
 
 
 C_CONDITIONAL = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else)\b", re.M)
-C_DEFINED_NAME = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)", re.M)
 C_LINE_MARKER = re.compile(r'#\s*\d+\s+"((?:[^"\\]|\\.)*)"')
 # Le préprocesseur seul est rapide ; une bombe d'inclusions ou de macros, elle, tiendrait la
 # compilation réelle jusqu'à son délai : on ne lui en laisse pas autant ici, sans conclure.
@@ -6335,22 +6396,12 @@ def c_student_segment(preprocessed, file_name):
     return chr(10).join(keep)
 
 
-def c_drop_absent(method_list, obj_list, present, source):
-    """Fonctions et classes dont le nom a disparu au préprocesseur, retirées. PURE (testée).
-
-    Un nom que le code soumis `#define` est gardé : le préprocesseur l'a remplacé, il ne l'a
-    pas écarté (`#define FN doubler` puis `int FN(int x)`)."""
-    macros = set(C_DEFINED_NAME.findall(source or ""))
-
-    def kept(name):
-        return name in present or name in macros
-    return ([m for m in method_list if kept(m[1])], [o for o in obj_list if kept(o[0])])
-
-
-def c_preprocessed_names(student_source, compiler, std, case_dir, ext):
-    """Identifiants du code soumis APRÈS préprocesseur, ou None : pas de directive
-    conditionnelle (rien à écarter), ou préprocesseur en échec — la compilation réelle dira
-    pourquoi. Sous l'UID étudiant, dans son chantier, comme sa compilation."""
+def c_directives_only_source(student_source, compiler, std, case_dir, ext):
+    """Code soumis aux directives TRAITÉES (`gcc -E -fdirectives-only`, segment du fichier soumis
+    seulement : branches `#if` inactives écartées, macros NON développées), ou None : aucune
+    directive conditionnelle (rien à écarter), ou préprocesseur en échec — la compilation réelle
+    dira pourquoi. Mêmes options que la vraie compilation (`-O1 -fno-builtin` définissent
+    `__OPTIMIZE__`, `__NO_INLINE__`) ; sous l'UID étudiant, dans son chantier."""
     if not C_CONDITIONAL.search(student_source or ""):
         return None
     key = (compiler, std, student_source)
@@ -6364,12 +6415,12 @@ def c_preprocessed_names(student_source, compiler, std, case_dir, ext):
     with open(source, "w", encoding="utf-8") as f:
         f.write(student_source)
     set_owner_mode(source, STUDENT_UID, STUDENT_GID, 0o600)
-    names = None
+    segment = None
     try:
-        code, expired = run_proc([compiler, std, "-E", name, "-o", "pp.i"], build_area,
-                                 student_build_env(build_area), C_PREPROCESS_TIMEOUT_S,
-                                 os.path.join(case_dir, "pp.out"), os.path.join(case_dir, "pp.err"),
-                                 preexec_student_compile)
+        code, expired = run_proc([compiler, std, "-O1", "-fno-builtin", "-E", "-fdirectives-only",
+                                  name, "-o", "pp.i"], build_area, student_build_env(build_area),
+                                 C_PREPROCESS_TIMEOUT_S, os.path.join(case_dir, "pp.out"),
+                                 os.path.join(case_dir, "pp.err"), preexec_student_compile)
         if code == 0 and not expired:
             # Sans suivre de lien, fichier ordinaire seulement (chantier de l'UID étudiant).
             fd = os.open(target, os.O_RDONLY | O_NO_LINK)
@@ -6377,19 +6428,17 @@ def c_preprocessed_names(student_source, compiler, std, case_dir, ext):
                 if stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                     data = f.read(C_PREPROCESS_CAP + 1)
                     if len(data) <= C_PREPROCESS_CAP:
-                        text = data.decode("utf-8", "replace")
-                        names = set(re.findall(r"[A-Za-z_]\w*",
-                                               blank_code(c_student_segment(text, name))))
+                        segment = c_student_segment(data.decode("utf-8", "replace"), name)
     except OSError:
-        names = None
+        segment = None
     finally:
         for leftover in (source, target):
             try:
                 os.unlink(leftover)
             except OSError:
                 pass
-    C_PREPROCESSED[key] = names
-    return names
+    C_PREPROCESSED[key] = segment
+    return segment
 
 
 def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
@@ -6404,15 +6453,14 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         if ident.startswith("solution.") :
             with open(os.path.join(src, ident), "r", encoding="utf-8", errors="replace") as f:
                 student_source = f.read()
-    extraction = blank_code(student_source)
+    # Lecture du source APRÈS les directives (branches `#if` écartées, macros intactes) : une
+    # fonction, une méthode ou une surcharge sous `#ifdef DEBUG` figurait dans le texte, absente
+    # du code compilé — le serveur l'appelait, « implicit declaration », « has no member », 0 sur
+    # une réponse juste.
+    directives_done = c_directives_only_source(student_source, compiler, std, case_dir, ext)
+    extraction = blank_code(directives_done if directives_done is not None else student_source)
     obj_list = cpp_object_api(extraction) if ext == "cpp" else []
     method_list = c_signatures(extraction, cpp=(ext == "cpp"))
-    # Lecture sur le TEXTE : une fonction sous `#ifdef DEBUG` y figure, absente une fois le code
-    # préprocessé — le serveur l'appelait, « implicit declaration of function », 0 sur une
-    # réponse juste. Le préprocesseur dit ce qui reste.
-    present = c_preprocessed_names(student_source, compiler, std, case_dir, ext)
-    if present is not None:
-        method_list, obj_list = c_drop_absent(method_list, obj_list, present, student_source)
     if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")

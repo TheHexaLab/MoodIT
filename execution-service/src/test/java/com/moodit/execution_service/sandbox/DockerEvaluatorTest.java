@@ -151,11 +151,25 @@ class DockerEvaluatorTest {
         // Un indexeur C# n'est pas un attribut, même quand l'indice porte le nom d'un marqueur.
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "return Solution.Notes(tab)[Test] == tab[TestCase] && d?[Theory] == 1;")).isFalse();
+        // Revue #246 : indexeur après un autre indexeur ou après une chaîne, chaîne brute Go et
+        // chaîne verbatim C# — des corps booléens valides.
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "return Grille()[0][Test] == 1 && \"abc\"[Test] == 'a';")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "var p = @\"C:\\\";\nvar q = @\"\n[Test]\";\nreturn Solution.F(p + q) == 1;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("go",
+                "return f(`func TestX(`) == 1")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("go",
+                "q := `\"`\nreturn f(\"func TestX(\") == 1")).isFalse();
         // Le même marqueur dans le CODE reste refusé.
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "int[] tab = { 1 };\n[Test] public void T() { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "[Category(\"a\")][Test] public void T() { }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "public class T {\n    [Category(\"a\"), Test]\n    public void A() { }\n}")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "public class T { [TestCase(3, 4)] public void A(int x, int y) { } }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("java",
                 "// commentaire\n@Test\nvoid t() { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",

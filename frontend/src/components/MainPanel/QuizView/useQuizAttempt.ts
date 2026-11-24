@@ -491,6 +491,12 @@ export function useQuizAttempt({
     void reload();
   }, [reload]);
 
+  // Vue courante, relue par les lectures asynchrones (mise à jour hors rendu).
+  const shownRef = useRef({ awaiting: awaitingReview, attemptId: currentAttemptId });
+  useEffect(() => {
+    shownRef.current = { awaiting: awaitingReview, attemptId: currentAttemptId };
+  });
+
   // Tentative à revoir (#116) affichée : l'enseignant peut relancer sa correction à tout moment.
   // Son verdict arrive par le même événement qu'une soumission, alors qu'aucune n'est en cours
   // ici (reconcilePending ne l'attend pas). On affiche le résultat de CETTE tentative — `reload`
@@ -513,13 +519,17 @@ export function useQuizAttempt({
       void reload();
       return;
     }
+    // L'étudiant a pu changer de vue pendant les deux lectures (autre puce, « Refaire ») : on
+    // n'écrase alors ni sa vue ni son choix.
+    const stillShown = () =>
+      mountedRef.current && shownRef.current.awaiting && shownRef.current.attemptId === attemptId;
     void (async () => {
       try {
         const [list, attemptResult] = await Promise.all([
           refresh(initialQuiz.id),
           fetchResult(initialQuiz.id, attemptId),
         ]);
-        if (!mountedRef.current) return;
+        if (!stillShown()) return;
         setAttempts(list);
         setResult(attemptResult);
         setCurrentAttemptId(attemptId);
@@ -527,7 +537,7 @@ export function useQuizAttempt({
         setAwaitingReview(false);
         setPhase('summary');
       } catch {
-        if (mountedRef.current) void reload();
+        if (stillShown()) void reload();
       }
     })();
   }, [attemptOutcome, awaitingReview, currentAttemptId, initialQuiz.id, reload]);

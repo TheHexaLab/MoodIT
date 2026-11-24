@@ -73,8 +73,12 @@ public final class HarnessProjects {
 
         StringBuilder caseList = new StringBuilder();
         int index = 0;
+        // UNE fois par job (revue #246) : il ne dépend que du code soumis, et le recalculer à
+        // chaque cas et canari relisait tout le code, place du sandbox tenue.
+        String studentFile = rpcStudentFile(lang, code);
         for (TestCaseInput testCase : cases) {
-            addCase(files, lang, index, code, testCase.harnessCode() == null ? "" : testCase.harnessCode());
+            addCase(files, lang, studentFile, index, code,
+                    testCase.harnessCode() == null ? "" : testCase.harnessCode());
             caseList.append(index > 0 ? "," : "")
                     .append("{\"index\":").append(index)
                     .append(",\"name\":").append(jsonString(testCase.name()))
@@ -83,7 +87,7 @@ public final class HarnessProjects {
         }
         // Canaris (voir javadoc) : harnais gabarit instancié par le superviseur.
         for (String kind : new String[] {"pass", "fail"}) {
-            addCase(files, lang, index, code, canaryHarness(lang));
+            addCase(files, lang, studentFile, index, code, canaryHarness(lang));
             caseList.append(",{\"index\":").append(index)
                     .append(",\"canary\":\"").append(kind).append("\"}");
             index++;
@@ -142,10 +146,10 @@ public final class HarnessProjects {
      * {@link DockerEvaluator#frameworkHarnessRejection} avec un diagnostic, plutôt que noté par
      * un chemin dont on sait qu'il est contournable.
      */
-    private static void addCase(Map<String, String> files, String lang, int index,
-            String studentCode, String harnessCode) {
+    private static void addCase(Map<String, String> files, String lang, String studentFile,
+            int index, String studentCode, String harnessCode) {
         String base = "cases/" + index + "/src/";
-        files.put(base + rpcStudentFile(lang, studentCode), studentCode);
+        files.put(base + studentFile, studentCode);
         files.put(base + "harnais_rpc." + rpcExtension(lang),
                 "// Harnais booléen du prof — compilé DANS LE NOTEUR, jamais avec le code de\n"
                 + "// l'étudiant. Tout ce qui suit le marqueur est son corps.\n"
@@ -211,7 +215,11 @@ public final class HarnessProjects {
      * principale — un étudiant qui garde une ancienne version en commentaire voyait le fichier
      * déposé nommé d'après la classe COMMENTÉE, et sa soumission correcte échouait à la
      * compilation avec un diagnostic qui ne désigne pas la cause. Blocs de texte Java
-     * ({@code \"\"\"}) compris.
+     * ({@code \"\"\"}) compris, ainsi que les chaînes brutes Go ({@code `…`}) et verbatim C#
+     * ({@code @"…"}, guillemet doublé, sans échappement par barre) : sans elles, un
+     * {@code func TestX(} ou un {@code [Test]} cité dans une telle chaîne d'un harnais booléen
+     * passait pour du code, et la question entière était refusée comme « classe de test du
+     * framework » (revue #246).
      */
     static String withoutCommentsOrLiterals(String source) {
         StringBuilder res = new StringBuilder(source.length());
@@ -235,6 +243,38 @@ public final class HarnessProjects {
                 if (i < n) {
                     res.append("  ");
                     i += 2;
+                }
+            } else if (c == '`') {   // chaîne brute Go : jusqu'au prochain accent grave
+                res.append(' ');
+                i++;
+                while (i < n && source.charAt(i) != '`') {
+                    res.append(source.charAt(i) == '\n' ? '\n' : ' ');
+                    i++;
+                }
+                if (i < n) {
+                    res.append(' ');
+                    i++;
+                }
+            } else if (c == '@' && i + 1 < n && (source.charAt(i + 1) == '"'
+                    || (source.charAt(i + 1) == '$' && i + 2 < n && source.charAt(i + 2) == '"'))) {
+                // Chaîne verbatim C# (`@"…"`, `@$"…"`) : `""` y est un guillemet, `\` un caractère.
+                int open = source.indexOf('"', i);
+                for (int k = i; k <= open; k++) {
+                    res.append(' ');
+                }
+                i = open + 1;
+                while (i < n) {
+                    if (source.charAt(i) == '"' && i + 1 < n && source.charAt(i + 1) == '"') {
+                        res.append("  ");
+                        i += 2;
+                    } else if (source.charAt(i) == '"') {
+                        res.append(' ');
+                        i++;
+                        break;
+                    } else {
+                        res.append(source.charAt(i) == '\n' ? '\n' : ' ');
+                        i++;
+                    }
                 }
             } else if (c == '"' && i + 2 < n
                     && source.charAt(i + 1) == '"' && source.charAt(i + 2) == '"') {

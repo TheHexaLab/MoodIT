@@ -170,26 +170,13 @@ public class CodeAssembler {
     /** Noms de fonctions et classes de PREMIER NIVEAU définis par l'étudiant (pour créer les proxys). */
     // Identifiants Unicode (`def carré`) : en ASCII seul, le mandataire s'appelait `carr`, et
     // la réponse juste notait 0 (revue #246). `(?U)` rend `\\w` Unicode.
-    private static final Pattern PY_DEF = Pattern.compile("(?mU)^(?:async\\s+)?def\\s+([\\p{L}_]\\w*)");
+    // `carre = lambda x: …` est aussi une fonction de premier niveau (revue #246 : sans
+    // mandataire, le harnais ne la trouvait pas). Quantificateurs possessifs : aucun retour
+    // arrière sur un code soumis choisi pour en provoquer.
+    private static final Pattern PY_DEF = Pattern.compile(
+            "(?mU)^(?:(?:async\\s++)?def\\s++([\\p{L}_]\\w*+)|([\\p{L}_]\\w*+)\\s*+=\\s*+lambda\\b)");
     private static final Pattern PY_CLASS = Pattern.compile("(?mU)^class\\s+([\\p{L}_]\\w*)");
 
-    /**
-     * Python : exécution ISOLÉE en deux processus (cf. proxy/RPC). Le harnais du prof tourne
-     * INCHANGÉ dans un NOTEUR (grader.py) qui ne contient AUCUN code étudiant ; les symboles de
-     * l'étudiant (fonctions/classes) y sont des PROXYS qui délèguent, par RPC (JSON sur stdin/stdout),
-     * à un SERVEUR (student_server.py) où vit le vrai code étudiant. Conséquences :
-     * <ul>
-     *   <li>le nonce est émis par le NOTEUR, où aucun code étudiant ne tourne — le résiduel de
-     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce). RÉSERVE commune à
-     *       tout le mode « exec » (Python, JS/TS, PHP, Bash, JSX/TSX) : noteur et code soumis y
-     *       partagent l'UID, la garantie dépend donc de {@code kernel.yama.ptrace_scope ≥ 1} sur
-     *       l'hôte (cf. ISOLATION.md, « Résiduel connu », et {@link #assembleBashRpc}) ; seuls les
-     *       six langages compilés portent la propriété « verdict non falsifiable » ;</li>
-     *   <li>les ATTENDUS du harnais restent dans le noteur, hors de portée de l'étudiant (mémoire
-     *       distincte, {@code grader.py} auto-supprimé) → passer = produire les bonnes sorties ;</li>
-     *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
-     * </ul>
-     */
     /** Mandataire Python d'une fonction soumise : l'appel part par RPC. */
     private static String pyFunctionProxy(String f) {
         return "def " + f + "(*a):\n"
@@ -221,6 +208,23 @@ public class CodeAssembler {
      */
     private static final String SAMPLE_PROXY_NAME = "__moodit_exemple";
 
+    /**
+     * Python : exécution ISOLÉE en deux processus (cf. proxy/RPC). Le harnais du prof tourne
+     * INCHANGÉ dans un NOTEUR (grader.py) qui ne contient AUCUN code étudiant ; les symboles de
+     * l'étudiant (fonctions/classes) y sont des PROXYS qui délèguent, par RPC (JSON sur stdin/stdout),
+     * à un SERVEUR (student_server.py) où vit le vrai code étudiant. Conséquences :
+     * <ul>
+     *   <li>le nonce est émis par le NOTEUR, où aucun code étudiant ne tourne — le résiduel de
+     *       lecture de source disparaît (le serveur étudiant n'a pas de nonce). RÉSERVE commune à
+     *       tout le mode « exec » (Python, JS/TS, PHP, Bash, JSX/TSX) : noteur et code soumis y
+     *       partagent l'UID, la garantie dépend donc de {@code kernel.yama.ptrace_scope ≥ 1} sur
+     *       l'hôte (cf. ISOLATION.md, « Résiduel connu », et {@link #assembleBashRpc}) ; seuls les
+     *       six langages compilés portent la propriété « verdict non falsifiable » ;</li>
+     *   <li>les ATTENDUS du harnais restent dans le noteur, hors de portée de l'étudiant (mémoire
+     *       distincte, {@code grader.py} auto-supprimé) → passer = produire les bonnes sorties ;</li>
+     *   <li>ExecutionService est inchangé : il vérifie toujours le nonce.</li>
+     * </ul>
+     */
     private Assembled assemblePython(String studentCode, String harnessCode, String nonce,
             String startCode) {
         StringBuilder proxies = new StringBuilder();
@@ -488,11 +492,17 @@ public class CodeAssembler {
     }
 
     /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
+    /** Pour chaque occurrence, le PREMIER groupe capturé (motifs à plusieurs formes). */
     private static List<String> matchAll(Pattern pattern, String text) {
         List<String> out = new ArrayList<>();
         Matcher m = pattern.matcher(text == null ? "" : text);
         while (m.find()) {
-            out.add(m.group(1));
+            for (int g = 1; g <= m.groupCount(); g++) {
+                if (m.group(g) != null) {
+                    out.add(m.group(g));
+                    break;
+                }
+            }
         }
         return out;
     }
@@ -503,20 +513,16 @@ public class CodeAssembler {
     // `export` (et `export default`) facultatif : c'est l'écriture ordinaire d'un module
     // TypeScript, et sans lui une `export function f` ne recevait pas de mandataire — le harnais
     // ne trouvait pas `f`, et une réponse juste était notée fausse.
-    private static final String JS_EXPORT = "(?:export\\s+(?:default\\s+)?)?";
+    private static final String JS_EXPORT = "(?:export\\s++(?:default\\s++)?)?";
+    // Quantificateurs POSSESSIFS : `function\s*\*?\s*` se renvoyait une longue suite de blancs
+    // entre ses deux `\s*`, en temps quadratique — 45 s de CPU par harnais pour 100 000 blancs
+    // soumis, hors de toute place du sandbox (revue #246).
     private static final Pattern JS_CALLABLE = Pattern.compile(
-            "(?mU)^" + JS_EXPORT + "(?:async\\s+)?function\\s*\\*?\\s*([\\p{L}_$][\\w$]*)"
-                    + "|(?mU)^" + JS_EXPORT + "(?:const|let|var)\\s+([\\p{L}_$][\\w$]*)\\s*=");
+            "(?mU)^" + JS_EXPORT + "(?:async\\s++)?function\\s*+(?:\\*\\s*+)?([\\p{L}_$][\\w$]*+)"
+                    + "|(?mU)^" + JS_EXPORT + "(?:const|let|var)\\s++([\\p{L}_$][\\w$]*+)\\s*+=");
     private static final Pattern JS_CLASS = Pattern.compile(
-            "(?mU)^" + JS_EXPORT + "(?:abstract\\s+)?class\\s+([\\p{L}_$][\\w$]*)");
+            "(?mU)^" + JS_EXPORT + "(?:abstract\\s++)?class\\s++([\\p{L}_$][\\w$]*+)");
 
-    /**
-     * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
-     * Le NOTEUR (grader.js) exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.js)
-     * héberge le code étudiant. RPC SYNCHRONE (le harnais est synchrone) via {@code fs.readSync} sur le
-     * fd du sous-processus. Le nonce est émis par le noteur, où aucun code étudiant ne tourne
-     * (même réserve que Python : UID partagé, cf. {@link #assemblePython}).
-     */
     /** Mandataire JavaScript d'une fonction soumise. */
     private static String jsFunctionProxy(String f) {
         return "function " + f + "(...a){ return __moodit_rpc({op:'call',name:'" + f + "',args:a}).value; }\n";
@@ -529,6 +535,13 @@ public class CodeAssembler {
                 + " return new Proxy({}, { get(_o,p){ return (...a)=>__moodit_rpc({op:'method',handle:h,name:p,args:a}).value; } }); } });\n";
     }
 
+    /**
+     * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
+     * Le NOTEUR (grader.js) exécute le harnais INCHANGÉ avec des proxys ; le SERVEUR (student_server.js)
+     * héberge le code étudiant. RPC SYNCHRONE (le harnais est synchrone) via {@code fs.readSync} sur le
+     * fd du sous-processus. Le nonce est émis par le noteur, où aucun code étudiant ne tourne
+     * (même réserve que Python : UID partagé, cf. {@link #assemblePython}).
+     */
     private Assembled assembleJsRpc(String studentCode, String harnessCode, String nonce, boolean typescript,
             String startCode) {
         // TS : fichiers .ts, transpilés côte à côte par le runner (tsc --noCheck) en .js
@@ -758,7 +771,17 @@ public class CodeAssembler {
     // ── Bash ─────────────────────────────────────────────────────────────────────
 
     /** Fonctions bash de premier niveau : {@code nom()} ou {@code function nom}. */
-    private static final Pattern BASH_FUNC = Pattern.compile("(?m)^(?:function\\s+)?([A-Za-z_]\\w*)\\s*\\(\\s*\\)");
+    // `f() {`, `function f() {` et `function f {` (sans parenthèses, écriture courante), nom
+    // Unicode compris (revue #246 : sans mandataire, « command not found », 0 sur une réponse
+    // juste). Lettres, chiffres et `_` seulement : ces noms sont recopiés sans guillemets dans
+    // grader.sh, aucun métacaractère du shell ne doit pouvoir y entrer.
+    private static final Pattern BASH_FUNC = Pattern.compile(
+            "(?mU)^(?:function\\s++([\\p{L}_][\\p{L}\\p{Nd}_]*+)|([\\p{L}_][\\p{L}\\p{Nd}_]*+)\\s*+\\(\\s*+\\))");
+
+    /** Mandataire Bash d'une fonction soumise. */
+    private static String bashProxy(String f) {
+        return f + "() { __moodit_rpc " + f + " \"$@\"; }\n";
+    }
 
     /**
      * Bash : exécution ISOLÉE. Le NOTEUR (grader.sh) exécute le harnais INCHANGÉ avec des proxys ;
@@ -778,11 +801,6 @@ public class CodeAssembler {
      * propriété « verdict non falsifiable » ne vaut que pour les six langages compilés avec un
      * harnais booléen.
      */
-    /** Mandataire Bash d'une fonction soumise. */
-    private static String bashProxy(String f) {
-        return f + "() { __moodit_rpc " + f + " \"$@\"; }\n";
-    }
-
     private Assembled assembleBashRpc(String studentCode, String harnessCode, String nonce,
             String startCode) {
         StringBuilder proxies = new StringBuilder();
@@ -881,9 +899,9 @@ public class CodeAssembler {
 
     /**
      * Nom de fichier pour un « run » Java : la classe publique doit correspondre au fichier
-     * ({@code Solution} → {@code Solution.java}). À défaut, {@code Main.java}.
+     * ({@code Solution} → {@code Solution.java}), à défaut {@code Main.java}. Même règle que la
+     * notation : un seul lecteur du nom de fichier Java.
      */
-    /** Même règle que la notation : un seul lecteur du nom de fichier Java. */
     private static String javaFileName(String studentCode) {
         return com.moodit.execution_service.sandbox.HarnessProjects.javaFileName(studentCode, "Main");
     }

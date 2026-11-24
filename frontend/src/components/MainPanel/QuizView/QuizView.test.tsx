@@ -273,6 +273,50 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
       'Tentative transmise à votre enseignant'
     );
   });
+
+  it('relance aboutie sur la tentative affichée : focus rendu à sa puce, correction annoncée', async () => {
+    // Revue #246 : la barre du message d'attente est démontée au profit de celle du résumé ; le
+    // focus clavier tombait sur <body> et la note n'était pas annoncée.
+    const graded: QuizResult = {
+      attemptId: 9,
+      earned: 2,
+      max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: null, max: 3, status: 'review' },
+      ])
+      .mockResolvedValue([
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+      ]);
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts,
+      onFetchAttemptResult: vi.fn(async () => graded),
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() => expect(screen.getByText('#2 · à revoir')).toBeTruthy());
+    const reviewChip = screen.getByText('#2 · à revoir');
+    reviewChip.focus();
+
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+    expect(reviewChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#2 · 2/3');
+    expect(document.querySelector('[aria-live="polite"]:not([role])')?.textContent).toBe(
+      'Votre tentative a été corrigée : son résultat est affiché.'
+    );
+  });
 });
 
 describe('QuizView — phase résumé & révision', () => {

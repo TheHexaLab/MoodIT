@@ -20,15 +20,15 @@ Dans la console Hetzner → **Add Server** :
 
 - Localisation : au choix (Nuremberg/Helsinki = moins cher ; Ashburn si public US).
 - Image : **Ubuntu 24.04**.
-- Type : **CAX21** (ARM Ampere, 4 vCPU / **8 Go**) ≈ 7-8 €/mois. *(x86 : CX32 équivalent.)*
+- Type : **CX32** (x86, 4 vCPU / **8 Go**) ≈ 7-8 €/mois — **x86 obligatoire** depuis #116
+  (images runner, voir l'encadré ci-dessous).
 - Ajouter ta **clé SSH**.
 - Créer, puis noter l'**IP publique**.
 
-> ARM (CAX) : les images des SERVICES se buildent sur place, mais **pas celles des runners**
-> depuis #116 : les Dockerfile java et csharp refusent volontairement une base non amd64
-> (invariant du miroir apt), et `python/requirements.txt` ne porte que des empreintes
-> amd64. Pour un hôte d'exécution, prendre du x86 ;
-> la prod actuelle tourne sur **x86** (CX32).
+> Pourquoi pas ARM (CAX) : les images des SERVICES s'y construiraient, mais **pas celles des
+> runners** depuis #116 — les Dockerfile java et csharp refusent volontairement une base non
+> amd64 (invariant du miroir apt), et `python/requirements.txt` ne porte que des empreintes
+> amd64 : `./docker/runners/build.sh` échoue. La prod tourne sur **x86** (CX32).
 
 ## 2. Pointer le domaine
 
@@ -325,9 +325,12 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > **2. Juste APRÈS `./deploy/update.sh`.** Rejouer contre la prod, qui est la seule référence :
 >
 > ```bash
-> # Heure de la bascule, à noter AVANT update.sh (horloge de la base) : elle borne la fenêtre
-> # ci-dessous.
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT NOW()::timestamp;"
+> # Heure de la bascule, à noter AVANT update.sh (horloge de la base), EN UTC : elle borne la
+> # fenêtre ci-dessous, et `Attempt.submitted_at` est écrit en UTC (core tourne en UTC), alors
+> # que la session psql du conteneur est à l'heure de Toronto (PGTZ) — `NOW()::timestamp` seul
+> # décalait la fenêtre de 4 à 5 h et listait des tentatives notées avant la bascule.
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+>   "SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;"
 > # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT ou un
 > # À VÉRIFIER non acquitté, le temps de les régler dans l'éditeur. Mêmes --ack qu'à l'étape 1.
 > python3 deploy/check-compiled-harnesses.py --unpublish --ack <id>,<id>
@@ -335,7 +338,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et
 > la fermeture, et recevoir 0 sans faute de leur part. Lister ces tentatives (`<ids>` : les quiz
-> que le script vient de fermer ; `<bascule>` : l'heure notée) :
+> que le script vient de fermer ; `<bascule>` : l'heure notée, en UTC comme `submitted_at`) :
 >
 > ```bash
 > docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
@@ -472,8 +475,10 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   2 vCPU visent le dev). Sur ~3,5-4 Go au repos, la marge restante est donc d'environ 1 Go :
   c'est le poste à surveiller avant d'augmenter l'une de ces bornes.
 - **Groq** est gratuit (quotas généreux) ; aucune donnée LLM ne coûte de GPU. C'est la seule raison de ce choix : voir « Modèle d'IA ».
-- Si tu veux **0 €/mois** : reprends exactement ce compose sur une VM
-  **Oracle Cloud Always Free** (ARM 4 cœurs / 24 Go). Même fichiers, seul l'hébergeur change.
+- Si tu veux **0 €/mois** : l'offre **Oracle Cloud Always Free** ne donne de la puissance
+  qu'en ARM (4 cœurs / 24 Go), où les images runner ne se construisent pas (voir l'étape 1) :
+  l'exécution du code des quiz n'y fonctionnerait pas. Ses VM x86 gratuites (1 Go de RAM) sont
+  trop petites pour ce compose.
 - Pour réduire la RAM : externaliser Postgres vers **Neon**/**Supabase** (offre gratuite)
   et retirer le service `postgres` du compose (mettre `POSTGRES_HOST`/`PORT` sur l'hôte managé).
 

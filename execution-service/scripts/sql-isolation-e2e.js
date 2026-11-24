@@ -1,7 +1,10 @@
-// Test d'intégration : valide l'isolation SQL 2 phases DIRECTEMENT contre un sqlite3 réel.
-// Rejoue la même logique que ExecutionService.runSqlIsolated (setup -> code etudiant -> .dump ->
-// filtre tables de travail -> verdict encadre par nonce), avec la même commande que le mode
-// exec du runner (sqlite3 -safe -bail -batch :memory:). Nécessite node ET sqlite3 dans le PATH.
+// Test d'intégration : valide le PRINCIPE de l'isolation SQL 2 phases contre un sqlite3 réel
+// (setup -> code etudiant -> .dump -> filtre tables de travail -> verdict encadre par nonce),
+// avec la même commande que le mode exec du runner (sqlite3 -safe -bail -batch :memory:).
+// Version SIMPLIFIÉE de ExecutionService.runSqlIsolated : sentinelles par SELECT (et non
+// .print), filtre ligne à ligne (et non le découpeur de CodeAssembler, ni le refus d'un dump à
+// paramètre ou tronqué). La référence, qui passe par le vrai code, reste
+// ExecutionIntegrationTest (sql_*). Nécessite node ET sqlite3 dans le PATH.
 // Cf. scripts/README.md. Aucun effet de bord (base en mémoire, jetable).
 const { spawnSync } = require('child_process');
 // Un nonce PAR PHASE, comme runSqlIsolated (#23) : le code soumis tourne en phase 1, rien de ce

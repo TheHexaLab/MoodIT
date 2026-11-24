@@ -673,6 +673,14 @@ class ExecutionIntegrationTest {
         requireRuntime("python");
         assertThat(passes("Python", "def carré(x):\n    return x * x", "return carré(3) == 9")).isTrue();
         assertThat(passes("Python", "def carré(x):\n    return x + x", "return carré(3) == 9")).isFalse();
+        assertThat(passes("Python", "carre = lambda x: x * x", "return carre(3) == 9")).isTrue();
+        assertThat(passes("Python", "carre = lambda x: x + x", "return carre(3) == 9")).isFalse();
+        requireRuntime("bash");
+        assertThat(passes("Bash", "function carre {\n  echo $(( $1 * $1 ))\n}",
+                "[ \"$(carre 3)\" = 9 ]")).isTrue();
+        assertThat(passes("Bash", "function carre {\n  echo $(( $1 + $1 ))\n}",
+                "[ \"$(carre 3)\" = 9 ]")).isFalse();
+        assertThat(passes("Bash", "carré() { echo $(( $1 * $1 )); }", "[ \"$(carré 3)\" = 9 ]")).isTrue();
         requireRuntime("sqlite3");
         String harness = "CREATE TABLE élèves (nom TEXT, actif INTEGER);\n"
                 + "INSERT INTO élèves VALUES ('a', 1), ('b', 1);\n-- @student\n"

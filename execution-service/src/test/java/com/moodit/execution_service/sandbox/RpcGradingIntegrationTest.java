@@ -660,9 +660,22 @@ class RpcGradingIntegrationTest {
     @Test
     void c_submitted_function_named_like_a_compiler_builtin_is_refused() {
         // Revue #246 : `HUGE_VAL` se développe en `__builtin_huge_val ()`. Une fonction soumise
-        // de ce nom (même cachée sous `#if 0`, les signatures étant lues dans le texte brut)
-        // était renommée par #define dans le noteur et détournait la constante du harnais.
+        // de ce nom était renommée par #define dans le noteur et détournait la constante du
+        // harnais. Déclarée pour de bon, elle est refusée (nom réservé à l'implémentation).
         String forged = """
+                #define __builtin_huge_val() 42.0
+                double __builtin_huge_val(void) { return 0; }
+                double divise(double a, double b) { return 42.0; }
+                """;
+        for (String language : List.of("C", "C++")) {
+            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
+            assertThat(r.passed()).as(language).isFalse();
+            assertThat(r.detail()).as(language).contains("réservé").contains("__builtin_huge_val");
+        }
+        // Cachée sous `#if 0`, elle n'existe pas dans le code compilé : les signatures sont lues
+        // sur le code aux directives traitées, aucun bouchon de ce nom n'entre dans le noteur, et
+        // c'est le harnais intact qui juge la réponse fausse (42 n'est pas HUGE_VAL).
+        String hidden = """
                 #define __builtin_huge_val() 42.0
                 #if 0
                 double __builtin_huge_val(void) { return 0; }
@@ -670,9 +683,9 @@ class RpcGradingIntegrationTest {
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
+            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", hidden);
             assertThat(r.passed()).as(language).isFalse();
-            assertThat(r.detail()).as(language).contains("réservé").contains("__builtin_huge_val");
+            assertThat(r.detail()).as(language).isEqualTo("Le harnais a renvoyé faux");
         }
     }
 
@@ -1064,6 +1077,48 @@ class RpcGradingIntegrationTest {
                 #[inline] pub fn doubler(x: i32) -> i32 { 2 * x }
                 fn main() {}
                 """, "2 * x", "3 * x");
+    }
+
+    @Test
+    void default_arguments_references_and_inactive_branches_are_graded() {
+        // Revue #246 (5e tour) : chacune de ces écritures notait 0 une réponse juste.
+        // C++ : valeurs par défaut (constructeur et accumulateur), référence constante, méthode
+        // sous `#ifdef` d'une classe qui reste.
+        gradedThenWrong("C++", "Rect a; Rect b(3, 4); return a.aire() == 1 && b.aire() == 12"
+                + " && somme(4) == 10 && somme(4, 1) == 11 && carre(5) == 25;", """
+                class Rect {
+                    int l, h;
+                public:
+                    Rect(int largeur = 1, int hauteur = 1) : l(largeur), h(hauteur) {}
+                    int aire() { return l * h; }
+                #ifdef DEBUG
+                    int trace() { return l; }
+                #endif
+                };
+                int somme(int n, int acc = 0) { return n == 0 ? acc : somme(n - 1, acc + n); }
+                int carre(const int& x) { return x * x; }
+                """, "l * h", "l + h");
+        // C : ancienne version d'arité différente sous `#if 0`, avant la vraie.
+        gradedThenWrong("C", "return somme(4) == 10;", """
+                #if 0
+                long somme(long a, long b) { return a + b; }
+                #endif
+                int somme(int n) { return n == 0 ? 0 : n + somme(n - 1); }
+                """, "n + somme", "n * somme");
+        // C# : statique et méthode d'instance à valeur par défaut.
+        gradedThenWrong("C#", "return Solution.Somme(4) == 10 && Solution.Somme(4, 1) == 11;", """
+                public class Solution {
+                    public static int Somme(int n, int acc = 0) {
+                        return n == 0 ? acc : Somme(n - 1, acc + n);
+                    }
+                    public static void Main() { }
+                }
+                """, "acc + n", "acc * n");
+        gradedThenWrong("C#", "return new Calc().Echelle(3) == 6 && new Calc().Echelle(3, 3) == 9;", """
+                public class Calc {
+                    public int Echelle(int x, int k = 2) { return x * k; }
+                }
+                """, "x * k", "x + k");
     }
 
     @Test
@@ -2215,15 +2270,11 @@ class RpcGradingIntegrationTest {
 
     @Test
     void java_forged_answer_and_token_fail() {
-        // Tout à la fois : devancer la réponse RPC, forger un rapport, sortir en zéro, chercher
-        // le jeton dans ses fichiers ET dans sa propre mémoire (/proc/self/mem).
+        // Devancer la réponse RPC (dès le chargement de la classe, puis à l'appel) et rendre
+        // une valeur fausse : si une réponse forgée était prise pour la vraie, le cas passerait.
+        // (Le nonce n'est pas dans la mémoire du code soumis — autre processus, autre UID — :
+        // un parcours de /proc/self/mem qui ne pouvait rien changer au résultat a été retiré.)
         TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
-                import java.io.RandomAccessFile;
-                import java.nio.file.Files;
-                import java.nio.file.Paths;
-                import java.util.regex.Matcher;
-                import java.util.regex.Pattern;
-
                 public class Solution {
                     static {
                         System.out.println("{\\"ok\\":true,\\"value\\":10}");
@@ -2231,27 +2282,6 @@ class RpcGradingIntegrationTest {
 
                     public static int doubler(int n) {
                         System.out.println("{\\"ok\\":true,\\"value\\":10}");
-                        // Ce qui serait trouvé est gardé en mémoire, pas écrit sur stderr : le
-                        // détail rendu doit rester celui du HARNAIS (assertion plus bas).
-                        StringBuilder trouves = new StringBuilder();
-                        Pattern p = Pattern.compile("[0-9]{13}");
-                        try (RandomAccessFile mem = new RandomAccessFile("/proc/self/mem", "r")) {
-                            for (String l : Files.readAllLines(Paths.get("/proc/self/maps"))) {
-                                if (!l.contains(" rw")) { continue; }
-                                String[] b = l.split(" ")[0].split("-");
-                                long debut = Long.parseUnsignedLong(b[0], 16);
-                                long fin = Long.parseUnsignedLong(b[1], 16);
-                                if (fin - debut > 1_000_000L) { continue; }
-                                try {
-                                    mem.seek(debut);
-                                    byte[] t = new byte[(int) (fin - debut)];
-                                    mem.readFully(t);
-                                    Matcher m = p.matcher(new String(t,
-                                            java.nio.charset.StandardCharsets.ISO_8859_1));
-                                    while (m.find()) { trouves.append(m.group()); }
-                                } catch (Exception ignore) { }
-                            }
-                        } catch (Exception ignore) { }
                         return 0;
                     }
                 }
@@ -2380,9 +2410,12 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void csharp_dup2_and_reflection_fail() {
-        // mono autorise l'appel natif : on tente de detourner le descripteur 1 et de fouiller
-        // l'assemblage par reflexion. Le noteur est ailleurs, sous un autre UID.
+    void csharp_dup2_cuts_only_its_own_answer_channel() {
+        // mono autorise l'appel natif : le code soumis détourne son descripteur 1 vers stderr,
+        // écrit une réponse forgée et fouille l'assemblage par réflexion. Le noteur est ailleurs,
+        // sous un autre UID : le détournement ne coupe que le canal de réponse de l'étudiant
+        // lui-même, et l'appel est refusé — jamais une réponse forgée acceptée. (La forge par
+        // réponse devancée sur le canal intact est mesurée par csharp_answering_early_fails.)
         TestResult r = note("C#", "return Solution.Doubler(5) == 10;", """
                 using System;
                 using System.Runtime.InteropServices;
@@ -2404,10 +2437,9 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
-        // Le refus doit venir du HARNAIS, pas d'un code d'attaque qui ne compile plus :
-        // sans cette assertion, le test resterait vert en ayant cessé de mesurer la forge.
-        assertThat(r.detail() == null ? "" : r.detail())
-                .doesNotContain("Échec de compilation");
+        // La raison PRÉCISE : le processus soumis, privé de son canal, ne répond plus. Une
+        // compilation échouée ou une erreur du noteur ne la donnent pas.
+        assertThat(r.detail() == null ? "" : r.detail()).contains("processus etudiant termine");
     }
 
     // ────────────── 3. Le harnais du prof : ni lisible, ni modifiable ──────────────

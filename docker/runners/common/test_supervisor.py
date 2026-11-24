@@ -738,23 +738,57 @@ class SignatureFormsTest(unittest.TestCase):
         self.assertLess(server.index("#undef int\n"), server.index("moodit_lit_int"))
         self.assertIn("(int) ::f(moodit_a0)", server)
 
-    def test_c_preprocessor_segment_and_dropped_names(self):
+    def test_c_preprocessor_segment(self):
         pre = ('# 1 "pp.c"\n# 1 "<built-in>"\nint builtin_noise;\n# 1 "/usr/include/stdio.h" 1 3\n'
                "int printf(const char *, ...);\n# 3 \"pp.c\" 2\nint doubler(int x) { return 2 * x; }\n")
         self.assertEqual("int doubler(int x) { return 2 * x; }",
                          supervisor.c_student_segment(pre, "pp.c"))
-        present = {"int", "doubler", "x", "return"}
-        methods = [("int", "trace", ["int"]), ("int", "doubler", ["int"]), ("int", "FN", ["int"])]
-        objects = [("Cache", [[]], []), ("doubler", [[]], [])]
-        kept_m, kept_o = supervisor.c_drop_absent(
-            methods, objects, present, "#ifdef DEBUG\nint trace(int x);\n#endif\n#define FN doubler\n")
-        self.assertEqual(["doubler", "FN"], [m[1] for m in kept_m])
-        self.assertEqual(["doubler"], [o[0] for o in kept_o])
-        # Sans directive conditionnelle : pas de préprocesseur (None), rien n'est écarté.
-        self.assertIsNone(supervisor.c_preprocessed_names("int f(int x) { return x; }", "gcc",
-                                                          "-std=gnu17", ".", "c"))
+        # Sans directive conditionnelle : pas de préprocesseur (None), le texte brut est lu.
+        self.assertIsNone(supervisor.c_directives_only_source("int f(int x) { return x; }", "gcc",
+                                                              "-std=gnu17", ".", "c"))
         self.assertTrue(supervisor.C_CONDITIONAL.search("int a;\n  #  ifdef X\n"))
         self.assertFalse(supervisor.C_CONDITIONAL.search("#include <stdio.h>\n#define A 1\n"))
+
+    def test_default_arities(self):
+        self.assertEqual(0, supervisor.trailing_defaults("int a, int b"))
+        self.assertEqual(2, supervisor.trailing_defaults("int a, int b = 1, int c = 2"))
+        self.assertEqual(0, supervisor.trailing_defaults(""))
+        # Arité réduite gardée seulement sans conflit : déclaration explicite de même arité, ou
+        # deux entrées qui réduisent à la même signature (appel ambigu dans le serveur).
+        self.assertEqual(
+            [("int", "f", ["int", "int"]), ("int", "f", ["int"])],
+            supervisor.with_default_arities([("int", "f", ["int", "int"], 1),
+                                             ("int", "f", ["int"], 0)]))
+        self.assertEqual(
+            [("int", "g", ["int", "int"]), ("int", "g", ["int", "double"])],
+            supervisor.with_default_arities([("int", "g", ["int", "int"], 1),
+                                             ("int", "g", ["int", "double"], 1)]))
+        self.assertEqual(
+            [("long", "s", ["int", "int", "int"]), ("long", "s", ["int", "int"]), ("long", "s", ["int"])],
+            supervisor.with_default_arities([("long", "s", ["int", "int", "int"], 2)]))
+        # C# : statiques et méthodes d'instance.
+        cs = chr(10).join(["class Solution {",
+                           "    static int Somme(int n, int acc = 0) { return n == 0 ? acc : Somme(n - 1, acc + n); }",
+                           "    public int Echelle(int x, int k = 2) { return x * k; }",
+                           "}", ""])
+        self.assertEqual([("int", "Somme", ["int", "int"]), ("int", "Somme", ["int"])],
+                         supervisor.cs_signatures(cs))
+        _ctors, methods = supervisor.cs_object_api(cs, "Solution")
+        self.assertEqual([("int", "Echelle", ["int", "int"]), ("int", "Echelle", ["int"])], methods)
+        # Serveur C# : arité réduite acceptée seulement sur des paramètres optionnels, et
+        # surcharges essayées par nombre de paramètres croissant.
+        server = supervisor.cs_server_source(["Solution"])
+        self.assertIn("if (!attendus[i].IsOptional) { return false; }", server)
+        self.assertIn("donnes[i] = attendus[i].DefaultValue", server)
+        self.assertEqual(3, server.count("ParArite("))
+
+    def test_cpp_reference_parameters(self):
+        self.assertEqual(["int", "double"], supervisor._c_param_types("const int& x, double &y"))
+        self.assertEqual(["int"], supervisor._c_param_types("const int &"))
+        self.assertIsNone(supervisor._c_param_types("int&& x"))
+        self.assertIsNone(supervisor._c_param_types("int *x"))
+        self.assertEqual([("int", "carre", ["int"])],
+                         supervisor.c_signatures("int carre(const int& x) { return x * x; }\n", cpp=True))
 
     def test_go_promoted_methods_through_embedding(self):
         src = ("type Rectangle struct {\n\tl, h int\n}\n"
@@ -1922,20 +1956,21 @@ class Review25Test(unittest.TestCase):
         # constructeur a valeurs par defaut faisait disparaitre la classe entiere (le
         # constructeur implicite n'est plus fourni des qu'un constructeur est declare). Une
         # reponse juste etait notee 0, sans que le « Tester » du prof le revele.
+        # Revue #246 : chaque arité RÉDUITE aussi — `somme(4)` ne compilait pas dans le noteur.
         self.assertEqual(
             supervisor.c_signatures("int somme(int a, int b = 0) { return a + b; }\n", cpp=True),
-            [("int", "somme", ["int", "int"])])
+            [("int", "somme", ["int", "int"]), ("int", "somme", ["int"])])
         self.assertEqual(
             supervisor.c_signatures("double mi(const double x=1.5) { return x / 2; }\n", cpp=True),
-            [("double", "mi", ["double"])])
+            [("double", "mi", ["double"]), ("double", "mi", [])])
         src = self.NL.join(["class Rect {", "public:",
                             "    Rect(int w = 1, int h = 1) { }",
                             "    int aire(int facteur = 1) { return 0; }",
                             "};", ""])
         (klass, ctors, method_list), = supervisor.cpp_object_api(src)
         self.assertEqual(klass, "Rect")
-        self.assertEqual(ctors, [["int", "int"]])
-        self.assertEqual(method_list, [("int", "aire", ["int"])])
+        self.assertEqual(ctors, [["int", "int"], ["int"], []])
+        self.assertEqual(method_list, [("int", "aire", ["int"]), ("int", "aire", [])])
         # Un type non transportable reste ecarte, valeur par defaut ou non.
         self.assertEqual(
             supervisor.c_signatures("int f(long double x = 0) { return 0; }\n", cpp=True), [])
@@ -1958,7 +1993,7 @@ class Review25Test(unittest.TestCase):
         # Le chemin objet utilise le MEME lecteur.
         ctors, _ = supervisor.cs_object_api(
             "class R {" + self.NL + "    public R(int l, int h = 1) { }" + self.NL + "}", "R")
-        self.assertEqual(ctors, [["int", "int"]])
+        self.assertEqual(ctors, [["int", "int"], ["int"]])
 
     def test_environment_error_is_not_a_bug(self):
         # OSError (disque, lien, processus) : l'etudiant peut la provoquer -> une note, pas un

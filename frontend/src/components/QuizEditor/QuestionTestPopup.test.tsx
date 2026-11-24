@@ -148,6 +148,22 @@ describe('QuestionTestBody — correction Code via l’API', () => {
     expect(screen.getByText('h2')).toBeTruthy();
   });
 
+  it('affiche le diagnostic du serveur sous un harnais en échec, jamais sous un harnais réussi', async () => {
+    // Revue #246 : un harnais au format framework (refusé) ne montrait qu'une croix, sans la
+    // forme à écrire — « Tester » est pourtant le seul moyen de mettre au point la forme booléenne.
+    const diagnostic = 'Ce harnais est une classe de test du framework (@Test).';
+    const onEvaluateCode = vi.fn().mockResolvedValue([
+      { name: 'h1', passed: true, weight: 1, detail: 'ignoré' },
+      { name: 'h2', passed: false, weight: 3, detail: diagnostic },
+      { name: 'h3', passed: false, weight: 1, detail: null },
+    ]);
+    renderBody(codingDraft(), { onEvaluateCode });
+    fireEvent.click(correctButton());
+
+    expect(await screen.findByText(diagnostic)).toBeTruthy();
+    expect(screen.queryByText('ignoré')).toBeNull();
+  });
+
   it('envoie le code de départ de la QUESTION et son temps limite, pas le code saisi', async () => {
     // Le code saisi part de code de départ : sans le modifier, le test ne distinguait pas les deux.
     const onEvaluateCode = vi.fn().mockResolvedValue([{ name: 'h1', passed: true, weight: 1 }]);

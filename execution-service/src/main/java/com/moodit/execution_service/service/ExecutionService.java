@@ -503,7 +503,6 @@ public class ExecutionService {
         return String.join("\n", java.util.Arrays.asList(lines).subList(s + 1, e));
     }
 
-    /** Message d'échec exploitable pour le prof (signal = timeout/OOM, sinon stderr). */
     /**
      * Compilation TUÉE (temps ou mémoire) : le superviseur la rend sans code, avec un signal.
      * Seul le code était lu : elle passait pour réussie, l'étape run manquait, et l'interface
@@ -530,6 +529,7 @@ public class ExecutionService {
                 "Échec de compilation");
     }
 
+    /** Message d'échec exploitable pour le prof (signal = timeout/OOM, sinon stderr). */
     private static String runFailureDetail(RunnerExec.Stage run) {
         if (run == null) {
             return "Aucune sortie d'exécution";

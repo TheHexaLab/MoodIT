@@ -1,4 +1,5 @@
-# Compose de PRODUCTION pour un VPS unique (Hetzner ~8 €/mois, ARM ou x86).
+# Compose de PRODUCTION pour un VPS unique (Hetzner ~8 €/mois, x86 : les images runner ne se
+# construisent pas sur ARM, cf. deploy/DEPLOY.md).
 # Dérivé de docker-compose-prod.yml, avec 2 différences :
 #   1. Ollama SUPPRIMÉ  → mcp-service pointe sur Groq : choix de la prod pour son coût (voir #33).
 #   2. Caddy AJOUTÉ     → seul conteneur exposé sur Internet (HTTPS auto Let's Encrypt).

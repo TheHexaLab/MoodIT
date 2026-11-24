@@ -194,6 +194,12 @@ export interface CodingTestResult {
   passed: boolean;
   /** Poids du harnais (Test_Case.weight) — pour afficher sa contribution au score. */
   weight: number;
+  /**
+   * Diagnostic d'execution-service (harnais au format framework refusé, harnais qui ne compile
+   * pas, nom réservé…). Présent seulement dans « Tester » (enseignant, /exec/evaluate) : core
+   * ne le transmet jamais à l'étudiant (CodingTestResultDTO n'a pas ce champ).
+   */
+  detail?: string | null;
 }
 
 /**

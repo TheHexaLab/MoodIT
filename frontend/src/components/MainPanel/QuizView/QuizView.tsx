@@ -154,12 +154,31 @@ const QuizView: React.FC<QuizViewProps> = ({
   };
   const awaitingReviewShown = attempt.phase === 'summary' && attempt.awaitingReview;
 
+  // Relance de l'enseignant aboutie sur la tentative AFFICHÉE (même id, message d'attente →
+  // résumé) : la barre du message d'attente est démontée, celle du résumé montée. Sans rien de
+  // plus, le focus clavier tombait sur <body> et la note n'était pas annoncée. Suivi du passage
+  // par état dérivé, ajusté pendant le rendu (pas d'effet) ; un autre changement efface l'annonce.
+  const view = { awaiting: awaitingReviewShown, id: attempt.currentAttemptId, phase: attempt.phase };
+  const [prevView, setPrevView] = useState(view);
+  const [reviewGradedNotice, setReviewGradedNotice] = useState(false);
+  if (prevView.awaiting !== view.awaiting || prevView.id !== view.id || prevView.phase !== view.phase) {
+    const graded = prevView.awaiting && !view.awaiting && view.phase === 'summary'
+      && view.id != null && view.id === prevView.id;
+    setPrevView(view);
+    setReviewGradedNotice(graded);
+    if (graded) setChipFocus(view.id);
+  }
+
   return (
     <div className={styles.view}>
       {/* Région annoncée TOUJOURS montée : un role=status inséré avec son texte déjà présent
           n'est pas lu par la plupart des lecteurs d'écran ; seul le texte change ici. */}
       <p className={styles.visuallyHidden} aria-live="polite">
-        {awaitingReviewShown ? `${t.awaitingReviewTitle}. ${t.awaitingReview}` : ''}
+        {awaitingReviewShown
+          ? `${t.awaitingReviewTitle}. ${t.awaitingReview}`
+          : reviewGradedNotice
+            ? t.reviewGraded
+            : ''}
       </p>
       {busy && (
         <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">

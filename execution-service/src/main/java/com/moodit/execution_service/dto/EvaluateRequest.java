@@ -25,11 +25,14 @@ public record EvaluateRequest(
         Integer timeoutMs,
         /**
          * Code de départ de la question, écrit par l'ENSEIGNANT ; {@code null} s'il n'y en a pas.
-         * Une fonction ou une classe qu'il déclare est celle que l'énoncé impose : elle peut porter
-         * le nom d'une intégrée du langage ({@code sum}, {@code max}, {@code len}…) sans être
-         * refusée comme « Nom réservé » (cf. CodeAssembler#notImposed). Jamais fourni par
-         * l'étudiant : core le lit dans la question, et la route publique est réservée aux
-         * éditeurs de quiz.
+         * Langages INTERPRÉTÉS seulement (Python, JavaScript, TypeScript, Bash) : une fonction ou
+         * une classe qu'il déclare est celle que l'énoncé impose, et peut porter le nom d'une
+         * intégrée du langage ({@code sum}, {@code max}, {@code len}…) sans être refusée comme
+         * « Nom réservé » (cf. CodeAssembler#notImposed). Les six langages COMPILÉS ne s'en
+         * servent pas : un nom qui masque un outil du harnais y est refusé quel que soit le code
+         * de départ (le noteur compile ses propres bouchons à ce nom) — l'énoncé y impose donc
+         * un autre nom, ce que « Tester » montre au prof. Jamais fourni par l'étudiant : core le
+         * lit dans la question, et la route publique est réservée aux éditeurs de quiz.
          */
         @Size(max = 100_000) String startCode) {
 

@@ -266,11 +266,16 @@ public class DockerEvaluator {
             // Qualification bornee a huit segments : le moteur Java repete un groupe par recursion.
             case "java" -> java.util.regex.Pattern.compile(
                     "@\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\\b");
-            // Un ATTRIBUT, pas un indexeur : `tab[Test]`, `F()[Test]` ou `d?[Test]` dans un corps
-            // booléen légitime faisait refuser toute la question. Le crochet d'un attribut ne
-            // suit jamais un identifiant, une parenthèse fermante ni un `?`.
+            // Un ATTRIBUT, pas un indexeur : `tab[Test]`, `F()[Test]`, `d?[Test]`, `g()[0][Test]`
+            // ou `"abc"[Test]` dans un corps booléen légitime faisait refuser toute la question.
+            // Un attribut ouvre une DÉCLARATION : en début de ligne, ou après `{`, `}` ou `;`,
+            // derrière d'autres attributs éventuels (`[Category("a")][Test]`), le marqueur en
+            // tête ou après une virgule de la liste (`[Category("a"), Test]`). Un vrai test qui y
+            // échapperait ne compilerait pas comme corps booléen : diagnostic au prof, pas de note.
             case "csharp" -> java.util.regex.Pattern.compile(
-                    "(?<![\\w)?])\\[\\s*(?:\\w+\\s*\\.\\s*){0,8}(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+                    "(?m)(?:^|(?<=[{};]))[ \\t]*(?:\\[[^\\[\\]\\n]*\\][ \\t]*){0,8}"
+                    + "\\[\\s*(?:[^\\[\\]\\n]*,\\s*)?(?:\\w+\\s*\\.\\s*){0,8}"
+                    + "(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
             case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
             case "rust" -> java.util.regex.Pattern.compile(
                     "#\\s*\\[\\s*(?:\\w+\\s*::\\s*){0,8}test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");

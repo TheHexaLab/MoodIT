@@ -374,6 +374,7 @@
 
 .testRow {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.625rem;
     padding: 0.5rem 0;
@@ -384,6 +385,19 @@
 
 .testRow:last-child {
     border-bottom: none;
+}
+
+/* Diagnostic sous la ligne du harnais en échec (« Tester ») : texte du serveur, sur sa propre
+   ligne, retours à la ligne gardés (sortie du compilateur). */
+.testDetail {
+    flex: 1 0 100%;
+    margin: 0;
+    padding-left: calc(1.125rem + 0.625rem);
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .testName {

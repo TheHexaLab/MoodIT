@@ -360,6 +360,13 @@ class HarnessProjectsTest {
             {"x\"\"", "x  "},                                       // chaîne vide en fin de source
             {"a/", "a/"},                                           // / seule en fin de source
             {"a / b * c", "a / b * c"},
+            {"q := `a\"\nb` + 1", "q :=    \n   + 1"},               // chaîne brute Go
+            {"a `bc", "a    "},                                     // chaîne brute non fermée
+            {"p = @\"C:\\\"; q", "p =       ; q"},                  // verbatim C# : \ ordinaire
+            {"@\"a\"\"b\" c", "        c"},                         // verbatim : "" = guillemet
+            {"@$\"x{y}\" z", "         z"},                         // verbatim interpolée
+            {"@\"abc", "     "},                                    // verbatim non fermée
+            {"@Override x", "@Override x"},                         // annotation Java : du code
         };
         for (String[] c : cases) {
             assertThat(HarnessProjects.withoutCommentsOrLiterals(c[0])).as(c[0]).isEqualTo(c[1]);

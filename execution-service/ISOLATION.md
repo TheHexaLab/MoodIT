@@ -16,9 +16,13 @@ les **dépendances fragiles** à connaître avant une mise à jour, et le **rés
 ### Isolation RPC (interprétés + JSX/TSX)
 Le **harnais du prof reste identique**. À l'assemblage, `CodeAssembler` produit **deux fichiers** :
 
-- **`grader.*` (noteur)** : exécute le harnais avec des **proxys** pour chaque symbole étudiant
-  (fonctions/classes découverts par regex). Contient le **nonce** et les **attendus**. S'**auto-supprime**
-  au démarrage. **Aucun code étudiant** n'y tourne.
+- **`grader.*` (noteur)** : exécute le harnais avec des **proxys** (mandataires) pour les symboles
+  étudiants que le harnais **emploie** (fonctions/classes découvertes par regex, noms Unicode
+  compris ; PHP : tous). Contient le **nonce** et les **attendus**. S'**auto-supprime** au
+  démarrage. **Aucun code étudiant** n'y tourne. Un nom soumis qui masquerait une intégrée que
+  le harnais emploie (`sum`, `max`, `test`…) est **refusé** (« Nom réservé »), sauf s'il est
+  déclaré par le **code de départ** de la question (#22) et que le noteur ne s'en sert pas
+  lui-même.
 - **`student_server.*` (serveur)** : héberge le vrai code étudiant. Boucle RPC (JSON par ligne) : reçoit
   « appelle `f(args)` / `new C(args)` / méthode », exécute, renvoie la valeur. **Aucun nonce.**
 
@@ -42,7 +46,7 @@ couvre** (`ExecutionIntegrationTest`, cf. CI) — le lancer après toute mise à
 - **`process.mainModule`** : vecteur d'évasion en JSX **corrigé** par l'isolation (le composant ne peut
   plus atteindre le nonce). À re-tester si le runtime React/Node change.
 - **Compilation TS** : `tsc --noCheck` (transpilation seule — typage permissif à l'exécution) ;
-  le grader spawn `node student_server` → résolu vers le `.js` transpilé.
+  le grader lance `node student_server.js`, le `.js` transpilé.
 - **Bash** : bash garde `grader.sh` ouvert (fd 255) même supprimé, et `/proc/<pid>/fd/255` le
   rouvre sous le même UID. Le noteur est donc un seul bloc `{ … }`, analysé en entier avant
   exécution, qui **vide** son fichier avant de l'effacer : le fd ne rouvre plus qu'un fichier vide.

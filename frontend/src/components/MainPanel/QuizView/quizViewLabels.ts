@@ -36,6 +36,8 @@ export interface QuizViewLabels {
   awaitingReviewTitle: string;
   /** Corps de ce message. */
   awaitingReview: string;
+  /** Annonce (lecteur d'écran) quand la relance de l'enseignant aboutit sur la tentative affichée. */
+  reviewGraded: string;
   /** Titre du popup d'erreur de soumission. */
   errorTitle: string;
   /** Bouton « réessayer » (erreur de chargement). */
@@ -83,6 +85,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   awaitingReviewTitle: 'Tentative transmise à votre enseignant',
   awaitingReview:
     "La correction automatique de votre code n'a pas abouti malgré plusieurs essais. Votre tentative est enregistrée et votre enseignant va relancer sa correction : vous recevrez votre résultat ici.",
+  reviewGraded: 'Votre tentative a été corrigée : son résultat est affiché.',
   errorTitle: 'Soumission impossible',
   retry: 'Réessayer',
   empty: 'Ce quiz ne contient pas encore de question.',

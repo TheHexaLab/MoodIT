@@ -493,6 +493,42 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void lecture_des_noms_soumis_reste_lineaire() {
+        // Revue #246 : `function` + 100 000 blancs + `(` coûtait 45 s de CPU par harnais à
+        // JS_CALLABLE (deux `\s*` autour de `\*?`), hors de toute place du sandbox.
+        for (String language : List.of("JavaScript", "TypeScript", "Python", "PHP", "Bash")) {
+            for (String code : List.of("function" + " ".repeat(99_000) + "(",
+                    "function" + "\t".repeat(99_000) + "*",
+                    "export" + " ".repeat(99_000) + "x",
+                    "f" + " ".repeat(99_000) + "= lambda",
+                    "def" + " ".repeat(99_000) + "(")) {
+                org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),
+                        () -> assembler.assemble(language, code, "return f(1) == 1", "N"), language);
+            }
+        }
+    }
+
+    @Test
+    void formes_de_fonctions_bash_et_lambda_python_ont_leur_mandataire() {
+        // Revue #246 : `function f {` (sans parenthèses), un nom Unicode en Bash, et une lambda
+        // nommée en Python n'avaient pas de mandataire — « command not found », 0 sur une
+        // réponse juste.
+        String bash = assembler.assemble("Bash",
+                "function carre {\n  echo $(( $1 * $1 ))\n}\ncarré() { echo 1; }\nfunction cube() { echo 8; }",
+                "[ \"$(carre 3)\" = 9 ] && [ \"$(carré)\" = 1 ] && [ \"$(cube)\" = 8 ]", "N")
+                .files().get(0).content();
+        assertThat(bash).contains("carre() { __moodit_rpc carre \"$@\"; }")
+                .contains("carré() { __moodit_rpc carré \"$@\"; }")
+                .contains("cube() { __moodit_rpc cube \"$@\"; }");
+        // Aucun métacaractère du shell ne passe dans un nom (recopié sans guillemets).
+        assertThat(assembler.assemble("Bash", "function a;rm {\n:\n}\nb$(x)() { :; }",
+                "a;rm; b$(x)", "N").files().get(0).content())
+                .doesNotContain("__moodit_rpc a;rm").doesNotContain("__moodit_rpc b$(x)");
+        assertThat(assembler.assemble("Python", "carre = lambda x: x * x",
+                "return carre(3) == 9", "N").files().get(0).content()).contains("def carre(*a):");
+    }
+
+    @Test
     void splitSqlStatements_commentaire_de_ligne_final_sans_saut_de_ligne() {
         assertThat(CodeAssembler.splitSqlStatements("SELECT 1; -- fin ; pas une instruction"))
                 .containsExactly("SELECT 1");
