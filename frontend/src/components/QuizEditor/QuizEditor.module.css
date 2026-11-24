@@ -345,6 +345,13 @@
 }
 .addLinkButton:hover { background: var(--brand-teal-surface); }
 .addLinkButton:active { transform: scale(0.96); }
+/* Inactif mais focalisable (aria-disabled, cf. ReviewAttemptsBody) : il doit en avoir l'air. */
+.addLinkButton[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.addLinkButton[aria-disabled="true"]:hover { background: none; }
+.addLinkButton[aria-disabled="true"]:active { transform: none; }
 
 /* ── Listes (quiz / questions / réponses / items / harnais) ── */
 .panelBody .list {
@@ -452,6 +459,9 @@
 @media (hover: hover) and (pointer: fine) {
     .listRow { cursor: grab; }
     .listRow:active { cursor: grabbing; }
+    /* Rangée FIXE (tentatives à revoir) : rien à saisir. */
+    .listRowStatic,
+    .listRowStatic:active { cursor: default; }
 }
 
 /* Poignée de réordonnancement (souris + tactile) : `touch-action: none` empêche le

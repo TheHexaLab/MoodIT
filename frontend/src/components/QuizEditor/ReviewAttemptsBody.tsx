@@ -136,7 +136,7 @@ export function ReviewAttemptsBody({
         )}
         {attempts?.length === 0 && <p className={styles.listEmpty}>{t.empty}</p>}
         {attempts?.map((attempt) => (
-          <div key={attempt.attemptId} className={styles.listRow}>
+          <div key={attempt.attemptId} className={[styles.listRow, styles.listRowStatic].join(' ')}>
             <div className={styles.rowBody}>
               <div className={styles.rowTitleLine}>
                 <span className={styles.rowTitle}>{attempt.studentName}</span>

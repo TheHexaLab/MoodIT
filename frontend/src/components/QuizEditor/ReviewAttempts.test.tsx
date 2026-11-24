@@ -80,9 +80,12 @@ describe('QuizEditor — tentatives à revoir', () => {
     fireEvent.pointerDown(badge, { pointerId: 1, button: 0 });
     fireEvent.pointerMove(badge, { pointerId: 1, clientY: 40 });
     expect(badge.closest('[data-reorder-id]')?.className).not.toMatch(/listRowDragging/);
+    badge.focus(); // un vrai clic focalise le bouton (jsdom ne le fait pas)
     fireEvent.click(badge);
     expect(screen.getByText(editorT.reviewTitle)).toBeTruthy();
     await screen.findByText('Éva Test');
+    // La pastille a disparu avec la liste : le focus est replacé dans la fenêtre (« Retour »).
+    expect(document.activeElement).toBe(screen.getByLabelText(/retour/i));
     expect(onFetchReviewAttempts).toHaveBeenCalledWith(1);
     expect(screen.getByText(reviewT.attemptLabel(2))).toBeTruthy();
     expect(screen.getByText(reviewT.attemptSub(null, 1))).toBeTruthy();
