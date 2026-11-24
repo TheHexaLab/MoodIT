@@ -615,7 +615,7 @@ class CodeAssemblerTest {
         assertThat(content).doesNotContain("SELECT (SELECT count(*)");
         // Le dump est encadré et vient APRÈS le code étudiant.
         assertThat(content).contains(".dump");
-        assertThat(content.indexOf("DELETE FROM t")).isLessThan(content.indexOf("SELECT 'N_DUMP_START'"));
+        assertThat(content.indexOf("DELETE FROM t")).isLessThan(content.indexOf(".print N_DUMP_START"));
     }
 
     @Test

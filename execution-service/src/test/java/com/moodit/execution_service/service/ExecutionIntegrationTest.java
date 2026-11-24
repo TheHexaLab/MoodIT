@@ -660,6 +660,31 @@ class ExecutionIntegrationTest {
                 harness)).isFalse();
     }
 
+    @Test
+    void sql_rewritten_schema_cannot_run_sql_in_the_grading_phase() {
+        // Revue #246 : en phase 1, le code soumis réécrit sqlite_master (writable_schema). `.dump`
+        // recopie ce texte ; `$x(/*)` est un paramètre pour SQLite, un commentaire pour un
+        // découpage naïf, qui gardait alors une vue TEMP masquant la table de travail : la phase
+        // 2 comparait la référence à elle-même. Réponse FAUSSE (la table est vidée) : jamais juste.
+        requireRuntime("sqlite3");
+        String harness = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n"
+                + "INSERT INTO utilisateurs VALUES ('a', 1), ('b', 0);\n-- @student\n"
+                + "CREATE TEMP TABLE attendu (nom TEXT, actif INTEGER);\n"
+                + "INSERT INTO attendu VALUES ('a', 0), ('b', 0);\n"
+                + "SELECT NOT EXISTS (SELECT * FROM utilisateurs EXCEPT SELECT * FROM attendu)"
+                + " AND NOT EXISTS (SELECT * FROM attendu EXCEPT SELECT * FROM utilisateurs);";
+        String forge = "DELETE FROM utilisateurs;\nPRAGMA writable_schema=ON;\n"
+                + "UPDATE sqlite_master SET sql = 'CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);"
+                + "INSERT INTO utilisateurs VALUES($x(/*),0);"
+                + "CREATE TEMP VIEW utilisateurs AS SELECT * FROM temp.attendu;SELECT 1 /* */'"
+                + " WHERE name='utilisateurs';";
+        assertThat(passes("SQL", forge, harness)).isFalse();
+        // Témoins : la bonne réponse passe, même après un `.mode box` (sentinelles par .print).
+        assertThat(passes("SQL", "UPDATE utilisateurs SET actif = 0;", harness)).isTrue();
+        assertThat(passes("SQL", ".mode box\n.headers on\nUPDATE utilisateurs SET actif = 0;",
+                harness)).isTrue();
+    }
+
     // ─────────────────────── Limites du bac à sable (#24) ───────────────────────
 
     @Test

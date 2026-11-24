@@ -37,16 +37,20 @@ verdict y vaut OK — le format de ces harnais n'a pas changé.
 Un harnais compilé qui teste une EXCEPTION du code soumis (catch, assertThrows, catch_unwind…)
 sort À VÉRIFIER : le noteur séparé n'en reçoit pas le type, toute bonne réponse échouerait.
 
-Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER non acquitté, 1 sinon, 2 si l'inventaire est
-impossible ou VIDE (--allow-empty pour accepter une base sans aucune question).
-Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
-pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié sans cette option.
+Code de sortie : 0 si aucun quiz PUBLIÉ ne porte de question BLOQUANT ou À VÉRIFIER non
+acquittée, 1 sinon, 2 si l'inventaire est impossible ou VIDE (--allow-empty pour accepter une
+base sans aucune question). Une question d'un quiz NON publié (brouillon, quiz fermé) est listée
+sans bloquer : aucun étudiant ne peut la soumettre, et la corriger avant de (ré)ouvrir le quiz
+revient à son enseignant. Corriger ou fermer un quiz publié règlent donc tous deux la sortie.
+Avec --unpublish, les quiz publiés qui portent un BLOQUANT ou un À VÉRIFIER non acquitté sont
+fermés (is_published = false), pour qu'aucun étudiant ne les soumette avant correction ou
+vérification ; rien n'est modifié sans cette option.
 
 Deux temps (deploy/DEPLOY.md, « Changement de schéma ») : (1) AVANT la mise en prod, obligatoire,
-contre execution-service de CETTE version lancé en local et une base jetable chargée du dernier
-dump de prod (PG_CONTAINER, EXEC_URL) ; (2) juste APRÈS la mise en ligne, sur l'hôte de prod,
+contre execution-service de CETTE version lancé en local et une base jetable chargée d'un dump
+FRAIS de la prod (PG_CONTAINER, EXEC_URL) ; (2) juste APRÈS la mise en ligne, sur l'hôte de prod,
 contre le nouveau noteur, avec --unpublish. Une question À VÉRIFIER rejouée à la main avec une
-solution s'acquitte par --ack (ids séparés par des virgules). Variables d'environnement :
+solution s'acquitte par --ack (ids séparés par des virgules), à repasser à l'étape 2. Variables d'environnement :
   PG_CONTAINER    conteneur Postgres (défaut moodit_postgres) ;
   EXEC_CONTAINER  conteneur execution-service (défaut moodit_execution) ;
   EXEC_URL        URL d'execution-service, sinon l'IP du conteneur sur son réseau Docker et
@@ -395,7 +399,8 @@ def parse_ack(text):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--unpublish", action="store_true",
-                        help="fermer les quiz publiés qui portent une question BLOQUANT")
+                        help="fermer les quiz publiés qui portent une question BLOQUANT ou "
+                             "À VÉRIFIER non acquittée")
     parser.add_argument("--allow-empty", action="store_true",
                         help="accepter un inventaire VIDE (base sans question compilée ni "
                              "interprétée) : sans cette option, c'est une erreur (sortie 2), un "
@@ -424,7 +429,11 @@ def main():
         return 2
     print("%d question(s) à rejouer." % len(questions))
     counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0}
+    # Quiz publiés qui portent une question non réglée : eux seuls bloquent la sortie, et
+    # --unpublish les ferme. Un À VÉRIFIER non acquitté en fait partie : un harnais qui teste
+    # une exception, ou une fonction aux types non transportables, note 0 à toute bonne réponse.
     blocked_published = set()
+    drafts = 0
     for question in questions:
         status, lines = check_question(base_url, token, question)
         if status == TO_CHECK and int(question["question_id"]) in acknowledged:
@@ -437,11 +446,17 @@ def main():
             question["language"]))
         for line in lines:
             print("    " + line)
-        if status == BLOCKING and question["published"]:
-            blocked_published.add(int(question["quiz_id"]))
+        if status != OK:
+            if question["published"]:
+                blocked_published.add(int(question["quiz_id"]))
+            else:
+                drafts += 1
 
     print("\nBilan : %d bloquant(s), %d à vérifier, %d ok." % (
         counts[BLOCKING], counts[TO_CHECK], counts[OK]))
+    if drafts:
+        print("Dont %d dans des quiz non publiés : sans effet sur la sortie, à corriger avant "
+              "d'ouvrir leur quiz." % drafts)
     if blocked_published:
         ids = ", ".join(str(i) for i in sorted(blocked_published))
         if args.unpublish:
@@ -449,7 +464,7 @@ def main():
             print("Quiz fermés (is_published = false) : %s" % ids)
         else:
             print("Quiz publiés à corriger ou fermer : %s (--unpublish pour les fermer)" % ids)
-    return 1 if counts[BLOCKING] or counts[TO_CHECK] else 0
+    return 1 if blocked_published else 0
 
 
 if __name__ == "__main__":

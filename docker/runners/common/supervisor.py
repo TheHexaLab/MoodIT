@@ -277,8 +277,8 @@ def mark_oom_victim(score=OOM_ADJ_SUBMITTED):
     Le superviseur est le PID 1 du conteneur : si l'OOM le tue, le conteneur meurt sans JSON —
     panne, 502, tentative supprimée et rejouable à volonté. Il est donc lancé à -1000, « jamais
     tué » (DockerSandbox.SUPERVISOR_OOM_SCORE_ADJ), et CHAQUE processus qu'il lance — code
-    soumis, noteur, compilations, javap/nm, aide de kill_student_uid — passe par ici, et
-    run_proc/run_pair l'appliquent d'office (oom_victim_first). Un enfant oublié hériterait de
+    soumis, noteur, compilations, javap/nm, aide de kill_student_uid, rm de remove_tree —
+    passe par ici, et run_proc/run_pair l'appliquent d'office (oom_victim_first). Un enfant oublié hériterait de
     -1000 : intuable, il bloquerait l'OOM du cgroup au lieu d'être tué.
 
     IRRÉVERSIBLE : écrite par root qui DÉTIENT CAP_SYS_RESOURCE (DockerSandbox l'accorde au
@@ -770,9 +770,11 @@ def remove_tree(path):
         return
     if os.path.exists(RM):
         try:
+            # oom_victim_first : comme tout lancement, il ne garde pas le -1000 du superviseur.
             subprocess.run([RM, "-rf", "--one-file-system", "--", path],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=120, check=False)
+                           stderr=subprocess.DEVNULL, timeout=120, check=False,
+                           preexec_fn=oom_victim_first(None))
         except (OSError, subprocess.SubprocessError):
             pass
     if os.path.lexists(path):
@@ -2571,9 +2573,11 @@ def go_harness_package_names(names):
 def harness_mentions(harness_code, name):
     """Le harnais emploie-t-il ce nom ? FONCTION PURE (testée).
 
-    Recherche du MOT dans le texte BRUT du harnais, chaînes et commentaires compris : dans le
-    doute, le nom compte comme employé, et la règle la plus stricte s'applique."""
-    return re.search(r"(?<!\w)%s(?!\w)" % re.escape(name), harness_code or "") is not None
+    Recherche du MOT dans le CODE du harnais, commentaires et littéraux blanchis (blank_code,
+    chaînes brutes Go comprises) : un `max` cité en commentaire n'emploie rien, et faisait
+    refuser la fonction d'aide `max` d'une réponse juste (revue #246)."""
+    code = blank_code(harness_code or "", backticks=True)
+    return re.search(r"(?<!\w)%s(?!\w)" % re.escape(name), code) is not None
 
 
 # Identifiants prédéclarés dont le SERVEUR généré (compilé dans le paquet de l'étudiant) se
@@ -2695,7 +2699,7 @@ def go_signatures(source):
 
 GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
 GO_METHOD = re.compile(
-    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^()]*)\)\s*" + GO_RESULT + r"\s*\{", re.M)
+    r"^func\s+\(\s*(?:\w+\s+)?(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^()]*)\)\s*" + GO_RESULT + r"\s*\{", re.M)
 
 
 def go_methods(source):
@@ -3621,6 +3625,10 @@ def cpp_object_api(source):
     src_text = source or ""
     found = []            # (classe, constructeurs, méthodes, instanciable), dans l'ordre du source
     apis, parents, hiding = {}, {}, {}
+    # Première base de chaque dérivée (tout accès), dérivées qui reprennent les constructeurs de
+    # leur base (`using Forme::Forme;`) et classes qui n'en déclarent aucun : de quoi leur donner,
+    # après coup, les constructeurs que C++ leur fournit (voir la fin).
+    bases, inheriting_ctors, without_ctor = {}, set(), set()
     cover = span_cover(cpp_class_spans(src_text) + cpp_namespace_spans(src_text))
     heads = [m.start() for m in CPP_TEMPLATE_HEAD.finditer(src_text)]
     bounds = [m.start() for m in CPP_STATEMENT_END.finditer(src_text)]
@@ -3649,8 +3657,12 @@ def cpp_object_api(source):
         public = is_struct
         # Base PUBLIQUE (`: public Forme`, ou toute base d'une struct) : ses methodes publiques
         # s'appellent sur la derivee. L'heritage d'une `class` est PRIVE par defaut.
-        base = re.match(r"\s*:\s*(public|protected|private)?\s*(?:virtual\s+)?(\w+)",
-                        src_text[klass.end():begin])
+        # `final` avant la liste des bases, `virtual` avant OU après l'accès : `class Carre final
+        # : public Forme` n'enregistrait pas sa base, et ses méthodes héritées manquaient.
+        base = re.match(r"\s*(?:final\s*)?:\s*(?:virtual\s+)?(public|protected|private)?\s*"
+                        r"(?:virtual\s+)?(\w+)", src_text[klass.end():begin])
+        if base:
+            bases[class_ident] = base.group(2)
         if base and (base.group(1) == "public" or (base.group(1) is None and is_struct)):
             parents[class_ident] = base.group(2)
         ctors, method_list = [], []
@@ -3667,12 +3679,11 @@ def cpp_object_api(source):
             if line_begin < len(src_text) and depths[line_begin] != level:
                 continue
             bare_line = src_line.strip()
-            if bare_line.startswith("public:"):
-                public = True
-                bare_line = bare_line[len("public:"):].strip()
-            elif bare_line.startswith("private:") or bare_line.startswith("protected:"):
-                public = False
-                bare_line = bare_line.split(":", 1)[1].strip()
+            # Étiquette d'accès, espace avant le `:` admis (`public :`), jamais `public::x`.
+            label = re.match(r"(public|private|protected)\s*:(?!:)", bare_line)
+            if label:
+                public = label.group(1) == "public"
+                bare_line = bare_line[label.end():].strip()
             # Noms de methodes DECLARES, toutes sections et tous types : ils masquent ceux de la
             # base (cf. inherit_instance_methods). Lus dans la TETE de declaration seulement :
             # un appel `aire()` dans le corps d'une autre methode ne declare rien.
@@ -3682,6 +3693,10 @@ def cpp_object_api(source):
             using = re.match(r"using\s+[\w:]+::(\w+)\s*;", bare_line)
             if using:
                 unhidden.add(using.group(1))
+                # `using Forme::Forme;` : les constructeurs de la base deviennent ceux de la
+                # dérivée (avec leur accès), qui n'était sinon pas proxifiée.
+                if base and using.group(1) == base.group(2):
+                    inheriting_ctors.add(class_ident)
             else:
                 declared = re.search(r"(~?\w+)\s*\(", head)
                 if declared and declared.group(1) not in (class_ident, "~" + class_ident, "operator"):
@@ -3716,6 +3731,8 @@ def cpp_object_api(source):
         # genere qui ne compile pas casserait le programme de l'etudiant.
         if not declares_ctor and ":" not in src_text[klass.end():begin]:
             ctors = [[]]
+        if not declares_ctor:
+            without_ctor.add(class_ident)
         if class_ident not in apis:
             apis[class_ident] = (ctors, method_list)
             hiding[class_ident] = declared_names - unhidden
@@ -3725,6 +3742,25 @@ def cpp_object_api(source):
     # portait pas — et une derivee sans methode propre n'etait meme pas proxifiee (« 'Carre'
     # was not declared »). 0 sur une reponse juste qui herite au lieu de redefinir.
     merged = inherit_instance_methods(apis, parents, hiding)
+    # Constructeurs fournis par C++ à une DÉRIVÉE, d'après ceux (publics) de sa base du code
+    # soumis : ceux qu'elle reprend par `using Base::Base;`, et son constructeur par défaut
+    # implicite quand elle n'en déclare aucun et que sa base se construit sans argument. Jusqu'à
+    # stabilité, pour les chaînes de dérivation. 0 sur une réponse juste sinon : « 'Carre' was
+    # not declared ».
+    changed = True
+    while changed:
+        changed = False
+        for name, (ctors, _methods) in apis.items():
+            base_api = apis.get(bases.get(name))
+            if base_api is None:
+                continue
+            wanted = [t for t in base_api[0] if t] if name in inheriting_ctors else []
+            if name in without_ctor and [] in base_api[0]:
+                wanted.append([])
+            for types in wanted:
+                if types not in ctors:
+                    ctors.append(types)
+                    changed = True
     return [(name, ctors, merged[name]) for name, ctors, concrete in found
             if concrete and ctors and merged[name]]
 
@@ -4268,7 +4304,10 @@ def rust_signatures(source):
     return hits
 
 
-RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
+# Attributs sur la même ligne (`#[derive(Debug)] struct R`) et visibilité restreinte
+# (`pub(crate)`) admis : la structure était ignorée, 0 sur une réponse juste.
+RUST_STRUCT = re.compile(
+    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)", re.M)
 # `impl Type {` et `impl Trait for Type {` (génériques tolérés) : les méthodes d'un trait
 # implémenté s'appellent sur l'objet comme les autres. Groupe 1 : le trait, groupe 2 : le type.
 RUST_IMPL = re.compile(
@@ -4397,8 +4436,11 @@ def rust_object_api(source):
     return result
 
 
-RUST_STRUCT_BODY = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*\{([^{}]*)\}", re.M | re.S)
-RUST_UNIT_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)\s*;", re.M)
+RUST_STRUCT_BODY = re.compile(
+    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*\{([^{}]*)\}",
+    re.M | re.S)
+RUST_UNIT_STRUCT = re.compile(
+    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*;", re.M)
 
 
 def rust_struct_fields(source):

@@ -542,6 +542,22 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
+    void sql_modification_schema_reecrit_avec_un_parametre_est_refuse_sans_phase2() {
+        // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema) ; le `$x(/*)` cachait
+        // une vue TEMP qui s'exécutait en phase 2. Dump refusé, la phase 2 ne part pas.
+        pistonRun(f -> isPhase1(f)
+                ? stage(dump(f, "CREATE TABLE t(n INT);INSERT INTO t VALUES($x(/*),0);"
+                        + "CREATE TEMP VIEW t AS SELECT 0 AS n;SELECT 1 /* */;\n"), "", 0, null, null)
+                : stage(sqlFenced(f, "1"), "", 0, null, null));
+
+        TestResult t = single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS);
+
+        assertThat(t.passed()).isFalse();
+        assertThat(t.detail()).isEqualTo("État de la base invalide après ton code");
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
     void sql_modification_dump_tronque_par_le_superviseur_est_refuse() {
         // #23 : au-delà de son plafond en octets, le superviseur garde la tête et la queue de la
         // sortie. Les sentinelles survivent, le dump a perdu son milieu (la ligne fautive avec) :

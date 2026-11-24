@@ -104,6 +104,29 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.getByText(listT.reviewBadge(1))).toBeTruthy();
   });
 
+  it('pastille gardée après l’ENREGISTREMENT du quiz, dont la réponse ne porte pas le compteur', async () => {
+    // Le quiz renvoyé par l'enregistrement vient de toQuiz, qui ne mappe pas le compteur
+    // (route /manage seulement) : upsertInList doit garder celui de la liste. « Retour » ne le
+    // prouve pas — il restaure une copie de la liste prise à l'ouverture.
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
+        onClose={vi.fn()}
+        handlers={{
+          onFetchQuiz: vi.fn(async () => makeQuiz()),
+          onUpdateQuiz: vi.fn(async () => makeQuiz()),
+          onFetchReviewAttempts: vi.fn(async () => [EVA]),
+          onRegradeAttempt: vi.fn(),
+        }}
+      />
+    );
+    fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
+    await screen.findByText(editorT.editQuizTitle);
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(await screen.findByText(listT.reviewBadge(2))).toBeTruthy();
+  });
+
   it('pastille gardée après ouverture du quiz, recalée sur la liste chargée', async () => {
     // Le détail d'édition ne porte pas le compteur : l'ouvrir ne doit pas effacer la pastille.
     const onFetchQuiz = vi.fn(async () => makeQuiz());

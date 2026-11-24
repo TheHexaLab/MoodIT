@@ -280,6 +280,21 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void public_budget_is_capped_internal_budget_is_not() {
+        // Revue #246 : un « Tester » public (jusqu'à 100 cas fournis par l'appelant) est borné à
+        // PUBLIC_WALL_MS ; la correction interne garde le budget configuré, même au-delà.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = Long.MAX_VALUE;
+        assertThat(svc.interpretedBudgetMs()).isEqualTo(DockerEvaluator.PUBLIC_WALL_MS);
+        assertThat(limiter.asInternal(svc::interpretedBudgetMs)).isEqualTo(Long.MAX_VALUE);
+        // Sous le plafond, le budget configuré vaut des deux côtés.
+        svc.interpretedBudgetMs = 1000;
+        assertThat(svc.interpretedBudgetMs()).isEqualTo(1000);
+        assertThat(limiter.asInternal(svc::interpretedBudgetMs)).isEqualTo(1000L);
+    }
+
+    @Test
     void ample_budget_evaluates_every_harness() {
         // Contrôle négatif du test ci-dessus : avec le budget par défaut (15 min), l'échéance
         // n'intervient jamais — sinon le test précédent passerait pour la mauvaise raison.

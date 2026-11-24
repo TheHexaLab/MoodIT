@@ -321,6 +321,40 @@ class ClassifyTest(unittest.TestCase):
                 mock.patch.object(chk.sys, "argv", ["check", "--allow-empty"]):
             self.assertEqual(0, chk.main())
 
+    def test_sortie_et_unpublish_ne_portent_que_sur_les_quiz_publies(self):
+        # Revue #246 : fermer un quiz BLOQUANT ne changeait pas la sortie (toutes les questions
+        # comptaient, brouillons compris), et --unpublish laissait ouvert un quiz À VÉRIFIER
+        # (harnais à exception) qui note 0 à toute bonne réponse.
+        def question(qid, quiz, published, harness):
+            return {"quiz_id": quiz, "quiz_title": "Q%d" % quiz, "published": published,
+                    "question_id": qid, "language": "Java", "start_code": "class S {}",
+                    "exec_timeout_ms": None,
+                    "cases": [{"id": qid, "name": "c", "harnessCode": harness, "weight": 1}]}
+        inventory = [question(1, 10, True, "try { f(); } catch (Exception e) { return true; }"),
+                     question(2, 20, False, "try { f(); } catch (Exception e) { return true; }"),
+                     question(3, 30, True, "return f() == 1;")]
+        calls = []
+
+        def fake_psql(container, sql):
+            calls.append(sql)
+            return chk.json.dumps(inventory) if "json_agg" in sql else ""
+        verdict = [{"passed": True, "detail": None}]
+        for argv, expected, closed in (
+                (["check"], 1, None),
+                (["check", "--unpublish"], 1, "IN (10);"),
+                (["check", "--ack", "1"], 0, None)):
+            calls.clear()
+            with self.subTest(argv=argv), \
+                    mock.patch.object(chk, "psql", side_effect=fake_psql), \
+                    mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                    mock.patch.object(chk, "internal_token", return_value="t"), \
+                    mock.patch.object(chk, "evaluate", return_value=verdict), \
+                    mock.patch.object(chk.sys, "argv", argv):
+                self.assertEqual(expected, chk.main())
+                updates = [sql for sql in calls if sql.startswith("UPDATE")]
+                self.assertEqual([closed] if closed else [],
+                                 [sql[sql.index("IN ("):] for sql in updates])
+
     def test_worst(self):
         self.assertEqual(chk.OK, chk.worst([chk.OK, chk.OK]))
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.OK, chk.TO_CHECK]))

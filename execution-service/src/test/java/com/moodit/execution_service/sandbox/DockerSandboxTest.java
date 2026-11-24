@@ -779,6 +779,9 @@ class DockerSandboxTest {
         try {
             var pending = pool.submit(() -> sandbox.run("img", Map.of("job.json", "{}"), 5000));
             assertThat(started.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            // Les conteneurs EN VOL de cette instance sont visibles (un test d'intégration n'agit
+            // que sur les siens).
+            assertThat(sandbox.inFlightContainers()).containsExactly("cid");
 
             assertThat(sandbox.removeInFlight()).isEqualTo(1);
             org.mockito.Mockito.verify(remove).exec();
@@ -803,6 +806,7 @@ class DockerSandboxTest {
             pool.shutdownNow();
         }
         // Run terminé : le conteneur n'est plus en vol.
+        assertThat(sandbox.inFlightContainers()).isEmpty();
         assertThat(sandbox.removeInFlight()).isZero();
     }
 

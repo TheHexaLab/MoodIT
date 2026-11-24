@@ -165,7 +165,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > **Avant tout** : le contrôle préalable des harnais (section « Changement de schéma », étape 1)
 > doit être sorti en 0, et l'heure de la bascule notée (`SELECT NOW()` sur la base) ; **juste
-> après** le second `update.sh` vient son étape 2, `check-compiled-harnesses.py --unpublish`.
+> après** le second `update.sh` vient son étape 2, `check-compiled-harnesses.py --unpublish`, avec les mêmes `--ack`.
 >
 > Aucun `update.sh` ne doit partir seul pendant cette procédure : si une ligne de cron le lance
 > sur ce serveur (`crontab -l`), la suspendre AVANT la fusion `main → deploiement` — l'ancien
@@ -211,11 +211,15 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > du code de départ, noteur muet ou qui refuse le format, détail non reconnu : rejouer à la main
 > avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
-> fermé). Il sort en 1 tant qu'il reste un BLOQUANT ou un
-> À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Une question À VÉRIFIER
-> se règle en la rejouant à la main avec une solution (« Tester » sur une pile de CETTE version),
-> puis en l'acquittant : `--ack <id>,<id>` (ids de question affichés par le script). Un BLOQUANT
-> ne s'acquitte pas : il se corrige. Le jeton interne est lu dans le conteneur et jamais affiché.
+> fermé). Il sort en 1 tant qu'un quiz **publié** porte un BLOQUANT ou un À VÉRIFIER : le
+> déploiement n'est pas terminé avant une sortie en 0. Pour chaque quiz publié en cause, deux
+> issues : le **corriger**, ou le **fermer** (le dépublier dans l'éditeur) jusqu'à ce que son
+> enseignant le corrige. Une question À VÉRIFIER se corrige en la rejouant à la main avec une
+> solution (« Tester » sur une pile de CETTE version), puis en l'acquittant : `--ack <id>,<id>`
+> (ids de question affichés par le script). Un BLOQUANT ne s'acquitte pas : il se corrige. Les
+> questions des quiz non publiés (brouillons, quiz fermés) sont listées sans bloquer la sortie :
+> aucun étudiant ne peut les soumettre, et les corriger avant d'ouvrir le quiz revient à leur
+> enseignant. Le jeton interne est lu dans le conteneur et jamais affiché.
 >
 > **Harnais qui testent une exception.** Le noteur étant un autre programme, une exception du
 > code soumis ne lui parvient pas avec son type : Java la relance en `RuntimeException`
@@ -250,8 +254,28 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > **1. AVANT la mise en prod (obligatoire).** Sur une machine de dev, avec cette version
 > extraite, les dix images runner construites (`docker/runners/build.sh`) et execution-service
 > lancé (`./gradlew bootRun` dans `execution-service/`, `.env` local), rejouer les questions de
-> la prod contre une **base jetable** chargée de son dernier dump. Pas la base de
-> `docker-compose-dev.yml` : son `db-migrate` y ajouterait les données de démo.
+> la prod contre une **base jetable** chargée d'un dump **frais**, pris juste avant le contrôle.
+> Pas le dernier dump d'`update.sh` (`backups/`) : il date du déploiement précédent, et ne
+> contient ni les questions créées depuis ni les harnais corrigés dans l'éditeur. Pas la base de
+> `docker-compose-dev.yml` non plus : son `db-migrate` y ajouterait les données de démo.
+>
+> Ce dump ne sort du serveur qu'avec ce dont le contrôle a besoin : le **schéma** complet, et les
+> **données** de `Quiz`, `Question`, `Language`, `Test_Case` et de l'historique Flyway. Ni
+> comptes, ni empreintes de mots de passe, ni forums ne quittent la prod. Sur le serveur, dans le
+> clone (`.env.docker` chargé) :
+>
+> ```bash
+> set -o pipefail
+> { docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --schema-only "$POSTGRES_DB" &&
+>   docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --data-only --disable-triggers \
+>     -t quiz -t question -t language -t test_case -t flyway_schema_history "$POSTGRES_DB"
+> } | gzip > precheck-$(date +%Y%m%d-%H%M%S).sql.gz
+> ```
+>
+> (`pg_dump` avertit d'une clé étrangère circulaire sur `language` : `--disable-triggers` est
+> justement là pour la charger.) Le copier sur la machine de dev, puis l'effacer du serveur.
+> Après une correction faite dans l'éditeur de la prod, reprendre un dump frais avant de
+> rejouer.
 >
 > Sous Git Bash (Windows), préfixer les commandes `docker` qui montent un chemin par
 > `MSYS_NO_PATHCONV=1`, sinon Flyway ne trouve aucune migration ; WSL ou Linux n'en ont pas
@@ -264,8 +288,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >   -e POSTGRES_PASSWORD=precheck -e POSTGRES_DB="$POSTGRES_DB" postgres:16
 > # L'image redémarre une fois après son initialisation : attendre le DEUXIÈME « ready ».
 > until [ "$(docker logs moodit_precheck 2>&1 | grep -c 'ready to accept connections')" -ge 2 ]; do sleep 1; done
-> # Dernier dump pris par update.sh sur le serveur (backups/db-*.sql.gz), copié en local.
-> gunzip -c db-AAAAMMJJ-HHMMSS.sql.gz \
+> # Dump frais pris ci-dessus sur le serveur, copié en local.
+> gunzip -c precheck-AAAAMMJJ-HHMMSS.sql.gz \
 >   | docker exec -i moodit_precheck psql -q -v ON_ERROR_STOP=1 -1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 > # Preuve que c'est bien le dump de la prod qui est chargé (historique Flyway jusqu'à V3) :
 > docker exec moodit_precheck psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
@@ -282,10 +306,12 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > `EXEC_URL` est obligatoire sous Docker Desktop : l'IP d'un conteneur n'y est pas joignable
 > depuis l'hôte. Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
-> Corriger dans l'éditeur de la prod encore en place les harnais sortis BLOQUANT, ou fermer leurs
-> quiz, **avant** de lancer `./deploy/update.sh` ; noter les À VÉRIFIER à rejouer après. Si ce
-> contrôle préalable est impossible, fermer avant la bascule tous les quiz publiés qui portent
-> une question de code compilée ou interprétée, et ne les rouvrir qu'après une sortie en 0.
+> Régler dans l'éditeur de la prod encore en place chaque quiz publié en cause (corriger ses
+> harnais, ou le fermer), rejouer à la main les À VÉRIFIER, puis reprendre un dump frais et
+> relancer le contrôle avec `--ack`, jusqu'à une sortie en 0, **avant** de lancer
+> `./deploy/update.sh`. Garder la liste des `--ack` pour l'étape 2. Si ce contrôle préalable est
+> impossible, fermer avant la bascule tous les quiz publiés qui portent une question de code
+> compilée ou interprétée, et ne les rouvrir qu'après une sortie en 0.
 >
 > **2. Juste APRÈS `./deploy/update.sh`.** Rejouer contre la prod, qui est la seule référence :
 >
@@ -293,9 +319,9 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > # Heure de la bascule, à noter AVANT update.sh (horloge de la base) : elle borne la fenêtre
 > # ci-dessous.
 > docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT NOW()::timestamp;"
-> # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT, le
-> # temps de corriger leurs harnais dans l'éditeur.
-> python3 deploy/check-compiled-harnesses.py --unpublish
+> # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT ou un
+> # À VÉRIFIER non acquitté, le temps de les régler dans l'éditeur. Mêmes --ack qu'à l'étape 1.
+> python3 deploy/check-compiled-harnesses.py --unpublish --ack <id>,<id>
 > ```
 >
 > Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et

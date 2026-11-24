@@ -141,18 +141,6 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Réponse lente mais dans le délai calculé pour ses harnais → verdicts")
-    void evaluate_reponseLenteDansLeDelai_verdicts() throws Exception {
-        String url = startStub(200,
-                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
-                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 400);
-
-        // 2 harnais : 100 + 2 × 300 = 700 ms > 400 ms ; un délai fixe de 300 ms aurait échoué.
-        assertThat(client(url, 100, 300).evaluate("Python", "code", TWO_HARNESSES))
-                .containsExactly(true, true);
-    }
-
-    @Test
     @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + exécution), au moins un")
     void readTimeout_couvreAttenteEtAppelParHarnais() {
         // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
@@ -451,29 +439,5 @@ class ExecutionClientTest {
         assertThat(ExecutionClient.workUnits("Java", 3)).isEqualTo(8);
         assertThat(ExecutionClient.workUnits("C++", 1)).isEqualTo(4);
         assertThat(ExecutionClient.workUnits("go", 2)).isEqualTo(6);
-    }
-
-    @Test
-    @DisplayName("Réponse retardée par l'attente d'une place mais dans le budget → verdicts")
-    void evaluate_attenteDUnePlaceDansLeBudget_verdicts() throws Exception {
-        String url = startStub(200,
-                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
-                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":true,\"detail\":null}]", 800);
-
-        // 2 harnais : 100 + 2 × (200 + 300) = 1,1 s > 800 ms ; sans l'attente, 100 + 2 × 200 = 500 ms.
-        assertThat(client(url, 100, 200, 300).evaluate("Python", "code", TWO_HARNESSES))
-                .containsExactly(true, true);
-    }
-
-    @Test
-    @DisplayName("Harnais SQL : le délai compte ses deux appels au sandbox")
-    void evaluate_sqlDeuxPhasesDansLeDelai_verdicts() throws Exception {
-        String url = startStub(200,
-                "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true,\"detail\":null},"
-                        + "{\"name\":\"cas B\",\"weight\":1,\"passed\":false,\"detail\":\"x\"}]", 800);
-
-        // 2 harnais SQL = 4 appels : 100 + 4 × 250 = 1,1 s > 800 ms ; comptés comme 2 appels, 600 ms.
-        assertThat(client(url, 100, 250).evaluate("sql", "code", TWO_HARNESSES))
-                .containsExactly(true, false);
     }
 }

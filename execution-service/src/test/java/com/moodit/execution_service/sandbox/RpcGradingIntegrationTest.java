@@ -913,6 +913,78 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void derived_classes_receivers_and_annotated_structs_are_graded() {
+        // Revue #246 (3e tour) : chacune de ces écritures donnait « aucune fonction exploitable »
+        // ou « 'Carre' was not declared » — 0 sur une réponse juste.
+        // C++ : dérivée `final`, constructeurs repris par `using`, défaut implicite d'une
+        // dérivée, `virtual public`, étiquette `public :`.
+        gradedThenWrong("C++", "Carre k(3); Cube u(2); Derivee d; Calc c;"
+                + " return k.aire() == 9 && u.aire() == 4 && d.un() == 1 && c.add(2, 3) == 5;", """
+                class Forme {
+                public:
+                    Forme(int c) : c(c) {}
+                    int aire() { return c * c; }
+                protected:
+                    int c;
+                };
+                class Carre final : public Forme {
+                public:
+                    Carre(int c) : Forme(c) {}
+                };
+                class Cube : public Forme {
+                public:
+                    using Forme::Forme;
+                };
+                struct Base { int un() { return 1; } };
+                struct Derivee final : virtual public Base { };
+                class Calc {
+                public :
+                    int add(int a, int b) { return a + b; }
+                };
+                """, "c * c", "c + c");
+        // Go : récepteurs sans nom, par valeur et par pointeur.
+        gradedThenWrong("Go", "return Calculatrice{}.Additionner(2, 3) == 5 && (&Calculatrice{}).Un() == 1", """
+                package main
+
+                type Calculatrice struct{}
+
+                func (Calculatrice) Additionner(a, b int) int { return a + b }
+
+                func (*Calculatrice) Un() int { return 1 }
+
+                func main() {}
+                """, "a + b", "a - b");
+        // Rust : attribut sur la ligne de la structure, visibilité `pub(crate)`.
+        gradedThenWrong("Rust", "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12"
+                + " && Carre { c: 2 }.aire() == 4", """
+                #[derive(Debug, Clone)] struct Rectangle { largeur: i32, hauteur: i32 }
+                impl Rectangle {
+                    fn aire(&self) -> i32 { self.largeur * self.hauteur }
+                }
+                pub(crate) struct Carre { c: i32 }
+                impl Carre {
+                    fn aire(&self) -> i32 { self.c * self.c }
+                }
+                fn main() {}
+                """, "self.largeur * self.hauteur", "self.largeur + self.hauteur");
+        // Go : un `max` d'aide cité seulement en commentaire du harnais n'est pas refusé.
+        gradedThenWrong("Go", "// le plus grand (max) des trois\nreturn PlusGrand(1, 5, 3) == 5", """
+                package main
+
+                func max(a, b int) int {
+                \tif a > b {
+                \t\treturn a
+                \t}
+                \treturn b
+                }
+
+                func PlusGrand(a, b, c int) int { return max(max(a, b), c) }
+
+                func main() {}
+                """, "return max(max(a, b), c)", "return a");
+    }
+
+    @Test
     void java_public_class_declared_after_an_import_on_the_same_line_is_graded() {
         // Revue #246 : la classe publique n'était reconnue qu'en début de ligne. Le fichier
         // déposé prenait un autre nom, et javac refusait « class Rectangle is public, should be

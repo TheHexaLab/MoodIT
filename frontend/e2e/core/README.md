@@ -20,7 +20,7 @@ Les points de rupture CSS du frontend sont 900 px (barre latérale en tiroir), 1
 
 ## Lancer en local
 
-Depuis la racine du dépôt (Docker requis ; ports 5173, 8080, 8025 et 2000 libres, donc pile de dev
+Depuis la racine du dépôt (Docker requis ; ports 5173, 8080 et 8025 libres, donc pile de dev
 arrêtée) :
 
 ```bash

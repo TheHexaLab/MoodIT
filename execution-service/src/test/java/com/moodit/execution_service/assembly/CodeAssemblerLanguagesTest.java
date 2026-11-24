@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -315,14 +316,14 @@ class CodeAssemblerLanguagesTest {
 
         assertThat(onlyFileContent(a)).isEqualTo(
                 "CREATE TABLE t(n INT);\nUPDATE t SET n = 0\n;\n"
-                        + "SELECT 'N_DUMP_START';\n.dump\nSELECT 'N_DUMP_END';\n");
+                        + ".print N_DUMP_START\n.dump\n.print N_DUMP_END\n");
     }
 
     @Test
     void phase1_tolere_code_et_harnais_nuls() {
         var a = assembler.assembleSqlPhase1(null, null, "N");
 
-        assertThat(onlyFileContent(a)).isEqualTo("\n;\nSELECT 'N_DUMP_START';\n.dump\nSELECT 'N_DUMP_END';\n");
+        assertThat(onlyFileContent(a)).isEqualTo("\n;\n.print N_DUMP_START\n.dump\n.print N_DUMP_END\n");
     }
 
     @Test
@@ -361,6 +362,50 @@ class CodeAssemblerLanguagesTest {
         assertThat(CodeAssembler.filterDumpToData(dump, Set.of("t"))).isEqualTo(
                 "CREATE TABLE IF NOT EXISTS [T](n INT)\n;\nINSERT OR REPLACE INTO \"T\" VALUES(1)\n;\n");
         assertThat(CodeAssembler.filterDumpToData("", Set.of("t"))).isEmpty();
+    }
+
+    @Test
+    void filterDumpToData_refuse_un_parametre_dans_une_instruction_gardee() {
+        // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema). `$x(/*)` est UN
+        // paramètre pour SQLite ; lu comme un commentaire, il cachait au filtre une vue TEMP
+        // exécutée en phase 2. .dump n'écrit jamais de paramètre : dump refusé.
+        String forged = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);"
+                + "INSERT INTO utilisateurs VALUES($x(/*),0);"
+                + "CREATE TEMP VIEW utilisateurs AS SELECT * FROM temp.attendu;SELECT 1 /* */;\n";
+        assertThat(CodeAssembler.filterDumpToData(forged, Set.of("utilisateurs"))).isNull();
+        for (String parameter : List.of(":a", "@a", "#a", "?1", "?", "$a", "$a::b(x)")) {
+            assertThat(CodeAssembler.filterDumpToData(
+                    "INSERT INTO t VALUES(" + parameter + ");", Set.of("t")))
+                    .as(parameter).isNull();
+        }
+        // Un paramètre dans une instruction JETÉE (table hors liste) ne fait rien refuser, et les
+        // mêmes caractères en chaîne, en identifiant ou au milieu d'un nom sont des données.
+        assertThat(CodeAssembler.filterDumpToData(
+                "INSERT INTO autre VALUES(:a);INSERT INTO t VALUES(':a $b(/*) @c #d ?');"
+                        + "CREATE TABLE t2 (\"a:b\" INT, prix$ INT);", Set.of("t", "t2")))
+                .isEqualTo("INSERT INTO t VALUES(':a $b(/*) @c #d ?')\n;\n"
+                        + "CREATE TABLE t2 (\"a:b\" INT, prix$ INT)\n;\n");
+    }
+
+    @Test
+    void splitSqlStatements_lit_les_parametres_comme_sqlite() {
+        // Variable TCL : jusqu'à `)` incluse, ou au premier blanc ; son contenu n'ouvre ni
+        // commentaire, ni chaîne, et son `;` ne finit pas l'instruction.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(/*); SELECT 2 /* */"))
+                .containsExactly("SELECT $x(/*)", "SELECT 2 /* */");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(';'); SELECT 2"))
+                .containsExactly("SELECT $x(';')", "SELECT 2");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(a /*; b */; SELECT 3"))
+                .containsExactly("SELECT $x(a /*; b */", "SELECT 3");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT :a::b(/*);SELECT ?12;SELECT @(/*)*/;S"))
+                .containsExactly("SELECT :a::b(/*)", "SELECT ?12", "SELECT @(/*)*/", "S");
+        // `$` au milieu d'un identifiant le prolonge : `a$x(/*` ouvre bien un commentaire.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT a$x(/*;*/); SELECT 4"))
+                .containsExactly("SELECT a$x(/*;*/)", "SELECT 4");
+        List<Boolean> flags = new java.util.ArrayList<>();
+        assertThat(CodeAssembler.splitSqlStatements("SELECT a$b; SELECT $c\t;SELECT '$d'", flags))
+                .hasSize(3);
+        assertThat(flags).containsExactly(false, true, false);
     }
 
     @Test

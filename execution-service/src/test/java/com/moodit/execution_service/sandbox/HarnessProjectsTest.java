@@ -259,6 +259,13 @@ class HarnessProjectsTest {
         assertThat(HarnessProjects.javaFileName(
                 "class Aide { }\n@A(b = @B(1)) public class Rectangle { }", "S"))
                 .isEqualTo("Rectangle.java");
+        // Annotation collée au mot suivant ; bloc de texte avec `\"""` échappé (revue #246).
+        assertThat(HarnessProjects.javaFileName("class Aide { }\n@A(1)public class Rectangle { }", "S"))
+                .isEqualTo("Rectangle.java");
+        assertThat(HarnessProjects.javaFileName(
+                "class Aide { static String s = \"\"\"\n  a \\\"\"\" b\n  \"\"\"; }\n"
+                        + "public class Solution { }", "S"))
+                .isEqualTo("Solution.java");
         // Annotation sur la meme ligne.
         assertThat(HarnessProjects.javaFileName("@SuppressWarnings public class Annotee { }", "S"))
                 .isEqualTo("Annotee.java");
@@ -314,7 +321,11 @@ class HarnessProjectsTest {
         // Une tete en \s* multiligne faisait repartir le moteur de chaque ligne jusqu'au bout
         // de la source : temps quadratique, sur une source choisie par l'etudiant.
         for (String source : List.of("\t\n".repeat(100_000), "\n".repeat(200_000),
-                "static ".repeat(30_000), "public ".repeat(30_000), "@a ".repeat(60_000))) {
+                "static ".repeat(30_000), "public ".repeat(30_000), "@a ".repeat(60_000),
+                // Argument d'annotation géant (revue #246) : lu caractère par caractère par un
+                // groupe répété, il faisait déborder la pile dès ~2 400 caractères.
+                "@A(" + " ".repeat(100_000) + ")\npublic class Solution { }",
+                "@A(" + "x".repeat(100_000) + "\npublic class Solution { }")) {
             assertTimeoutPreemptively(Duration.ofSeconds(2),
                     () -> HarnessProjects.javaFileName(source, "Solution"));
         }

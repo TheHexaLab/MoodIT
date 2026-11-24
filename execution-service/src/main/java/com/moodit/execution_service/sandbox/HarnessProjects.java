@@ -189,11 +189,15 @@ public final class HarnessProjects {
      * Solution}) : ancrée au seul début de ligne, elle n'était pas vue, le fichier prenait le nom
      * d'un autre type, et javac refusait la classe publique — 0 sur une réponse juste. Une
      * annotation peut avoir une espace avant sa parenthèse ({@code @SuppressWarnings ("x")}) et
-     * une annotation imbriquée en argument ({@code @A(b = @B(1))}), sur un niveau.
+     * une annotation imbriquée en argument ({@code @A(b = @B(1))}), sur un niveau, et être collée
+     * au mot suivant ({@code @A(1)public class B}). Ses arguments sont lus paire de parenthèses
+     * par paire (au plus huit), jamais caractère par caractère : un groupe répété à chaque
+     * caractère est récursif dans le moteur Java, et une annotation de quelques milliers de
+     * caractères faisait déborder la pile (StackOverflowError, 500, tentative supprimée).
      */
     private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
-            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\s*\\((?:[^()\\n]|\\([^()\\n]*\\))*\\))?|public|protected|private|static"
-            + "|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
+            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:@[\\p{javaJavaIdentifierPart}.]+(?:\\s*\\([^()\\n]*(?:\\([^()\\n]*\\)[^()\\n]*){0,8}\\)\\s*|\\s+)"
+            + "|(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
             + "(?:class|interface|record|enum|@interface)\\s+"
             + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");
     private static final Pattern PUBLIC_MOD = Pattern.compile("(?<![\\w-])public\\s");
@@ -235,6 +239,14 @@ public final class HarnessProjects {
                 i += 3;
                 while (i + 2 < n && !(source.charAt(i) == '"'
                         && source.charAt(i + 1) == '"' && source.charAt(i + 2) == '"')) {
+                    // Échappement (`\"""`, `\<fin de ligne>`) : le caractère suivant appartient
+                    // au bloc — un `\"""` le refermait trop tôt, et le reste du fichier était
+                    // blanchi (mauvais nom de fichier, 0 sur une réponse juste).
+                    if (source.charAt(i) == '\\' && i + 1 < n) {
+                        res.append(' ').append(source.charAt(i + 1) == '\n' ? '\n' : ' ');
+                        i += 2;
+                        continue;
+                    }
                     res.append(source.charAt(i) == '\n' ? '\n' : ' ');
                     i++;
                 }

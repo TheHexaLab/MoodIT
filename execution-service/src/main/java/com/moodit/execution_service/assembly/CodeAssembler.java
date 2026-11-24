@@ -1001,18 +1001,22 @@ public class CodeAssembler {
         // `\n;` : termine la dernière instruction étudiant même sans `;` (un code malformé échoue
         // proprement en phase 1 — sans risque, l'environnement est jetable).
         program.append(studentCode == null ? "" : studentCode).append("\n;\n");
-        program.append("SELECT '").append(sqlDumpStart(nonce)).append("';\n");
+        // `.print` et non `SELECT '…'` : un `.mode box` (ou table, json, line…) posé par le code
+        // soumis encadrait la sentinelle, qui n'était plus reconnue — « État de la base
+        // introuvable », 0 sur une réponse juste. `.print` ignore le mode d'affichage.
+        program.append(".print ").append(sqlDumpStart(nonce)).append('\n');
         program.append(".dump\n");
-        program.append("SELECT '").append(sqlDumpEnd(nonce)).append("';\n");
+        program.append(".print ").append(sqlDumpEnd(nonce)).append('\n');
         return new Assembled("sqlite3", List.of(new RunnerExec.File("main.sql", program.toString())));
     }
 
     /**
      * Phase 2 (mode modification) — NOTEUR ISOLÉ. On recharge l'état final de l'étudiant réduit aux
-     * seules {@code CREATE TABLE}/{@code INSERT} (cf. {@link #filterDumpToData}) : AUCUN SQL étudiant
-     * n'est exécuté ici (ni vue, ni déclencheur), seulement des définitions de tables et des INSERT à
-     * littéraux échappés. Le prof crée ensuite sa référence (à mettre en {@code TEMP}) + son verdict,
-     * encadré par les sentinelles au nonce.
+     * seules {@code CREATE TABLE}/{@code INSERT} des tables de travail (cf. {@link #filterDumpToData},
+     * qui refuse tout dump portant un paramètre) : ni vue, ni déclencheur, ni {@code PRAGMA} — chaque
+     * instruction gardée est UNE instruction pour SQLite, le découpage suivant son tokenizer. Le prof
+     * crée ensuite sa référence (à mettre en {@code TEMP}) + son verdict, encadré par les sentinelles
+     * au nonce.
      */
     public Assembled assembleSqlPhase2(String studentData, String harnessCode, String nonce) {
         Matcher marker = SQL_STUDENT_MARKER.matcher(harnessCode == null ? "" : harnessCode);
@@ -1033,10 +1037,24 @@ public class CodeAssembler {
      * la plomberie de l'environnement sqlite ({@code argv}), les tables {@code sqlite_*}, et toute table
      * fabriquée par l'étudiant. La phase 2 ne rejoue ainsi que des tables ATTENDUES + des INSERT à
      * littéraux échappés — aucun objet exécutable, aucun couplage aux internes du paquet.
+     *
+     * <p>Le texte d'un {@code CREATE TABLE} vient de {@code sqlite_master}, que le code soumis peut
+     * RÉÉCRIRE en phase 1 ({@code PRAGMA writable_schema}). Le filtre ne vaut donc que si chaque
+     * instruction gardée en est UNE pour SQLite : le découpage suit son tokenizer (paramètres
+     * compris, cf. {@link #splitSqlStatements}), et un dump dont une instruction gardée porte un
+     * paramètre ({@code $x(…)}, {@code :x}, {@code @x}, {@code #x}, {@code ?}) est REFUSÉ —
+     * {@code .dump} n'en écrit jamais, et un {@code $x(/*)} faisait voir à un autre analyseur
+     * (celui du shell {@code sqlite3}) un commentaire là où SQLite exécute la suite : vue
+     * {@code TEMP} masquant la table de travail, verdict forgé (revue #246).
+     *
+     * @return les instructions gardées, ou {@code null} si le dump est refusé
      */
     public static String filterDumpToData(String dump, Set<String> allowedTables) {
         StringBuilder out = new StringBuilder();
-        for (String statement : splitSqlStatements(dump)) {
+        List<Boolean> withParameter = new ArrayList<>();
+        List<String> statements = splitSqlStatements(dump, withParameter);
+        for (int k = 0; k < statements.size(); k++) {
+            String statement = statements.get(k);
             Matcher m = SQL_DUMP_TARGET.matcher(statement);
             if (!m.find()) {
                 continue; // ni CREATE TABLE ni INSERT (vue, déclencheur, PRAGMA, BEGIN/COMMIT…)
@@ -1044,6 +1062,9 @@ public class CodeAssembler {
             String table = m.group(1).toLowerCase(Locale.ROOT);
             if (!allowedTables.contains(table)) {
                 continue; // hors des tables de travail du prof (plomberie, sqlite_*, table étudiant)
+            }
+            if (withParameter.get(k)) {
+                return null; // schéma réécrit : jamais produit par .dump (cf. javadoc)
             }
             out.append(statement).append("\n;\n");
         }
@@ -1070,12 +1091,29 @@ public class CodeAssembler {
      * (héritage SQL Server / Oracle). Sans cette règle, une telle ligne faisait sortir la
      * réponse de son {@code CREATE VIEW} : la suite s'exécutait au premier niveau, commandes
      * point comprises, et pouvait imprimer un bloc de verdict avant le vrai.
+     *
+     * <p>Les PARAMÈTRES sont lus comme le tokenizer de SQLite ({@code tokenize.c}) : {@code ?}
+     * suivi de chiffres, et {@code $}, {@code @}, {@code :}, {@code #} suivis de caractères
+     * d'identifiant, de {@code ::} et d'un éventuel groupe {@code (…)} qui court jusqu'à la
+     * parenthèse fermante ou au premier blanc (variable TCL). Ce groupe peut contenir
+     * {@code /*}, {@code '} ou {@code ;} sans ouvrir de commentaire, de chaîne ni finir
+     * l'instruction : sans cette règle, le découpage voyait un commentaire là où SQLite
+     * exécutait la suite.
      */
     static List<String> splitSqlStatements(String sql) {
+        return splitSqlStatements(sql, null);
+    }
+
+    /**
+     * {@link #splitSqlStatements(String)}, et pour chaque instruction rendue, dans
+     * {@code withParameter} (si non nul), si elle porte un paramètre hors chaîne et commentaire.
+     */
+    static List<String> splitSqlStatements(String sql, List<Boolean> withParameter) {
         List<String> statements = new ArrayList<>();
         if (sql == null) {
             return statements;
         }
+        boolean hasParameter = false;
         StringBuilder current = new StringBuilder();
         // Le segment porte-t-il du SQL réel (hors blancs et commentaires) ? Tenu PENDANT le
         // découpage, qui connaît déjà les bornes des commentaires : une regex appliquée après
@@ -1091,9 +1129,10 @@ public class CodeAssembler {
                 int eol = sql.indexOf('\n', i);
                 int lineEnd = eol < 0 ? n : eol;
                 if (isShellTerminatorLine(sql.substring(i, lineEnd))) {
-                    addStatement(statements, current, hasCode);
+                    addStatement(statements, current, hasCode, withParameter, hasParameter);
                     current.setLength(0);
                     hasCode = false;
+                    hasParameter = false;
                     i = eol < 0 ? n : eol + 1;
                     continue;
                 }
@@ -1121,18 +1160,69 @@ public class CodeAssembler {
                 hasCode = true;
                 i = end;
             } else if (c == ';') { // fin d'instruction
-                addStatement(statements, current, hasCode);
+                addStatement(statements, current, hasCode, withParameter, hasParameter);
                 current.setLength(0);
                 hasCode = false;
+                hasParameter = false;
                 i++;
+            } else if (c == '?' || c == '@' || c == ':' || c == '#'
+                    || (c == '$' && (i == 0 || !isSqlIdChar(sql.charAt(i - 1))))) { // paramètre
+                int end = parameterEnd(sql, i);
+                current.append(sql, i, end);
+                hasCode = true;
+                hasParameter = true;
+                i = end;
             } else {
                 current.append(c);
                 hasCode |= !Character.isWhitespace(c);
                 i++;
             }
         }
-        addStatement(statements, current, hasCode);
+        addStatement(statements, current, hasCode, withParameter, hasParameter);
         return statements;
+    }
+
+    /** Caractère d'identifiant pour SQLite ({@code IdChar}) : lettre ASCII, chiffre, _, $, ou non ASCII. */
+    private static boolean isSqlIdChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || c == '_' || c == '$' || c >= 0x80;
+    }
+
+    /** Fin (exclue) du paramètre qui commence en {@code start}, comme {@code tokenize.c}. */
+    private static int parameterEnd(String sql, int start) {
+        int n = sql.length();
+        int i = start + 1;
+        if (sql.charAt(start) == '?') {
+            while (i < n && sql.charAt(i) >= '0' && sql.charAt(i) <= '9') {
+                i++;
+            }
+            return i;
+        }
+        int idChars = 0;
+        while (i < n) {
+            char c = sql.charAt(i);
+            if (isSqlIdChar(c)) {
+                idChars++;
+                i++;
+            } else if (c == '(' && idChars > 0) {
+                // Variable TCL : jusqu'à la parenthèse fermante (incluse) ou au premier blanc.
+                i++;
+                while (i < n && sql.charAt(i) != ')' && !isSqlSpace(sql.charAt(i))) {
+                    i++;
+                }
+                return i < n && sql.charAt(i) == ')' ? i + 1 : i;
+            } else if (c == ':' && i + 1 < n && sql.charAt(i + 1) == ':') {
+                i += 2;
+            } else {
+                break;
+            }
+        }
+        return i;
+    }
+
+    /** Blanc pour SQLite ({@code sqlite3Isspace}) : espace, et \t \n \v \f \r. */
+    private static boolean isSqlSpace(char c) {
+        return c == ' ' || (c >= '\t' && c <= '\r');
     }
 
     /**
@@ -1206,9 +1296,13 @@ public class CodeAssembler {
     }
 
     /** Ajoute le segment s'il porte du SQL réel (ni blanc ni commentaires seuls). */
-    private static void addStatement(List<String> statements, StringBuilder segment, boolean hasCode) {
+    private static void addStatement(List<String> statements, StringBuilder segment, boolean hasCode,
+            List<Boolean> withParameter, boolean hasParameter) {
         if (hasCode) {
             statements.add(segment.toString().strip());
+            if (withParameter != null) {
+                withParameter.add(hasParameter);
+            }
         }
     }
 

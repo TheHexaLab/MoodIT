@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Tests unitaires des FONCTIONS PURES de supervisor.py (verdict des canaris, jeton de fin,
-relecture tête+queue, substitution des gabarits, scan de trace) : la logique de verdict ne doit
-pas n'être couverte que par les tests d'intégration Docker. Lancés par le job CI `integration`
+"""Tests unitaires des FONCTIONS PURES de supervisor.py (verdict des canaris et du noteur,
+extraction des signatures et génération des bouchons et serveurs des six langages compilés,
+noms réservés, relecture tête+queue, nettoyage) : la logique de verdict ne doit pas n'être
+couverte que par les tests d'intégration Docker. Lancés par le job CI `integration`
 (`python3 docker/runners/common/test_supervisor.py`) AVANT la construction des images, et
-exécutables localement dans n'importe quelle image runner (le module importe `resource`,
-indisponible sous Windows).
+exécutables localement : dans une image runner, ou sous Windows, où les tests qui demandent un
+système Linux (UID, /proc, signaux) sont ignorés.
 """
 
 import json
@@ -679,6 +680,62 @@ class SignatureFormsTest(unittest.TestCase):
         self.assertEqual(["carre", "cube", "moitie"], [n for _r, n, _t in supervisor.c_signatures(src)])
         self.assertEqual([("i32", "carre", ["i32"])], supervisor.rust_signatures(
             "pub const fn carre(x: i32) -> i32 { x * x }\nfn main() {}\n"))
+
+    def test_cpp_final_inherited_ctors_and_spaced_labels(self):
+        # Revue #246 : `final` avant la base, `using Forme::Forme;`, `public :` et
+        # `virtual public` faisaient ignorer la classe (0 sur une réponse juste).
+        api = {n: (c, m) for n, c, m in supervisor.cpp_object_api(
+            "class Forme {\npublic:\n  Forme(int c) : c(c) {}\n  int aire() { return c * c; }\n"
+            "protected:\n  int c;\n};\n"
+            "class Carre final : public Forme {\npublic:\n  Carre(int c) : Forme(c) {}\n};\n"
+            "class Cube : public Forme {\npublic:\n  using Forme::Forme;\n};\n"
+            "class Calc {\npublic :\n  int add(int a, int b) { return a + b; }\n};\n"
+            "struct Base { int un() { return 1; } };\n"
+            "struct Derivee final : virtual public Base { };\n")}
+        self.assertEqual(([["int"]], [("int", "aire", [])]), api["Carre"])
+        self.assertEqual(([["int"]], [("int", "aire", [])]), api["Cube"])
+        self.assertEqual([("int", "add", ["int", "int"])], api["Calc"][1])
+        # Dérivée sans constructeur déclaré, base constructible sans argument : défaut implicite.
+        self.assertEqual(([[]], [("int", "un", [])]), api["Derivee"])
+        # Base sans constructeur par défaut : la dérivée n'en reçoit pas (il ne compilerait pas).
+        sans_defaut = {n: c for n, c, _m in supervisor.cpp_object_api(
+            "class Forme {\npublic:\n  Forme(int c) {}\n  int aire() { return 1; }\n};\n"
+            "class Carre : public Forme {\npublic:\n  int cote() { return 2; }\n};\n")}
+        self.assertNotIn("Carre", sans_defaut)
+        # `public::x` n'est pas une étiquette.
+        self.assertEqual([], [n for n, _c, _m in supervisor.cpp_object_api(
+            "class K {\n  int f() { return 1; }\n};\n")])
+
+    def test_go_method_with_unnamed_receiver(self):
+        src = ("type Calculatrice struct{}\n"
+               "func (Calculatrice) Additionner(a, b int) int { return a + b }\n"
+               "func (*Calculatrice) Un() int { return 1 }\n")
+        self.assertEqual({"Additionner", "Un"},
+                         {m[1] for m in supervisor.go_object_api(src)[0][2]})
+
+    def test_rust_struct_with_attributes_or_restricted_visibility(self):
+        for head in ("#[derive(Debug, Clone)] struct", "pub(crate) struct",
+                     "#[derive(Debug)]\npub(crate) struct"):
+            src = (head + " Rectangle { largeur: i32, hauteur: i32 }\n"
+                   "impl Rectangle {\n    fn aire(&self) -> i32 { self.largeur * self.hauteur }\n}\n")
+            with self.subTest(head=head):
+                api = {t: (c, m) for t, c, m in supervisor.rust_object_api(src)}
+                self.assertEqual({"aire"}, {m[1] for m in api["Rectangle"][1]})
+                self.assertEqual(["largeur", "hauteur"],
+                                 [f[0] for f in supervisor.rust_struct_fields(src)["Rectangle"]])
+        self.assertIn("Unite", supervisor.RUST_UNIT_STRUCT.findall("#[derive(Debug)] pub(crate) struct Unite;"))
+
+    def test_harness_mentions_ignores_comments_and_literals(self):
+        # Un nom cité en commentaire faisait refuser la fonction d'aide d'une réponse juste.
+        self.assertFalse(supervisor.harness_mentions(
+            "// le plus grand (max) des trois\nreturn PlusGrand(1, 5, 3) == 5", "max"))
+        self.assertFalse(supervisor.harness_mentions("/* abs */ return f(2) == 2;", "abs"))
+        self.assertFalse(supervisor.harness_mentions('return s == "max" && r == `abs`', "max"))
+        self.assertTrue(supervisor.harness_mentions("return max(f(1), 2) == 2 // max", "max"))
+        self.assertEqual((["max"], [], []), supervisor.go_hidden_names(
+            ["max"], "return max(PlusGrand(1, 5), 0) == 5"))
+        self.assertEqual(([], [], ["max"]), supervisor.go_hidden_names(
+            ["max"], "// max\nreturn PlusGrand(1, 5) == 5"))
 
     def test_java_default_method_through_a_parent_interface(self):
         polygone = ('Compiled from "S.java"\ninterface Polygone extends Forme, java.io.Serializable {\n}\n')
@@ -2830,8 +2887,12 @@ class Review246dTest(unittest.TestCase):
         with open(supervisor.__file__, encoding="utf-8") as f:
             source = f.read()
         main_body = source.split("\ndef main():", 1)[1]
-        self.assertNotIn('for _d in ("gocache_etu", "gopath_etu")', main_body)
-        self.assertIn('if language == "go":\n', main_body)
+        # Un seul appel, et sous la garde du langage Go.
+        self.assertEqual(1, main_body.count("reset_go_student_dirs("))
+        call = main_body.index("reset_go_student_dirs(")
+        guard = main_body.rfind('if language == "go":', 0, call)
+        self.assertGreaterEqual(guard, 0)
+        self.assertEqual(0, main_body.count("\n    if ", guard + 1, call))
 
 
 class Review246eTest(unittest.TestCase):
@@ -2950,8 +3011,9 @@ class Review246eTest(unittest.TestCase):
         self.assertFalse(supervisor.harness_mentions("return maximum(1, 2) == 2", "max"))
         self.assertFalse(supervisor.harness_mentions("return le_max(1, 2) == 2", "max"))
         self.assertFalse(supervisor.harness_mentions(None, "max"))
-        # Dans le doute (chaîne, commentaire), le nom compte comme employé.
-        self.assertTrue(supervisor.harness_mentions('return f() == "max"', "max"))
+        # Une chaîne ou un commentaire n'appelle rien (revue #246 : un `max` cité en commentaire
+        # faisait refuser la fonction d'aide d'une réponse juste).
+        self.assertFalse(supervisor.harness_mentions('return f() == "max"', "max"))
 
     # ── C / C++ ──────────────────────────────────────────────────────────────────────────
     def test_c_probe_plan_is_bounded(self):

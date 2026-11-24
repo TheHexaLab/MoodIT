@@ -205,11 +205,7 @@ public class ExecutionService {
                     request.language(), request.code(), request.testCases(), request.timeoutMs(),
                     maxWall));
         }
-        // Budget plafonné selon l'appelant, comme le mur du chemin compilé : une correction
-        // interne a droit au budget complet, un « Tester » public est borné au même plafond que
-        // les compilés (PUBLIC_WALL_MS) — la route accepte jusqu'à 100 cas fournis par l'appelant.
-        long budgetMs = limiter.isInternal() ? interpretedBudgetMs
-                : Math.min(interpretedBudgetMs, DockerEvaluator.PUBLIC_WALL_MS);
+        long budgetMs = interpretedBudgetMs();
         // Un budget absurde (Long.MAX_VALUE) fait SATURER toNanos et déborder l'addition : la
         // comparaison par DIFFÉRENCE ci-dessous (`nanoTime() - deadline >= 0`) reste juste malgré
         // le débordement — ne jamais l'écrire `nanoTime() >= deadline`.
@@ -341,16 +337,30 @@ public class ExecutionService {
     }
 
     /**
+     * Budget d'une correction interprétée, plafonné selon l'appelant comme le mur du chemin
+     * compilé : une correction interne a droit au budget complet, un « Tester » public est borné
+     * au même plafond que les compilés (PUBLIC_WALL_MS) — la route accepte jusqu'à 100 cas
+     * fournis par l'appelant.
+     */
+    long interpretedBudgetMs() {
+        return limiter.isInternal() ? interpretedBudgetMs
+                : Math.min(interpretedBudgetMs, DockerEvaluator.PUBLIC_WALL_MS);
+    }
+
+    /**
      * SQL en mode « modification » — exécution en DEUX PHASES ISOLÉES :
      * <ol>
      *   <li>Phase 1 : le code étudiant tourne dans un bac à sable JETABLE (tables de travail seules,
      *       aucune donnée de référence ni verdict) ; on récupère un DUMP de l'état final.</li>
      *   <li>Phase 2 : un NOTEUR séparé recharge cet état réduit aux seules tables de travail du prof
-     *       ({@code CREATE TABLE}/{@code INSERT}, cf. {@link CodeAssembler#filterDumpToData}) — donc
-     *       aucun SQL étudiant ne s'y exécute — puis lance la référence + le verdict du prof.</li>
+     *       ({@code CREATE TABLE}/{@code INSERT}, cf. {@link CodeAssembler#filterDumpToData}, qui
+     *       refuse un schéma réécrit pour cacher d'autres instructions) — ni vue, ni déclencheur,
+     *       ni {@code PRAGMA} de l'étudiant ne s'y exécute — puis lance la référence + le verdict
+     *       du prof.</li>
      * </ol>
      * Le SQL de l'étudiant ne s'exécute JAMAIS dans le processus qui note : l'isolation est
-     * structurelle (processus/base), pas un filtrage lexical.
+     * structurelle (processus/base) ; le seul texte étudiant qui passe en phase 2 est le dump,
+     * réduit à des définitions de tables et des INSERT découpés comme les découpe SQLite.
      */
     private TestResult runSqlIsolated(String code, TestCaseInput testCase,
             String nonce, int weight, Integer timeoutMs) {
@@ -388,6 +398,11 @@ public class ExecutionService {
         }
         // Liste blanche = tables déclarées par le prof ; découple le filtrage des internes de sqlite.
         String data = CodeAssembler.filterDumpToData(dump, CodeAssembler.sqlWorkingTables(testCase.harnessCode()));
+        if (data == null) {
+            // Schéma réécrit en phase 1 (writable_schema) pour faire exécuter du SQL en phase 2 :
+            // refusé fermé, jamais rejoué.
+            return new TestResult(testCase.name(), weight, false, "État de la base invalide après ton code");
+        }
 
         // Phase 2 — noteur isolé. Une erreur ici vient du HARNAIS (prof) : message générique, on ne
         // fuit pas son stderr (structure des tables de référence) à l'étudiant.
