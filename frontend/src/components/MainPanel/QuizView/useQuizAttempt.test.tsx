@@ -595,6 +595,41 @@ describe('tentative à revoir par l\'enseignant', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('relance réussie pendant laquelle l’étudiant change de vue : son choix n’est pas écrasé', async () => {
+    // Revue #246 : les deux lectures déclenchées par le verdict sont asynchrones ; si l'étudiant
+    // passe à une autre tentative entre-temps, leur résultat ne doit pas le ramener en arrière.
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56), summary(57, 2)])
+      .mockResolvedValue([summary(56), summary(57, 2)]);
+    let release56!: () => void;
+    const onFetchAttemptResult = vi.fn((_q: number, id: number) =>
+      id === 56
+        ? new Promise<ReturnType<typeof makeResult>>((res) => { release56 = () => res(makeResult(56)); })
+        : Promise.resolve(makeResult(id))
+    );
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })), onFetchAttempts,
+        onFetchAttemptResult, attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
+    act(() => result.current.selectAttempt(56));
+    expect(result.current.awaitingReview).toBe(true);
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() => expect(onFetchAttemptResult).toHaveBeenCalledWith(QUIZ_ID, 56));
+    // L'étudiant revient à #57 avant la fin des lectures.
+    await act(async () => { await result.current.selectAttempt(57); });
+    expect(result.current.currentAttemptId).toBe(57);
+    await act(async () => { release56(); });
+    expect(result.current.currentAttemptId).toBe(57);
+    expect(result.current.result?.attemptId).toBe(57);
+  });
+
   it('relance réussie, résultat illisible : rechargement complet en repli', async () => {
     const onFetchAttempts = vi
       .fn<(quizId: number) => Promise<AttemptSummary[]>>()

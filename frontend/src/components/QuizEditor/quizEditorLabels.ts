@@ -27,6 +27,8 @@ export interface QuizEditorLabels {
   // ── Messages d'erreur (toasts dans le formulaire) ──
   loadError: string;
   saveError: string;
+  /** Enregistrement refusé : quiz trop volumineux (413 du gateway). */
+  saveTooLarge: string;
   deleteError: string;
   reorderError: string;
   /** Chargement des tentatives à revoir impossible (#116). */
@@ -64,6 +66,8 @@ export const defaultQuizEditorLabels: QuizEditorLabels = {
 
   loadError: 'Chargement du quiz impossible.',
   saveError: "L'enregistrement a échoué. Réessayez.",
+  saveTooLarge:
+    "Ce quiz est trop volumineux pour être enregistré : réduisez ses harnais ou ses codes de départ.",
   deleteError: 'La suppression a échoué.',
   reorderError: "Le réordonnancement a échoué. Vous n'avez peut-être pas les droits.",
   reviewLoadError: 'Chargement des tentatives à revoir impossible.',

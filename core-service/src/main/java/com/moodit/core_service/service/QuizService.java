@@ -83,11 +83,19 @@ public class QuizService {
      * la tentative échouée est supprimée et l'étudiant resoumet ; à partir de ce compte, elle est
      * gardée « à revoir ». Une sandbox simplement indisponible ne compte pas.
      */
-    @Value("${app.quiz.grading.max-no-verdict-failures:3}")
     private int maxNoVerdictFailures = 3;
 
-    /** Pour les tests construits sans Spring. */
+    /**
+     * Au moins 1, vérifié au démarrage : 0 ne DÉSACTIVE pas le plafond, il le rend toujours
+     * atteint — toute tentative en échec, panne de la sandbox comprise, serait gardée « à revoir »
+     * au lieu d'être resoumise par l'étudiant (revue #246).
+     */
+    @Value("${app.quiz.grading.max-no-verdict-failures:3}")
     void setMaxNoVerdictFailures(int maxNoVerdictFailures) {
+        if (maxNoVerdictFailures < 1) {
+            throw new IllegalArgumentException(
+                    "app.quiz.grading.max-no-verdict-failures doit valoir au moins 1");
+        }
         this.maxNoVerdictFailures = maxNoVerdictFailures;
     }
 

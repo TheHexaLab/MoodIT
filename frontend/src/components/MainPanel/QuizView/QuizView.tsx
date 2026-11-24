@@ -162,8 +162,10 @@ const QuizView: React.FC<QuizViewProps> = ({
   const [prevView, setPrevView] = useState(view);
   const [reviewGradedNotice, setReviewGradedNotice] = useState(false);
   if (prevView.awaiting !== view.awaiting || prevView.id !== view.id || prevView.phase !== view.phase) {
+    // Pas pendant un rechargement : `reload` quitte le message d'attente AVANT d'avoir choisi
+    // la tentative à afficher, et l'annonce partait pour une tentative toujours à revoir.
     const graded = prevView.awaiting && !view.awaiting && view.phase === 'summary'
-      && view.id != null && view.id === prevView.id;
+      && view.id != null && view.id === prevView.id && !attempt.loading;
     setPrevView(view);
     setReviewGradedNotice(graded);
     if (graded) setChipFocus(view.id);

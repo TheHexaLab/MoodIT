@@ -781,6 +781,17 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
     }
 
+    @Test
+    void plafond_inferieur_a_un_refuse_au_demarrage() {
+        // 0 ne désactive pas le plafond : il le rend toujours atteint (revue #246).
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMaxNoVerdictFailures(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("au moins 1");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMaxNoVerdictFailures(-2))
+                .isInstanceOf(IllegalArgumentException.class);
+        service.setMaxNoVerdictFailures(1);
+    }
+
     // ── getMyAttempts ───────────────────────────────────────────────────────────
 
     @Test

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import styles from './QuizView.module.css';
 import { Check } from '../../../assets/Check';
 import { X } from '../../../assets/X';
@@ -57,7 +57,10 @@ export function AttemptBar({
   labels,
 }: AttemptBarProps): React.ReactElement | null {
   const chips = useRef(new Map<number, HTMLButtonElement>());
-  useEffect(() => {
+  // Effet de MISE EN PAGE : le focus est posé dans la même mise à jour que le montage de la
+  // barre, jamais après un passage par <body> (un effet passif courait après le rendu, au gré
+  // du planificateur — comme AssignmentTeams).
+  useLayoutEffect(() => {
     if (focusId == null) return;
     const chip = chips.current.get(focusId);
     if (!chip) return;

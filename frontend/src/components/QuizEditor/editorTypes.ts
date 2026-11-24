@@ -68,9 +68,16 @@ export interface QuestionDraft {
  * fois, sans dire quelle question corriger (#116).
  */
 export class QuizSaveRejectedError extends Error {
-  constructor(message: string) {
+  /**
+   * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo). Le texte affiché vient
+   * alors des libellés de l'éditeur (`saveTooLarge`), pas de ce message.
+   */
+  readonly reason?: 'tooLarge';
+
+  constructor(message: string, reason?: 'tooLarge') {
     super(message);
     this.name = 'QuizSaveRejectedError';
+    this.reason = reason;
   }
 }
 

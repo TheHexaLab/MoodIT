@@ -785,12 +785,13 @@ public class CodeAssembler {
 
     /**
      * Bash : exécution ISOLÉE. Le NOTEUR (grader.sh) exécute le harnais INCHANGÉ avec des proxys ;
-     * chaque appel de fonction est délégué à un SOUS-PROCESSUS FRAIS ({@code bash student_server.sh})
-     * qui charge le code étudiant, lit « nom args », appelle la fonction et renvoie sa sortie. Les
-     * fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas d'objets). Le nonce est émis
-     * par le noteur, où aucun code étudiant ne tourne ; {@code grader.sh} est auto-supprimé.
-     * Le code soumis vit dans un fichier à part ({@code solution.sh}), chargé par le répartiteur
-     * APRÈS la lecture de l'identifiant et dans un sous-shell à la sortie capturée.
+     * chaque appel de fonction est délégué à un SOUS-PROCESSUS FRAIS : un répartiteur passé à
+     * {@code bash -c} (pas un fichier, cf. le commentaire du gabarit), qui lit « identifiant nom
+     * args » sur son entrée, PUIS seulement charge le code soumis ({@code solution.sh}) dans un
+     * sous-shell à la sortie capturée, appelle la fonction et renvoie sa sortie cadrée par
+     * l'identifiant. Les fonctions bash étant SANS ÉTAT, un processus par appel suffit (pas
+     * d'objets). Le nonce est émis par le noteur, où aucun code étudiant ne tourne ;
+     * {@code grader.sh} se vide puis s'efface avant tout appel.
      *
      * <p><b>Portée de la garantie.</b> Le cadrage par identifiant ferme la forge par la sortie, et
      * le code soumis ne reçoit pas l'identifiant. Il subsiste un <b>résiduel assumé</b>, de même

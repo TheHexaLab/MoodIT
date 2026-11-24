@@ -194,6 +194,9 @@ class ExecutionIntegrationTest {
         // le publiait ensuite par le stderr du noteur (/proc/<pid>/fd/2) ou en remplaçant
         // run.err, que root relisait par son chemin. Le noteur se vide désormais avant tout
         // appel, et les sorties capturées vivent dans un dossier de root.
+        // La sonde ne rend la BONNE valeur que si elle a trouvé le nonce : le noteur, qui exige
+        // désormais aussi une sortie 0, ne pourrait pas laisser passer une fuite qui se
+        // contenterait de publier le nonce (revue #246).
         requireRuntime("bash");
         String forged = "doubler() {\n"
                 + "  local n='' f p\n"
@@ -205,7 +208,7 @@ class ExecutionIntegrationTest {
                 + "  for p in /box/work/run.err /box/work/run.out; do\n"
                 + "    rm -f \"$p\" 2>/dev/null; printf '%s' \"$n\" > \"$p\" 2>/dev/null\n"
                 + "  done\n"
-                + "  echo 0\n"
+                + "  if [ -n \"$n\" ]; then echo 10; else echo 0; fi\n"
                 + "}";
         assertThat(passes("Bash", forged, "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }
@@ -237,7 +240,9 @@ class ExecutionIntegrationTest {
     void python_module_dropped_next_to_the_grader_cannot_forge_the_verdict() {
         // Revue #246 : le noteur tournait avec son dossier (inscriptible par le code soumis) en
         // tête de sys.path. Un harnais qui importe une bibliothèque faisait charger, DANS le
-        // noteur, les modules que le code soumis y avait déposés — ils y lisaient le nonce.
+        // noteur, les modules que le code soumis y avait déposés — ils y lisaient le nonce. Le
+        // module déposé, s'il le trouve, l'écrit et fait sortir le noteur en 0 : une régression
+        // (perte de `-I`) donnerait un vrai verdict forgé, que ce test verrait.
         requireRuntime("python");
         String harness = "import numpy as np\nreturn bool(np.isclose(carre(3.0), 9.0))";
         String payload = "import sys\n"
@@ -246,6 +251,9 @@ class ExecutionIntegrationTest {
                 + "    for c in f.f_code.co_consts:\n"
                 + "        if isinstance(c, str) and c.startswith('MOODIT_OK_'):\n"
                 + "            sys.stderr.write(c)\n"
+                + "            sys.stderr.flush()\n"
+                + "            import os\n"
+                + "            os._exit(0)\n"
                 + "    f = f.f_back\n"
                 + "raise ImportError('x')\n";
         String forged = "import sys\n"
@@ -647,6 +655,11 @@ class ExecutionIntegrationTest {
         // Sentinelle = « MOODIT_OK_ » + 48 hex + « _VERDICT_START » (72 caractères), cherchée
         // par sa fin, écrite en deux morceaux pour ne pas trouver ce texte-ci dans main.sql.
         String sentinel = "substr(src, instr(src, '_VERDICT_' || 'START') - 58, 72)";
+        // Sortie de la vue par `go`, puis une vue TEMP qui masque solution1 : l'ancien découpage
+        // (une seule vue) laissait cette forge réussir (revue #246).
+        assertThat(passes("SQL", "SELECT n FROM t WHERE n > 1\ngo\n"
+                + "CREATE TEMP VIEW solution1 AS SELECT 1 AS n UNION SELECT 2 UNION SELECT 3",
+                roHarness)).isFalse();
         String forge = "SELECT n FROM t WHERE n > 1\ngo\n"
                 + "SELECT " + sentinel + " || char(10) || '1' || char(10) || replace(" + sentinel
                 + ", 'START', 'END') FROM (SELECT CAST(data AS TEXT) AS src FROM fsdir('main.sql'))";

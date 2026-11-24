@@ -243,6 +243,21 @@ describe('QuizEditor — refus métier de l’enregistrement', () => {
     expect(screen.queryByText(editorT.saveError)).toBeNull();
     expect(screen.getByText(editorT.editQuizTitle)).toBeTruthy();
   });
+
+  it('quiz trop volumineux (413) : message dédié, pas « Réessayez »', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: {
+        onUpdateQuiz: vi.fn(async () => {
+          throw new QuizSaveRejectedError('', 'tooLarge');
+        }),
+      },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByText(formT.save));
+    await screen.findByText(editorT.saveTooLarge);
+    expect(screen.queryByText(editorT.saveError)).toBeNull();
+  });
 });
 
 describe('QuizEditor — annulation défait la session', () => {

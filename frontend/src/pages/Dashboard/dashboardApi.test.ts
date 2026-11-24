@@ -601,6 +601,13 @@ describe('createQuiz / updateQuiz — refus métier (400)', () => {
     expect((error as Error).message).toBe('Question 2 : un harnais dépasse 50000 caractères.');
   });
 
+  it.each(save)('%s : 413 du gateway → QuizSaveRejectedError de raison tooLarge', async (_n, call) => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(413));
+    const error = await call().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QuizSaveRejectedError);
+    expect((error as QuizSaveRejectedError).reason).toBe('tooLarge');
+  });
+
   it.each(save)('%s : JSON de Spring, corps vide ou illisible → erreur générique', async (_n, call, generic) => {
     for (const text of [async () => '{"status":400}', async () => '  ', async () => {
       throw new Error('flux coupé');

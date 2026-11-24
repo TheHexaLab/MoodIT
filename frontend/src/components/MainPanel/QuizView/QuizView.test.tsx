@@ -312,7 +312,9 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
     rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
     await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
     expect(reviewChip.isConnected).toBe(false);
-    expect(document.activeElement?.textContent).toBe('#2 · 2/3');
+    // Le focus est rendu par l'effet de la nouvelle barre, après son montage : on l'attend (un
+    // contrôle immédiat dépendait de l'ordonnancement et échouait en CI).
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('#2 · 2/3'));
     expect(document.querySelector('[aria-live="polite"]:not([role])')?.textContent).toBe(
       'Votre tentative a été corrigée : son résultat est affiché.'
     );

@@ -379,12 +379,15 @@ export async function runCode(input: RunCodeInput): Promise<RunResult> {
 // (il ignore les ids temporaires négatifs de l'éditeur, ainsi que les harnais de code).
 
 /**
- * Refus métier d'un enregistrement de quiz (400, texte brut en français de core) →
- * `QuizSaveRejectedError` ; `null` sinon. Un corps JSON est une erreur générique de Spring
+ * Refus métier d'un enregistrement de quiz (400, texte brut en français de core ; 413, corps
+ * trop gros pour le gateway) → `QuizSaveRejectedError` ; `null` sinon. Un corps JSON est une erreur générique de Spring
  * (anglais, technique) et un corps vide ou illisible ne dit rien : l'éditeur garde alors son
  * message générique.
  */
 async function quizSaveRejection(res: Response): Promise<QuizSaveRejectedError | null> {
+  // 413 : le quiz entier dépasse la limite de corps du gateway — « Réessayez » renverrait le
+  // même quiz, refusé à chaque fois.
+  if (res.status === 413) return new QuizSaveRejectedError('', 'tooLarge');
   if (res.status !== 400) return null;
   const body = (await res.text().catch(() => '')).trim();
   return body && !body.startsWith('{') ? new QuizSaveRejectedError(body) : null;

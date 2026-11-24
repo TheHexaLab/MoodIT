@@ -1098,6 +1098,12 @@ class RpcGradingIntegrationTest {
                 int somme(int n, int acc = 0) { return n == 0 ? acc : somme(n - 1, acc + n); }
                 int carre(const int& x) { return x * x; }
                 """, "l * h", "l + h");
+        // C++ : valeur par défaut sur le PROTOTYPE, définition après `main` sans elle.
+        gradedThenWrong("C++", "return somme(4) == 10 && somme(4, 1) == 11;", """
+                int somme(int n, int acc = 0);
+                int main() { return 0; }
+                int somme(int n, int acc) { return n == 0 ? acc : somme(n - 1, acc + n); }
+                """, "acc + n", "acc * n");
         // C : ancienne version d'arité différente sous `#if 0`, avant la vraie.
         gradedThenWrong("C", "return somme(4) == 10;", """
                 #if 0

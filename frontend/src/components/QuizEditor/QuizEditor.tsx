@@ -300,7 +300,13 @@ export function QuizEditor({
     } catch (e) {
       // Refus métier de core (taille d'un code ou d'un harnais…) : son message nomme la question
       // à corriger, alors que « Réessayez » ferait renvoyer le même quiz.
-      setError(e instanceof QuizSaveRejectedError ? e.message : t.saveError);
+      setError(
+        e instanceof QuizSaveRejectedError
+          ? e.reason === 'tooLarge'
+            ? t.saveTooLarge
+            : e.message
+          : t.saveError
+      );
     } finally {
       setSaving(false);
     }

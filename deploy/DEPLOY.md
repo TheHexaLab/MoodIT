@@ -164,8 +164,10 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
 >
 > **Avant tout** : le contrôle préalable des harnais (section « Changement de schéma », étape 1)
-> doit être sorti en 0, et l'heure de la bascule notée (`SELECT NOW()` sur la base) ; **juste
-> après** le second `update.sh` vient son étape 2, `check-compiled-harnesses.py --unpublish`, avec les mêmes `--ack`.
+> doit être sorti en 0, et l'heure de la bascule notée EN UTC, comme `submitted_at` (commande
+> de l'étape 2 : `SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;` — pas `NOW()` seul, à l'heure
+> de Toronto dans ce conteneur) ; **juste après** le second `update.sh` vient son étape 2,
+> `check-compiled-harnesses.py --unpublish`, avec les mêmes `--ack`.
 >
 > Aucun `update.sh` ne doit partir seul pendant cette procédure : si une ligne de cron le lance
 > sur ce serveur (`crontab -l`), la suspendre AVANT la fusion `main → deploiement` — l'ancien

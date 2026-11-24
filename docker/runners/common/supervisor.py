@@ -842,7 +842,8 @@ STUDENT_BUILDS = {}
 STUDENT_BUILD_CACHE = os.path.join(BOX, "etu_compilations")
 STUDENT_ARTIFACT_CAP = 64 * 1024 * 1024
 # ... et en nombre de fichiers : le cache garde ses inodes tout le job, sur un /box borné à
-# BOX_INODES (une classe Java par fichier ; une solution honnête en a quelques-unes).
+# DockerSandbox.BOX_INODES côté execution-service (une classe Java par fichier ; une solution
+# honnête en a quelques-unes).
 STUDENT_ARTIFACT_MAX_FILES = 256
 # Un échec NON CONCLUANT (délai dépassé, compilateur tué par signal) peut venir de l'hôte — une
 # machine chargée, le cache de Go encore froid à la première compilation — et non des entrées :
@@ -3366,6 +3367,12 @@ C_FUNC = re.compile(r"^[ \t]*" + C_ATTRIBUTES
                     + r"(?:(?:static|inline|extern|const|constexpr|consteval)\s+){0,8}"
                     r"(" + C_SCALAR_RET + r"|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)"
                     r"\s*(?:noexcept(?:\s*\([^()]*\))?\s*)?\{", re.M)
+# PROTOTYPE de premier niveau (`int somme(int n, int acc = 0);`) : en C++, la valeur par défaut
+# ne s'écrit qu'une fois, souvent là (prototype en haut, définitions après `main`).
+C_PROTO = re.compile(r"^[ \t]*" + C_ATTRIBUTES
+                     + r"(?:(?:static|inline|extern|const|constexpr|consteval)\s+){0,8}"
+                     r"(" + C_SCALAR_RET + r")\s+(\w+)\s*\(([^()]*)\)"
+                     r"\s*(?:noexcept(?:\s*\([^()]*\))?\s*)?;", re.M)
 # Retour en fin de signature (C++) : `auto f(int x) -> int {`.
 C_FUNC_TRAILING = re.compile(r"^[ \t]*" + C_ATTRIBUTES
                              + r"(?:(?:static|inline|constexpr|consteval)\s+){0,8}"
@@ -3611,6 +3618,17 @@ def c_signatures(source, cpp=False):
         found += [(h.start(), h.group(3), h.group(1), h.group(2))
                   for h in C_FUNC_TRAILING.finditer(source or "")]
         found.sort()
+    # Valeurs par défaut portées par un PROTOTYPE (C++) : reportées sur la définition de même
+    # nom et mêmes types, qui n'en porte pas (revue #246 : `somme(4)` ne compilait pas dans le
+    # noteur, 0 sur une réponse juste).
+    proto_defaults = {}
+    if cpp:
+        for proto in C_PROTO.finditer(source or ""):
+            proto_types = _c_param_types(proto.group(3))
+            if not covered(cover, proto.start()) and proto_types is not None:
+                key = (proto.group(2), tuple(proto_types))
+                proto_defaults[key] = max(proto_defaults.get(key, 0),
+                                          trailing_defaults(proto.group(3)))
     for start, ret, ident, params in found:
         if covered(cover, start):
             continue
@@ -3621,7 +3639,9 @@ def c_signatures(source, cpp=False):
         types = _c_param_types(params)
         if types is None:
             continue
-        hits.append((ret, ident, types, trailing_defaults(params) if cpp else 0))
+        defaults = max(trailing_defaults(params),
+                       proto_defaults.get((ident, tuple(types)), 0)) if cpp else 0
+        hits.append((ret, ident, types, defaults))
     hits = with_default_arities(hits)
     # Une fonction definie dans deux branches du preprocesseur (`#if … #else …`) etait vue deux
     # fois : deux bouchons identiques, « redefinition of moodit_f_… », 0 sur une reponse juste.
@@ -3890,12 +3910,17 @@ def _c_param_types(params):
     constructeur, la classe entiere : une reponse juste etait notee 0."""
     types = []
     for param_group in [p.strip() for p in params.split(",") if p.strip() and p.strip() != "void"]:
-        # Référence (`const int& x`, `int &x`) : le serveur passe une variable, qui s'y lie ; le
-        # type vu par l'appelant est le scalaire. Pas `&&` (une variable ne s'y lie pas), ni
-        # pointeur ni tableau.
+        # Référence CONSTANTE (`const int& x`) : le serveur passe une variable, qui s'y lie ; le
+        # type vu par l'appelant est le scalaire. Pas `int&` non constante : le bouchon passe
+        # par valeur, et une modification attendue par le harnais (`echange(a, b)`) serait
+        # perdue sans bruit — écartée, le harnais qui l'appelle ne compile pas (message au prof).
+        # Pas `&&` (une variable ne s'y lie pas), ni pointeur ni tableau.
         if any(c in param_group for c in "*[") or "&&" in param_group:
             return None
-        param_group = param_group.replace("&", " ")
+        if "&" in param_group:
+            if "const" not in param_group.split("=")[0].split("&")[0].split():
+                return None
+            param_group = param_group.replace("&", " ")
         pieces = [m for m in param_group.split("=")[0].split() if m != "const"]
         # Un type SEUL (parametre sans nom : `Rect(int, int);`, declaration dans la classe et
         # definition dehors — l'ecriture C++ la plus courante), ou un type et un NOM. Le type
@@ -3983,9 +4008,11 @@ def cpp_object_dispatch(obj_list):
         # constructeur demandé n'est pas accessible, rendait `new K(…)` illégal — « Échec de
         # compilation » dans du code que l'étudiant n'a pas écrit, 0 sur une réponse juste. Le
         # trait intégré de gcc évite tout en-tête ; la branche écartée n'est pas instanciée.
+        # `moodit_A&...` : les arguments passés sont des VARIABLES (lvalues), comme dans
+        # `new moodit_K(moodit_x...)` ; tester des rvalues refusait à tort `Rect(int&, int&)`.
         stacks.append("template <class moodit_K, class... moodit_A>\n"
                       "static moodit_K *moodit_cree(moodit_A... moodit_x) {\n"
-                      "    if constexpr (__is_constructible(moodit_K, moodit_A...)) {\n"
+                      "    if constexpr (__is_constructible(moodit_K, moodit_A&...)) {\n"
                       "        return new moodit_K(moodit_x...);\n"
                       "    } else {\n"
                       "        return 0;\n"

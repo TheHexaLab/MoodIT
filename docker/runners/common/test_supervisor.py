@@ -783,10 +783,26 @@ class SignatureFormsTest(unittest.TestCase):
         self.assertEqual(3, server.count("ParArite("))
 
     def test_cpp_reference_parameters(self):
-        self.assertEqual(["int", "double"], supervisor._c_param_types("const int& x, double &y"))
+        self.assertEqual(["int", "double"], supervisor._c_param_types("const int& x, const double &y"))
         self.assertEqual(["int"], supervisor._c_param_types("const int &"))
+        self.assertEqual(["long"], supervisor._c_param_types("long const& x"))
+        # Non constante : la modification ne reviendrait pas au harnais — écartée.
+        self.assertIsNone(supervisor._c_param_types("int &a"))
+        self.assertIsNone(supervisor._c_param_types("int& a, const int& b"))
         self.assertIsNone(supervisor._c_param_types("int&& x"))
         self.assertIsNone(supervisor._c_param_types("int *x"))
+        # Construction testée sur des variables (lvalues), comme l'appel réel.
+        stacks, _ = supervisor.cpp_object_dispatch([("Rect", [["int"]], [])])
+        self.assertIn("__is_constructible(moodit_K, moodit_A&...)", stacks)
+
+    def test_cpp_default_on_the_prototype_only(self):
+        # Revue #246 : prototype en haut (valeur par défaut), définition après `main` (sans).
+        src = ("int somme(int n, int acc = 0);\nint main() { return somme(3); }\n"
+               "int somme(int n, int acc) { return n == 0 ? acc : somme(n - 1, acc + n); }\n")
+        self.assertEqual([("int", "somme", ["int", "int"]), ("int", "somme", ["int"])],
+                         supervisor.c_signatures(src, cpp=True))
+        # En C, pas de valeur par défaut ; un prototype seul ne crée rien.
+        self.assertEqual([], supervisor.c_signatures("int f(int x);\n", cpp=True))
         self.assertEqual([("int", "carre", ["int"])],
                          supervisor.c_signatures("int carre(const int& x) { return x * x; }\n", cpp=True))
 
@@ -3202,7 +3218,7 @@ class Review246eTest(unittest.TestCase):
         self.assertIn("    Calculatrice() {", supervisor.cpp_object_stub(obj_list))
         stacks, branches = supervisor.cpp_object_dispatch(obj_list)
         self.assertIn("::Calculatrice *moodit_o = moodit_cree< ::Calculatrice >();", branches)
-        self.assertIn("__is_constructible(moodit_K, moodit_A...)", stacks)
+        self.assertIn("__is_constructible(moodit_K, moodit_A&...)", stacks)
         self.assertNotIn("new ::", branches)
 
     # ── Rust ─────────────────────────────────────────────────────────────────────────────

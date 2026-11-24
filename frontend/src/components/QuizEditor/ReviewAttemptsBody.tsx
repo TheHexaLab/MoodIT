@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { Spinner } from '../Spinner/Spinner';
 import { type MaybePromise, type ReviewAttempt } from './editorTypes';
@@ -44,7 +44,8 @@ export function ReviewAttemptsBody({
   const focusAfterRef = useRef<number | 'intro' | null>(null);
   const buttonRefs = useRef(new Map<number, HTMLButtonElement>());
   const introRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
+  // Effet de MISE EN PAGE : focus posé dans la mise à jour qui retire la ligne (cf. AttemptBar).
+  useLayoutEffect(() => {
     const focusAfter = focusAfterRef.current;
     if (focusAfter == null) return;
     focusAfterRef.current = null;
