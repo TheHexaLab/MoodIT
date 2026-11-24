@@ -3822,7 +3822,9 @@ def cpp_object_api(source):
                     method_list.append((c_scalar_type(meth.group(1)), meth.group(2), types,
                                         trailing_defaults(meth.group(3))))
         ctors = [types for _r, _n, types in with_default_arities(ctor_entries)]
-        method_list = with_default_arities(method_list)
+        # Une fois par signature : `int valeur() const` et `int valeur()` (surcharge sur
+        # `const`) donnaient deux bouchons identiques, refusés par le compilateur du noteur.
+        method_list = dedupe_signatures(with_default_arities(method_list))
         # AUCUN constructeur declare : C++ fournit le constructeur par defaut, comme Java et
         # C#. Sans lui, `Calculatrice c; c.additionner(2, 3)` n'etait pas notable. Pas pour une
         # classe DERIVEE : sa construction par defaut depend de celle de sa base, et un `K()`
@@ -6413,17 +6415,30 @@ C_PREPROCESS_CAP = 16 * 1024 * 1024
 C_PREPROCESSED = {}
 
 
-def c_student_segment(preprocessed, file_name):
+def c_student_segment(preprocessed, file_name, budget=None):
     """Lignes du fichier soumis LUI-MÊME (`file_name` au niveau 0 des inclusions) dans la sortie
-    de `gcc -E`. FONCTION PURE (testée).
+    de `gcc -E`, ou None si elles dépassent `budget` octets. FONCTION PURE (testée).
+
+    `preprocessed` : un texte (tests), ou un itérable de lignes en OCTETS — le fichier `pp.i`
+    ouvert en binaire, lu en flux : rien d'autre que les lignes gardées n'est retenu, et la
+    lecture s'arrête au premier octet au-delà du budget. Décoder puis découper toute la sortie
+    (jusqu'à 16 Mio) coûtait plus de 500 Mio au superviseur pour 90 Ko de code soumis (lignes
+    courtes en masse), et le bloquait sans JSON dans un conteneur à 512 Mo (revue #246).
 
     La pile des inclusions suit les drapeaux des marqueurs (1 empile, 2 dépile). Sans elle, un
     fichier qui s'inclut lui-même (`#if __INCLUDE_LEVEL__ < 150 && __has_include("pp.cpp")`,
     faux à la vraie compilation) était compté à chaque niveau : 97 Ko devenaient 14 Mo, que
-    l'extraction en Python lisait jusqu'au mur du conteneur — mort sans verdict (revue #246)."""
-    keep, stack = [], []
-    for line in (preprocessed or "").splitlines():
-        marker = C_LINE_MARKER.match(line)
+    l'extraction en Python lisait jusqu'au mur du conteneur — mort sans verdict (revue #246).
+    Un `#line` soumis peut tromper la pile ; le budget, lui, borne tout."""
+    if isinstance(preprocessed, str):
+        lines = [line.encode("utf-8") for line in preprocessed.splitlines()]
+    else:
+        lines = preprocessed or ()
+    keep, stack, kept = [], [], 0
+    for raw in lines:
+        marker = None
+        if raw.startswith(b"#"):
+            marker = C_LINE_MARKER.match(raw[:4096].decode("utf-8", "replace"))
         if marker:
             name, flags = marker.group(1), marker.group(2).split()
             if "1" in flags:
@@ -6438,7 +6453,10 @@ def c_student_segment(preprocessed, file_name):
             else:
                 stack = [name]
         elif len(stack) == 1 and stack[0] == file_name:
-            keep.append(line)
+            kept += len(raw)
+            if budget is not None and kept > budget:
+                return None
+            keep.append(raw.decode("utf-8", "replace").rstrip(chr(10)))
     return chr(10).join(keep)
 
 
@@ -6471,15 +6489,14 @@ def c_directives_only_source(student_source, compiler, std, case_dir, ext):
             # Sans suivre de lien, fichier ordinaire seulement (chantier de l'UID étudiant).
             fd = os.open(target, os.O_RDONLY | O_NO_LINK)
             with os.fdopen(fd, "rb") as f:
-                if stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                    data = f.read(C_PREPROCESS_CAP + 1)
-                    if len(data) <= C_PREPROCESS_CAP:
-                        segment = c_student_segment(data.decode("utf-8", "replace"), name)
-                        # Borne de défense : aux directives traitées, le fichier ne peut que
-                        # raccourcir (branches écartées). Plus long, il n'est pas le fichier
-                        # soumis : retour au texte brut, jamais une extraction démultipliée.
-                        if len(segment) > len(student_source) + 1024:
-                            segment = None
+                info = os.fstat(f.fileno())
+                if stat.S_ISREG(info.st_mode) and info.st_size <= C_PREPROCESS_CAP:
+                    # Budget : aux directives traitées, le fichier ne peut que raccourcir
+                    # (branches écartées). Au-delà, ce n'est pas le fichier soumis : retour au
+                    # texte brut (None), jamais une extraction démultipliée — et la lecture
+                    # s'arrête là, en flux, sans charger le reste.
+                    segment = c_student_segment(
+                        f, name, budget=len(student_source.encode("utf-8")) + 1024)
     except OSError:
         segment = None
     finally:

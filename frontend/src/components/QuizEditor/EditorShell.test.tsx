@@ -197,4 +197,24 @@ describe('EditorShell — en-tête et navigation', () => {
     );
     expect(body().scrollTop).toBe(0);
   });
+
+  it('changer de vue : focus perdu → chevron ; focus dans une AUTRE fenêtre → laissé en place', () => {
+    const view = (key: string) => (
+      <EditorShell title="Éditeur" onClose={() => {}} onBack={() => {}} scrollResetKey={key}>
+        <p>Contenu</p>
+      </EditorShell>
+    );
+    const { rerender } = render(view('a'));
+    // Focus perdu (sur <body>) : rendu au chevron.
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(view('b'));
+    expect(document.activeElement).toBe(screen.getByLabelText('Retour'));
+    // Focus dans une autre fenêtre modale ouverte par-dessus (revue #246) : il y reste.
+    const autre = document.createElement('button');
+    document.body.appendChild(autre);
+    autre.focus();
+    rerender(view('c'));
+    expect(document.activeElement).toBe(autre);
+    autre.remove();
+  });
 });

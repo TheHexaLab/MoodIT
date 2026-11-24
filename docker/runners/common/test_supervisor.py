@@ -749,6 +749,37 @@ class SignatureFormsTest(unittest.TestCase):
                   '# 2 "pp.cpp" 2\n# 2 "pp.cpp" 2\nint b;\n# 1 "/usr/include/x.h" 1 3\nint h;\n'
                   '# 3 "pp.cpp" 2\nint c;\n')
         self.assertEqual("int a;\nint b;\nint c;", supervisor.c_student_segment(nested, "pp.cpp"))
+        # Budget en octets : dépassé, None (repli sur le texte brut) — sans avoir lu la suite.
+        self.assertIsNone(supervisor.c_student_segment(nested, "pp.cpp", budget=10))
+        self.assertEqual("int a;\nint b;\nint c;",
+                         supervisor.c_student_segment(nested, "pp.cpp", budget=30))
+
+    def test_c_preprocessor_segment_is_streamed_within_budget(self):
+        # Revue #246 : toute la sortie de `gcc -E` était décodée et découpée avant la borne ; des
+        # millions de lignes courtes coûtaient plus de 500 Mio au superviseur. En flux, la
+        # mémoire reste bornée par le budget, quelle que soit la longueur de la sortie.
+        import tracemalloc
+        produced = []
+
+        def lines():
+            yield b'# 1 "pp.c"\n'
+            for _ in range(2_000_000):
+                produced.append(1) if len(produced) < 1 else None
+                yield b"x\n"
+        tracemalloc.start()
+        try:
+            result = supervisor.c_student_segment(lines(), "pp.c", budget=10_000)
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertIsNone(result)
+        self.assertLess(peak, 2 * 1024 * 1024)
+
+    def test_cpp_const_overload_gives_one_stub(self):
+        api = {n: m for n, _c, m in supervisor.cpp_object_api(
+            "class Compteur {\n  int v;\npublic:\n  Compteur(int x) : v(x) {}\n"
+            "  int valeur() const { return v; }\n  int valeur() { return v; }\n};\n")}
+        self.assertEqual([("int", "valeur", [])], api["Compteur"])
         # Sans directive conditionnelle : pas de préprocesseur (None), le texte brut est lu.
         self.assertIsNone(supervisor.c_directives_only_source("int f(int x) { return x; }", "gcc",
                                                               "-std=gnu17", ".", "c"))

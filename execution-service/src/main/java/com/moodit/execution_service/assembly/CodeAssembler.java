@@ -605,6 +605,9 @@ public class CodeAssembler {
                 // réponse conforme AVANT d'être appelé pour la faire consommer comme réponse au
                 // premier appel (muter console.log ne couvre pas process.stdout.write).
                 + "const __moodit_crypto=require('crypto'); let __moodit_buf='';\n"
+                // Décodeur en FLUX : un caractère UTF-8 coupé entre deux lectures de 64 Kio
+                // devenait U+FFFD, et une réponse juste non ASCII était notée fausse.
+                + "const __moodit_utf8=new (require('string_decoder').StringDecoder)('utf8');\n"
                 + "function __moodit_rpc(o){\n"
                 + "  o.id=__moodit_crypto.randomBytes(8).toString('hex');\n"
                 + "  __moodit_child.stdin.write(JSON.stringify(o)+__moodit_NL);\n"
@@ -620,7 +623,7 @@ public class CodeAssembler {
                 + "    let n; try{ n=__moodit_fs.readSync(__moodit_fd,b,0,b.length,null); }"
                 + "catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
                 + "    if(n===0) throw new Error('processus etudiant termine');\n"
-                + "    __moodit_buf+=b.toString('utf8',0,n);\n"
+                + "    __moodit_buf+=__moodit_utf8.write(b.subarray(0,n));\n"
                 + "  }\n"
                 + "}\n"
                 + proxies
@@ -660,6 +663,8 @@ public class CodeAssembler {
                 + "catch(__moodit_e){ let __moodit_x; try{ __moodit_x=exports[__moodit_n]; }"
                 + "catch(__moodit_f){} if(__moodit_x===void 0) throw __moodit_e; return __moodit_x; } };\n"
                 + "function __moodit_serve(){ const __moodit_objs={}; let __moodit_hid=0, __moodit_buf='';\n"
+                // Texte décodé en flux par le flux lui-même (caractère coupé entre deux paquets).
+                + "__moodit_process.stdin.setEncoding('utf8');\n"
                 + "__moodit_process.stdin.on('data', __moodit_d=>{ __moodit_buf+=__moodit_d; let __moodit_i;\n"
                 + "  while((__moodit_i=__moodit_buf.indexOf(__moodit_NL))>=0){"
                 + " const __moodit_line=__moodit_buf.slice(0,__moodit_i);"
@@ -837,19 +842,29 @@ public class CodeAssembler {
         //     `sed "s/^$__id|//p"` : l'identifiant passait alors en argument d'un processus, donc
         //     lisible par tout voisin du même UID.
         String dispatcher = "read -r __moodit_id __moodit_name __moodit_rest\n"
+                // ARGUMENTS codés UN PAR UN (`x` + hexadécimal, `x` seul pour un argument vide),
+                // décodés AVANT de charger le code soumis : envoyés tels quels sur la ligne, ils
+                // étaient redécoupés et développés — `premier "le chat"`, `nb_args "" x` et
+                // `premier "*"` rendaient une réponse fausse à une fonction juste.
+                + "__moodit_args=()\n"
+                + "for __moodit_a in $__moodit_rest; do"
+                + " __moodit_e=$(printf '%s' \"${__moodit_a#x}\" | sed 's/../\\\\x&/g');"
+                + " __moodit_x=$(printf '%b.' \"$__moodit_e\"); __moodit_args+=(\"${__moodit_x%.}\"); done\n"
                 + "__moodit_val=$(unset __moodit_id;"
                 + " . ./solution.sh >/dev/null 2>&1;"
-                + " $__moodit_name $__moodit_rest)\n"
+                + " \"$__moodit_name\" \"${__moodit_args[@]}\")\n"
                 // STATUT de l'appel réel (celui de la substitution) : il voyage avec la valeur.
                 // Le mandataire renvoyait toujours 0 — `if est_pair 3` était vrai pour toute
                 // réponse, et une réponse juste qui renvoie 1 était notée fausse.
                 + "__moodit_st=$?\n"
-                // La valeur part en HEXADÉCIMAL sur UNE ligne : le noteur ne retient que la ligne
-                // « id|… », une valeur multi-ligne perdait donc tout sauf sa première — réponse
-                // juste notée fausse. `-v` est OBLIGATOIRE : sans lui, od compresse les répétitions
-                // en « * » et la valeur décodée serait fausse.
-                + "printf '%s|%s|%s\\n' \"$__moodit_id\" \"$__moodit_st\" "
-                + "\"$(printf '%s' \"$__moodit_val\" | od -An -vtx1 | tr -d ' \n')\"\n";
+                // En-tête « id|statut|longueur en octets », puis la valeur BRUTE : le noteur lit
+                // l'en-tête (ligne courte), puis exactement `longueur` octets par `head -c`, qui
+                // lit par blocs. La valeur passait en hexadécimal sur la ligne de l'en-tête, lue
+                // octet par octet par `read` : ~2 s par Mo, une réponse juste de 1,5 Mo dépassait
+                // le temps limite par défaut (revue #246).
+                + "__moodit_len=$(printf '%s' \"$__moodit_val\" | wc -c)\n"
+                + "printf '%s|%s|%s\\n' \"$__moodit_id\" \"$__moodit_st\" \"$((__moodit_len))\"\n"
+                + "printf '%s' \"$__moodit_val\"\n";
         // Le noteur entier est UN SEUL bloc `{ … }` : bash le lit et l'analyse en entier avant
         // d'en exécuter la première commande. Il peut donc VIDER son propre fichier avant tout
         // appel au code soumis. L'effacer ne suffisait pas : bash garde le script ouvert (fd 255)
@@ -859,21 +874,21 @@ public class CodeAssembler {
                 + ": > grader.sh 2>/dev/null; rm -f grader.sh 2>/dev/null\n"
                 + "__moodit_srv=" + shellSingleQuote(dispatcher) + "\n"
                 + "__moodit_rpc() { local __n=\"$1\"; shift;"
-                + " local __id; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
-                + " printf '%s\\n' \"$__id $__n $*\" | bash -c \"$__moodit_srv\" 2>/dev/null"
-                // Ligne « id|statut|hex » : la valeur est décodée, puis le dernier élément du
-                // tube SORT avec le statut de l'appel réel — c'est celui du tube, donc du
-                // mandataire. Statut illisible ou réponse absente → 1, jamais 0.
+                + " local __id __q __a; __id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \\n');"
+                // Un argument = un mot `x` + son hexadécimal (cf. le répartiteur).
+                + " __q=\"$__id $__n\"; for __a in \"$@\"; do"
+                + " __q=\"$__q x$(printf '%s' \"$__a\" | od -An -vtx1 | tr -d ' \\n')\"; done;"
+                + " printf '%s\\n' \"$__q\" | bash -c \"$__moodit_srv\" 2>/dev/null"
+                // En-tête « id|statut|longueur » de CET appel, puis exactement `longueur`
+                // octets de valeur, et le saut de ligne qu'une sortie de commande porte ; le
+                // dernier élément du tube SORT avec le statut de l'appel réel — celui du tube,
+                // donc du mandataire. En-tête illisible ou absent → 1, jamais 0.
                 + " | { while IFS= read -r __l; do case \"$__l\" in \"$__id|\"*)"
-                + " __l=\"${__l#*|}\"; __moodit_dec \"${__l#*|}\";"
-                + " case \"${__l%%|*}\" in ''|*[!0-9]*) exit 1;; esac; exit \"${__l%%|*}\";;"
+                + " __l=\"${__l#*|}\"; __s=\"${__l%%|*}\"; __z=\"${__l#*|}\";"
+                + " case \"$__s\" in ''|*[!0-9]*) exit 1;; esac;"
+                + " case \"$__z\" in ''|*[!0-9]*) exit 1;; esac;"
+                + " head -c \"$__z\"; printf '\\n'; exit \"$__s\";;"
                 + " esac; done; exit 1; }; }\n"
-                // Décodage en UNE passe (pas de xxd dans l'image) : sed fait de chaque paire
-                // d'hexas un `\xHH`, que printf %b rend en octet ; puis le saut de ligne que
-                // la ligne unique du protocole avait absorbé. Une boucle octet par octet
-                // (`${__h:__i:2}` coûte O(n) en bash) prenait un temps QUADRATIQUE : une valeur
-                // de 15 Ko dépassait le temps limite, réponse juste notée « Interrompu ».
-                + "__moodit_dec() { local __e; __e=$(printf '%s' \"$1\" | sed 's/../\\\\x&/g'); printf '%b\\n' \"$__e\"; }\n"
                 + SHADOW_SLOT
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"
@@ -1437,6 +1452,7 @@ public class CodeAssembler {
                 + "function isNode(v){ return v && typeof v==='object' && typeof v.nodeType==='number'; }\n"
                 + "function wrap(v){ if(isNode(v)) return {node:store(v)}; if(typeof v==='function') return {fn:true}; return {value:(v===undefined?null:v)}; }\n"
                 + "const NL=String.fromCharCode(10); let buf='';\n"
+                + "process.stdin.setEncoding('utf8');\n"
                 + "process.stdin.on('data', function(d){ buf+=d; let i;\n"
                 + "  while((i=buf.indexOf(NL))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);\n"
                 + "    let m; try{ m=JSON.parse(line);}catch(e){continue;}\n"
@@ -1469,7 +1485,8 @@ public class CodeAssembler {
                 // un console.log honnête cassait le JSON de la première ligne (réponse juste
                 // notée 0). Tampon PERSISTANT : l'ancien lecteur jetait tout ce qui suivait
                 // la première ligne à chaque appel.
-                + "const crypto=require('crypto'); let buf='';\n"
+                + "const crypto=require('crypto'); let buf='';"
+                + " const utf8=new (require('string_decoder').StringDecoder)('utf8');\n"
                 + "function rpc(o){ o.id=crypto.randomBytes(8).toString('hex');\n"
                 + "  child.stdin.write(JSON.stringify(o)+NL); const b=Buffer.alloc(1<<20);\n"
                 + "  for(;;){ let i;\n"
@@ -1479,7 +1496,7 @@ public class CodeAssembler {
                 + "      if(!r.ok) throw new Error(r.error); return r; }\n"
                 + "    let n; try{ n=fs.readSync(outFd,b,0,b.length,null); }catch(e){ if(e.code==='EAGAIN') continue; throw e; }\n"
                 + "    if(n===0) throw new Error('processus etudiant termine'); \n"
-                + "    buf+=b.toString('utf8',0,n); } }\n"
+                + "    buf+=utf8.write(b.subarray(0,n)); } }\n"
                 + "function uw(r){ if(r.node!==undefined) return elp(r.node); return r.value; }\n"
                 + "function elp(handle){ return new Proxy({__h:handle}, { get(t,p){ if(p==='__h')return handle;\n"
                 + "  const r=rpc({op:'get',handle,name:String(p)});\n"

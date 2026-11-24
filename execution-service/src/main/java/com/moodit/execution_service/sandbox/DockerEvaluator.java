@@ -275,7 +275,12 @@ public class DockerEvaluator {
             case "csharp" -> java.util.regex.Pattern.compile(
                     "(?m)(?:^|(?<=[{};]))[ \\t]*(?:\\[[^\\[\\]\\n]*\\][ \\t]*){0,8}"
                     + "\\[\\s*(?:[^\\[\\]\\n]*,\\s*)?(?:\\w+\\s*\\.\\s*){0,8}"
-                    + "(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b");
+                    + "(?:Test|TestCase|TestCaseSource|Theory|TestFixture)\\b[^\\[\\]\\n]*\\]"
+                    // ... SUIVI d'une déclaration (autre attribut, modificateur, ou type puis nom
+                    // puis `(`) : un initialiseur d'index `{ [Mode.Test] = 3 }` ou un indexeur
+                    // écrit en continuation (`[Test] == 3`) n'en sont pas (revue #246).
+                    + "\\s*(?:\\[|(?:public|private|protected|internal|static|async|void|override"
+                    + "|virtual|sealed|abstract|partial|class)\\b|[\\w.<>,?\\[\\]]+\\s+\\w+\\s*[(<])");
             case "go" -> java.util.regex.Pattern.compile("func\\s+Test\\w*\\s*\\(");
             case "rust" -> java.util.regex.Pattern.compile(
                     "#\\s*\\[\\s*(?:\\w+\\s*::\\s*){0,8}test\\s*\\]|#\\s*\\[\\s*cfg\\s*\\(\\s*test\\s*\\)");

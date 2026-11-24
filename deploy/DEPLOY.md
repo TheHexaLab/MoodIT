@@ -148,7 +148,10 @@ Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
    Caddyfile chargé par Caddy diffère de celui du dépôt, le script recrée Caddy : un simple
    `restart` garderait l'ancien fichier monté (#241).
 4. Si la PR modifie `deploy/update.sh` lui-même, c'est encore l'ancienne version qui s'exécute
-   à ce lancement : relancer `./deploy/update.sh --force` pour appliquer la nouvelle.
+   à ce lancement : relancer `./deploy/update.sh --force` pour appliquer la nouvelle. **Pour le
+   premier déploiement de #116, suivre d'abord l'encadré « Premier déploiement de #116 »
+   ci-dessous** (images runner construites avant, contrôle préalable des harnais) : l'ancien
+   script ne construit pas les images runner, et chaque exécution répondrait 502.
 
 ### Sauvegarde de la base
 
@@ -280,7 +283,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > ```
 >
 > (`pg_dump` avertit d'une clé étrangère circulaire sur `language` : `--disable-triggers` est
-> justement là pour la charger.) Le copier sur la machine de dev, puis l'effacer du serveur.
+> justement là pour la charger.) Le copier sur la machine de dev, puis l'effacer du serveur — et
+> de la machine de dev une fois le contrôle fini (il porte les harnais, donc les cas cachés).
 > Après une correction faite dans l'éditeur de la prod, reprendre un dump frais avant de
 > rejouer.
 >
@@ -291,10 +295,11 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > ```bash
 > # Sous-shell `set -euo pipefail` : la PREMIÈRE étape en échec arrête tout (dump illisible,
 > # base qui n'est pas celle de la prod, migration refusée), et la base jetable est supprimée
-> # à la sortie dans tous les cas. Le code de sortie du bloc est celui du contrôle.
+> # à la sortie dans tous les cas, avec son volume. Le code de sortie du bloc est celui du
+> # contrôle.
 > (
 > set -euo pipefail
-> trap 'docker rm -f moodit_precheck >/dev/null 2>&1' EXIT
+> trap 'docker rm -fv moodit_precheck >/dev/null 2>&1' EXIT   # -v : son volume de données aussi
 > # Mêmes POSTGRES_USER / POSTGRES_DB que la prod (.env.docker), pour que le dump s'applique tel quel.
 > docker run -d --name moodit_precheck -e POSTGRES_USER="$POSTGRES_USER" \
 >   -e POSTGRES_PASSWORD=precheck -e POSTGRES_DB="$POSTGRES_DB" postgres:16

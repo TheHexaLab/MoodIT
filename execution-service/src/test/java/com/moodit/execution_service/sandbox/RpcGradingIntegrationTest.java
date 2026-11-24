@@ -1098,6 +1098,17 @@ class RpcGradingIntegrationTest {
                 int somme(int n, int acc = 0) { return n == 0 ? acc : somme(n - 1, acc + n); }
                 int carre(const int& x) { return x * x; }
                 """, "l * h", "l + h");
+        // C++ : méthode surchargée sur `const` — un seul bouchon (deux identiques ne
+        // compilaient pas dans le noteur).
+        gradedThenWrong("C++", "Compteur c(3); return c.valeur() == 3;", """
+                class Compteur {
+                    int v;
+                public:
+                    Compteur(int x) : v(x) {}
+                    int valeur() const { return v; }
+                    int valeur() { return v; }
+                };
+                """, "Compteur(int x) : v(x)", "Compteur(int x) : v(x + 1)");
         // C++ : valeur par défaut sur le PROTOTYPE, définition après `main` sans elle.
         gradedThenWrong("C++", "return somme(4) == 10 && somme(4, 1) == 11;", """
                 int somme(int n, int acc = 0);

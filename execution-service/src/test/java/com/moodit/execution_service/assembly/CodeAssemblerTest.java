@@ -199,11 +199,11 @@ class CodeAssemblerTest {
         String grader = a.files().get(0).content();
         assertThat(grader).startsWith("{\n: > grader.sh 2>/dev/null; rm -f grader.sh")
                 .endsWith("fi\n}\n");
-        // La valeur voyage en HEX sur UNE ligne (od -v : sans lui, les répétitions se
-        // compressent en « * ») et le noteur la décode : une valeur multi-ligne perdait tout
-        // sauf sa première ligne — réponse juste notée fausse.
+        // La valeur voyage BRUTE après un en-tête « id|statut|longueur » et le noteur en lit
+        // exactement la longueur (head -c) ; les arguments partent un par un en hexadécimal
+        // (od -v : sans lui, les répétitions se compressent en « * »).
         assertThat(a.files().get(0).content())
-                .contains("od -An -vtx1").contains("__moodit_dec");
+                .contains("head -c \"$__z\"").contains("od -An -vtx1").contains("wc -c");
     }
 
     @Test
@@ -533,7 +533,7 @@ class CodeAssemblerTest {
         assertThat(grader).contains("for __moodit_n in test est_pair; do if [ -n \"$(type -t");
         assertThat(grader.indexOf("type -t")).isLessThan(grader.indexOf("test() { __moodit_rpc"));
         // Le statut de l'appel réel voyage avec la valeur et devient celui du mandataire.
-        assertThat(grader).contains("__moodit_st=$?").contains("exit \"${__l%%|*}\"");
+        assertThat(grader).contains("__moodit_st=$?").contains("exit \"$__s\"");
         // Sans fonction soumise : pas de boucle de refus (une liste vide serait inutile).
         assertThat(assembler.assemble("Bash", "x=1", "true", "N").files().get(0).content())
                 .doesNotContain("for __moodit_n in");

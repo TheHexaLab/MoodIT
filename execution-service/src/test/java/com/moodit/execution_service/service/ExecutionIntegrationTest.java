@@ -93,7 +93,8 @@ class ExecutionIntegrationTest {
         assertThat(passes("Python",
                 // Sonde : la BONNE valeur seulement si elle a trouvé le nonce — le noteur exige
                 // aussi une sortie 0, une fuite qui se contenterait de le publier passerait.
-                "import re, sys\ndef doubler(n):\n    s = open(__file__).read()\n"
+                "import re, sys\ndef doubler(n):\n    try:\n        s = open('grader.py').read()\n"
+                        + "    except OSError:\n        s = ''\n"
                         + "    m = re.search(r'MOODIT_OK_[0-9a-f]+', s)\n"
                         + "    sys.stderr.write(m.group() if m else 'X')\n    return n * 2 if m else 0",
                 "return doubler(5) == 10")).isFalse();
@@ -137,9 +138,22 @@ class ExecutionIntegrationTest {
         assertThat(passes("JavaScript", "function doubler(n){ return 0; }", "return doubler(5) === 10;")).isFalse();
         assertThat(passes("JavaScript",
                 "const fs = require('fs');\nfunction doubler(n){"
-                        + " try{ const m = fs.readFileSync(__filename,'utf8').match(/MOODIT_OK_[0-9a-f]+/);"
+                        + " try{ const m = fs.readFileSync('grader.js','utf8').match(/MOODIT_OK_[0-9a-f]+/);"
                         + " if(m){ process.stderr.write(m[0]); return n * 2; } }catch(e){} return 0; }",
                 "return doubler(5) === 10;")).isFalse();
+    }
+
+    @Test
+    void javascript_non_ascii_values_beyond_one_read_survive() {
+        // Revue #246 : un caractère UTF-8 coupé entre deux lectures de 64 Kio devenait U+FFFD,
+        // côté noteur (valeur rendue) comme côté serveur (argument) — réponse juste notée 0.
+        requireRuntime("javascript");
+        assertThat(passes("JavaScript", "function f(){ return 'é'.repeat(40000); }",
+                "return f() === 'é'.repeat(40000);")).isTrue();
+        assertThat(passes("JavaScript", "function g(s){ return s === 'é'.repeat(40000) ? 1 : 0; }",
+                "return g('é'.repeat(40000)) === 1;")).isTrue();
+        assertThat(passes("JavaScript", "function f(){ return 'é'.repeat(39999); }",
+                "return f() === 'é'.repeat(40000);")).isFalse();
     }
 
     @Test
@@ -157,7 +171,7 @@ class ExecutionIntegrationTest {
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return $n * 2; }", "return doubler(5) === 10;")).isTrue();
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return 0; }", "return doubler(5) === 10;")).isFalse();
         assertThat(passes("PHP",
-                "<?php\nfunction doubler($n){ $s = file_get_contents(__FILE__);"
+                "<?php\nfunction doubler($n){ $s = @file_get_contents('grader.php');"
                         + " if (preg_match('/MOODIT_OK_[0-9a-f]+/', $s, $m)) { fwrite(STDERR, $m[0]); return $n * 2; }"
                         + " return 0; }",
                 "return doubler(5) === 10;")).isFalse();
@@ -180,20 +194,28 @@ class ExecutionIntegrationTest {
                 "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isTrue();
         assertThat(passes("Bash", "lister() { printf 'a'; }",
                 "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isFalse();
-        // Valeur VOLUMINEUSE (~60 Ko) au temps limite par défaut : le décodage octet par octet
-        // était quadratique, et une réponse juste dépassait le temps limite (revue #246).
+        // Valeur VOLUMINEUSE au temps limite par défaut : décodée octet par octet, puis lue
+        // octet par octet par `read`, une réponse juste dépassait le temps limite (revue #246).
         assertThat(passes("Bash", "nombres() { seq 1 \"$1\"; }",
                 "[ \"$(nombres 12000)\" = \"$(seq 1 12000)\" ]")).isTrue();
+        assertThat(passes("Bash", "gen() { head -c 1500000 /dev/zero | tr '\\0' a; }",
+                "v=$(gen); [ \"${#v}\" -eq 1500000 ]")).isTrue();
+        // ARGUMENTS : espaces, argument vide, caractère de motif — passés tels quels.
+        assertThat(passes("Bash", "premier() { printf '%s' \"$1\"; }\nnb_args() { echo $#; }",
+                "[ \"$(premier 'le chat')\" = 'le chat' ] && [ \"$(nb_args '' x)\" = 2 ]"
+                        + " && [ \"$(premier '*')\" = '*' ]")).isTrue();
+        assertThat(passes("Bash", "premier() { printf '%s' \"$2\"; }\nnb_args() { echo $#; }",
+                "[ \"$(premier 'le chat')\" = 'le chat' ]")).isFalse();
         assertThat(passes("Bash",
                 "doubler() { if grep -oE 'MOODIT_OK_[0-9a-f]+' grader.sh 2>/dev/null >&2;"
                         + " then echo $(( $1 * 2 )); else echo 0; fi; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
         // CONTREFAÇON de la ligne de réponse : le code de premier niveau consomme stdin pour y
-        // apprendre l'identifiant de l'appel, puis publie lui-même « <id>|0|3130 » (statut 0,
-        // valeur « 10 » en hexadécimal, le format du protocole). Il ne le voit plus (lu avant
+        // apprendre l'identifiant de l'appel, puis publie lui-même « <id>|0|2 » suivi de « 10 »
+        // (statut 0, longueur, valeur : le format du protocole). Il ne le voit plus (lu avant
         // son chargement) et sa sortie est capturée, pas publiée.
         assertThat(passes("Bash",
-                "__vol=$(cat); printf '%s|0|3130\\n' \"${__vol%% *}\"\n"
+                "__vol=$(cat); printf '%s|0|2\\n10' \"${__vol%% *}\"\n"
                         + "doubler() { echo 0; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }

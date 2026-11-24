@@ -143,10 +143,11 @@ export function EditorShell({
       firstViewRef.current = false;
       return;
     }
-    const panel = headerRef.current?.parentElement;
+    // Focus PERDU seulement (absent, sur <body> ou détaché) : un focus posé dans une autre
+    // fenêtre modale au-dessus de l'éditeur (confirmation de suppression ouverte pendant un
+    // chargement) y reste — le ramener sur le chevron, derrière elle, coinçait le clavier.
     const active = document.activeElement;
-    const orphaned =
-      !active || active === document.body || !active.isConnected || !panel?.contains(active);
+    const orphaned = !active || active === document.body || !active.isConnected;
     if (!orphaned) return;
     (backRef.current ?? titleRef.current)?.focus({ preventScroll: true });
   }, [scrollResetKey]);

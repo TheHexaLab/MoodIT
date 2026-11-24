@@ -405,7 +405,19 @@ export function QuizEditor({
    * l'enseignant a déjà un compte relu au serveur, que le décompte fausserait.
    */
   function markRegraded(quizId: number) {
-    if (viewRef.current.kind !== 'review' || viewRef.current.quizId !== quizId) return;
+    if (viewRef.current.kind !== 'review' || viewRef.current.quizId !== quizId) {
+      // Revenu à la LISTE pendant la relance : sa lecture a pu être servie avant que la relance
+      // soit enregistrée, et garder un « à revoir » de trop. On la relit une fois la relance
+      // acceptée. (Ailleurs, le retour à la liste la relira de toute façon.)
+      if (viewRef.current.kind === 'list' && fetchQuizzes) {
+        Promise.resolve(fetchQuizzes(courseId))
+          .then((all) => setQuizzes(all))
+          .catch(() => {
+            /* échec : la liste affichée reste ; le prochain retour la recale */
+          });
+      }
+      return;
+    }
     setQuizzes((list) =>
       list.map((q) =>
         q.id === quizId

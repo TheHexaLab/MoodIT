@@ -128,7 +128,8 @@ class DockerEvaluatorTest {
         assertThat(DockerEvaluator.frameworkMarkerFound("rust", "#[" + "a::".repeat(50_000))).isFalse();
         // Les formes reelles, qualifiees, restent reconnues.
         assertThat(DockerEvaluator.frameworkMarkerFound("java", "@org.junit.jupiter.api.Test")).isTrue();
-        assertThat(DockerEvaluator.frameworkMarkerFound("csharp", "[NUnit.Framework.TestCase(1)]")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[NUnit.Framework.TestCase(1)] public void T(int x) { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("rust", "#[tokio::test]")).isTrue();
     }
 
@@ -161,11 +162,22 @@ class DockerEvaluatorTest {
                 "return f(`func TestX(`) == 1")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",
                 "q := `\"`\nreturn f(\"func TestX(\") == 1")).isFalse();
+        // Initialiseur d'index et indexeur en continuation : pas des attributs (revue #246).
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "var d = new Dictionary<Mode, int> { [Mode.Test] = 3 };\nreturn d[Mode.Test] == 3;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "var d = new Dictionary<Mode, int> {\n    [Mode.Test] = 3\n};\nreturn true;")).isFalse();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "return Solution.Notes()\n    [Test] == 3;")).isFalse();
         // Le même marqueur dans le CODE reste refusé.
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "int[] tab = { 1 };\n[Test] public void T() { }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "[Category(\"a\")][Test] public void T() { }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[Test]\n[Category(\"a\")]\nvoid T() { }")).isTrue();
+        assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
+                "[Test] Task T() { return null; }")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "public class T {\n    [Category(\"a\"), Test]\n    public void A() { }\n}")).isTrue();
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
