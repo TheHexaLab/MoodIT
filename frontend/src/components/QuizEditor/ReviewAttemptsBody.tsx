@@ -91,6 +91,13 @@ export function ReviewAttemptsBody({
     setAttempt((n) => n + 1);
   };
 
+  // « Réessayer » disparaît avec le rechargement (remplacé par le spinner) : le focus passe
+  // d'abord sur l'introduction, sinon il tombait sur <body>, hors de la fenêtre modale.
+  const retryLoad = () => {
+    introRef.current?.focus();
+    reload();
+  };
+
   const regrade = async (attempt: ReviewAttempt) => {
     // Une relance à la fois : les boutons restent focalisables (aria-disabled), d'où ce garde.
     if (regrading != null) return;
@@ -131,7 +138,7 @@ export function ReviewAttemptsBody({
           </div>
         )}
         {failed && (
-          <button type="button" className={styles.addButton} onClick={reload}>
+          <button type="button" className={styles.addButton} onClick={retryLoad}>
             {t.retry}
           </button>
         )}

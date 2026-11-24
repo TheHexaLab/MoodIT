@@ -240,7 +240,12 @@ describe('ReviewAttemptsBody', () => {
       .mockResolvedValue([EVA]);
     const { onError } = renderBody(onFetch);
 
-    fireEvent.click(await screen.findByText(reviewT.retry));
+    const retry = await screen.findByText(reviewT.retry);
+    retry.focus();
+    fireEvent.click(retry);
+    // Le bouton disparaît avec le rechargement : le focus reste dans la fenêtre (introduction).
+    expect(retry.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe(reviewT.intro);
     await screen.findByText('Éva Test');
     expect(onError).toHaveBeenCalledWith('load');
     expect(onFetch).toHaveBeenCalledTimes(2);

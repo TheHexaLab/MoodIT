@@ -868,9 +868,12 @@ public class CodeAssembler {
                 + " __l=\"${__l#*|}\"; __moodit_dec \"${__l#*|}\";"
                 + " case \"${__l%%|*}\" in ''|*[!0-9]*) exit 1;; esac; exit \"${__l%%|*}\";;"
                 + " esac; done; exit 1; }; }\n"
-                // Décodage en bash pur (pas de xxd dans l'image) : deux hexas → un octet,
-                // puis le saut de ligne que la ligne unique du protocole avait absorbé.
-                + "__moodit_dec() { local __h=\"$1\" __i; for ((__i=0; __i<${#__h}; __i+=2)); do printf '\\x'\"${__h:__i:2}\"; done; printf '\\n'; }\n"
+                // Décodage en UNE passe (pas de xxd dans l'image) : sed fait de chaque paire
+                // d'hexas un `\xHH`, que printf %b rend en octet ; puis le saut de ligne que
+                // la ligne unique du protocole avait absorbé. Une boucle octet par octet
+                // (`${__h:__i:2}` coûte O(n) en bash) prenait un temps QUADRATIQUE : une valeur
+                // de 15 Ko dépassait le temps limite, réponse juste notée « Interrompu ».
+                + "__moodit_dec() { local __e; __e=$(printf '%s' \"$1\" | sed 's/../\\\\x&/g'); printf '%b\\n' \"$__e\"; }\n"
                 + SHADOW_SLOT
                 + proxies
                 + "__moodit_harness() {\n" + harnessCode + "\n}\n"

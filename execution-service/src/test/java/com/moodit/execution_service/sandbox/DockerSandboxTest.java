@@ -322,6 +322,31 @@ class DockerSandboxTest {
     }
 
     @Test
+    void shutdown_during_log_read_is_unavailable_not_no_verdict() {
+        // Revue #246 : `closed` n'était plus relu après la lecture des journaux ; un arrêt
+        // pendant celle-ci rendait une sortie tronquée, comptée « sans verdict ».
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+        var logs = docker.logContainerCmd("cid");
+        org.mockito.Mockito.doAnswer(inv -> {
+            com.github.dockerjava.api.async.ResultCallback.Adapter<com.github.dockerjava.api.model.Frame> cb =
+                    inv.getArgument(0);
+            cb.onStart(() -> { });
+            sandbox.removeInFlight();
+            cb.onComplete();
+            return cb;
+        }).when(logs).exec(org.mockito.ArgumentMatchers.any());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                .isInstanceOf(SandboxException.class)
+                .isNotInstanceOf(NoVerdictException.class)
+                .hasMessageContaining("journaux de notation interrompus");
+    }
+
+    @Test
     void wait_callback_closed_and_json_file_log_driver_imposed() throws IOException {
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);

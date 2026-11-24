@@ -583,6 +583,12 @@ public class DockerSandbox {
                             + logReadTimeout.toSeconds() + " s");
                 }
             }
+            // Arrêt engagé PENDANT la lecture des journaux : removeInFlight a pu supprimer le
+            // conteneur en cours de lecture, et la sortie tronquée passerait pour un superviseur
+            // muet — un échec compté contre l'étudiant. Panne, comme pendant l'attente.
+            if (closed) {
+                throw new SandboxException("Service en cours d'arrêt : journaux de notation interrompus");
+            }
             // Sortie TRONQUÉE : pas un verdict non plus (même règle que la lecture incomplète).
             // Le superviseur borne ce qu'il émet : une sortie démesurée vient du conteneur.
             if (overflow.get()) {

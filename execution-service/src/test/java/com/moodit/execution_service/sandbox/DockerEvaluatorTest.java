@@ -466,6 +466,22 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void inconsistent_canaries_keep_the_case_detail_under_the_warning() {
+        // Le détail du cas reste lisible sous l'avertissement ; un détail vide n'ajoute rien.
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":true,"detail":"sortie du noteur"},
+                  {"index":1,"passed":true,"detail":"  "}
+                ],"events":[],"canaries":"incoherents"}
+                """);
+        List<TestResult> results = evaluator.evaluate("C", "code", TWO_CASES, null);
+        assertThat(results.get(0).detail()).isEqualTo(
+                "⚠ Incohérence détectée pendant la notation (falsification probable).\nsortie du noteur");
+        assertThat(results.get(1).detail()).isEqualTo(
+                "⚠ Incohérence détectée pendant la notation (falsification probable).");
+    }
+
+    @Test
     void missing_or_unknown_canary_verdict_is_a_failure_not_a_grade() {
         // Revue #246 : seul « incoherents » était relu. Un superviseur régressé qui omettait le
         // champ (ou rendait une valeur inconnue) voyait ses « réussi » acceptés, sans que rien

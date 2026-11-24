@@ -275,10 +275,13 @@ rollback() {
   # Images runner de l'ANCIENNE version : sans elles, l'ancien service tournerait avec celles
   # du commit refusé. `latest` d'abord (un ancien compose ne lit que lui), puis le tag du commit.
   export MOODIT_RUNNER_TAG="$OLD_RUNNER_TAG"
-  MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
-    || warn "Rollback : images runner (latest) non reconstruites."
-  bash docker/runners/build.sh >>"$LOG" 2>&1 \
-    || warn "Rollback : images runner (${MOODIT_RUNNER_TAG}) non reconstruites."
+  # Rien à construire si l'ancienne version est d'avant #116 (pas de docker/runners/).
+  if [ -f docker/runners/build.sh ]; then
+    MOODIT_RUNNER_TAG=latest bash docker/runners/build.sh >>"$LOG" 2>&1 \
+      || warn "Rollback : images runner (latest) non reconstruites."
+    bash docker/runners/build.sh >>"$LOG" 2>&1 \
+      || warn "Rollback : images runner (${MOODIT_RUNNER_TAG}) non reconstruites."
+  fi
   $COMPOSE up -d --build >>"$LOG" 2>&1 || warn "Rollback : échec du redémarrage de l'ancienne version."
   fail "Build/déploiement de la nouvelle version échoué — ancienne version restaurée."
 }
@@ -287,7 +290,13 @@ step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
 # Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
-if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
+# Seulement si la version déployée en a : un retour à une version d'avant #116 (revert de la
+# fusion) n'a pas `docker/runners/`, et exiger son build faisait annuler ce retour à chaque fois.
+if [ -f docker/runners/build.sh ]; then
+  if ! stream "Build des 10 images runner (notation des compilés + mode exec)" bash docker/runners/build.sh; then rollback; fi
+else
+  warn "Pas de docker/runners/ dans cette version : images runner non construites (version d'avant #116)."
+fi
 ok "Images construites."
 
 # Mode exec (interprétés, SQL, vues) : noteur et code soumis y partagent l'UID, et seul

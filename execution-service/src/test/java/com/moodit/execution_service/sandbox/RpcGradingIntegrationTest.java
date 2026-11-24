@@ -2641,7 +2641,10 @@ class RpcGradingIntegrationTest {
                 }
                 """);
         assertThat(r.passed()).isFalse();
+        // La raison PRÉCISE (et non un échec quelconque, de compilation par exemple) : le
+        // processus de l'étudiant, privé de son canal de réponse, ne répond plus.
         assertThat(r.detail()).isNotNull()
+                .contains("processus etudiant termine")
                 .doesNotContain("temps limite")
                 .doesNotContain("⚠");
     }

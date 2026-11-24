@@ -38,7 +38,5 @@ FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar
 COPY --from=jsvendor /out /app/vendor
-# Runner JSX/TSX fixe (injecté tel quel par CodeAssembler).
-COPY vendor/jsx-main.js /app/vendor/jsx-main.js
 EXPOSE 8085
 ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -91,9 +91,11 @@ class ExecutionIntegrationTest {
         assertThat(passes("Python", "def doubler(n):\n    return n * 2", "return doubler(5) == 10")).isTrue();
         assertThat(passes("Python", "def doubler(n):\n    return 0", "return doubler(5) == 10")).isFalse();
         assertThat(passes("Python",
+                // Sonde : la BONNE valeur seulement si elle a trouvé le nonce — le noteur exige
+                // aussi une sortie 0, une fuite qui se contenterait de le publier passerait.
                 "import re, sys\ndef doubler(n):\n    s = open(__file__).read()\n"
                         + "    m = re.search(r'MOODIT_OK_[0-9a-f]+', s)\n"
-                        + "    sys.stderr.write(m.group() if m else 'X')\n    return 0",
+                        + "    sys.stderr.write(m.group() if m else 'X')\n    return n * 2 if m else 0",
                 "return doubler(5) == 10")).isFalse();
         // Un print de premier niveau dont la sortie est du JSON valide ne fausse plus la correction.
         assertThat(passes("Python", "def doubler(n):\n    return n * 2\n\nprint(doubler(5))\nprint([1, 2])",
@@ -120,8 +122,10 @@ class ExecutionIntegrationTest {
     void javascript_answering_rpc_early_fails() {
         requireRuntime("javascript");
         assertThat(passes("JavaScript",
-                "console.log(JSON.stringify({ok: true, value: 10}));\n"
-                        + "function doubler(n){ console.log(JSON.stringify({ok: true, value: 10}));"
+                // process.stdout.write : console.log est neutralisé avant le code soumis, et la
+                // forge n'aurait jamais rien écrit.
+                "process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');\n"
+                        + "function doubler(n){ process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');"
                         + " return 0; }",
                 "return doubler(5) === 10;")).isFalse();
     }
@@ -134,7 +138,7 @@ class ExecutionIntegrationTest {
         assertThat(passes("JavaScript",
                 "const fs = require('fs');\nfunction doubler(n){"
                         + " try{ const m = fs.readFileSync(__filename,'utf8').match(/MOODIT_OK_[0-9a-f]+/);"
-                        + " if(m) process.stderr.write(m[0]); }catch(e){} return 0; }",
+                        + " if(m){ process.stderr.write(m[0]); return n * 2; } }catch(e){} return 0; }",
                 "return doubler(5) === 10;")).isFalse();
     }
 
@@ -154,7 +158,8 @@ class ExecutionIntegrationTest {
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return 0; }", "return doubler(5) === 10;")).isFalse();
         assertThat(passes("PHP",
                 "<?php\nfunction doubler($n){ $s = file_get_contents(__FILE__);"
-                        + " if (preg_match('/MOODIT_OK_[0-9a-f]+/', $s, $m)) fwrite(STDERR, $m[0]); return 0; }",
+                        + " if (preg_match('/MOODIT_OK_[0-9a-f]+/', $s, $m)) { fwrite(STDERR, $m[0]); return $n * 2; }"
+                        + " return 0; }",
                 "return doubler(5) === 10;")).isFalse();
         // Un echo de premier niveau (avec ou sans retour à la ligne) ne fausse plus la correction.
         assertThat(passes("PHP", "<?php\nfunction doubler($n){ return $n * 2; }\necho 5;",
@@ -175,14 +180,20 @@ class ExecutionIntegrationTest {
                 "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isTrue();
         assertThat(passes("Bash", "lister() { printf 'a'; }",
                 "[ \"$(lister)\" = \"$(printf 'a\\nb')\" ]")).isFalse();
+        // Valeur VOLUMINEUSE (~60 Ko) au temps limite par défaut : le décodage octet par octet
+        // était quadratique, et une réponse juste dépassait le temps limite (revue #246).
+        assertThat(passes("Bash", "nombres() { seq 1 \"$1\"; }",
+                "[ \"$(nombres 12000)\" = \"$(seq 1 12000)\" ]")).isTrue();
         assertThat(passes("Bash",
-                "doubler() { grep -oE 'MOODIT_OK_[0-9a-f]+' grader.sh 2>/dev/null >&2; echo 0; }",
+                "doubler() { if grep -oE 'MOODIT_OK_[0-9a-f]+' grader.sh 2>/dev/null >&2;"
+                        + " then echo $(( $1 * 2 )); else echo 0; fi; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
         // CONTREFAÇON de la ligne de réponse : le code de premier niveau consomme stdin pour y
-        // apprendre l'identifiant de l'appel, puis publie lui-même « <id>|10 ». Il ne le voit
-        // plus (lu avant son chargement) et sa sortie est capturée, pas publiée.
+        // apprendre l'identifiant de l'appel, puis publie lui-même « <id>|0|3130 » (statut 0,
+        // valeur « 10 » en hexadécimal, le format du protocole). Il ne le voit plus (lu avant
+        // son chargement) et sa sortie est capturée, pas publiée.
         assertThat(passes("Bash",
-                "__vol=$(cat); printf '%s|10\\n' \"${__vol%% *}\"\n"
+                "__vol=$(cat); printf '%s|0|3130\\n' \"${__vol%% *}\"\n"
                         + "doubler() { echo 0; }",
                 "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
     }
@@ -225,8 +236,13 @@ class ExecutionIntegrationTest {
         // noteur ; `abs` ou `len` la masquaient dans le harnais. Refus explicite, et le
         // verdict n'appelle plus que la vraie `bool`.
         requireRuntime("python");
-        assertThat(passes("Python", "def bool(x):\n    return True\ndef doubler(n):\n    return 0",
-                "return doubler(5) == 10")).isFalse();
+        // `bool` déclaré par le code de départ et nommé par le harnais : il reçoit un mandataire,
+        // qui ne doit jamais remplacer la vraie `bool` dans le verdict du noteur — sinon une
+        // réponse fausse passerait.
+        assertThat(service.evaluate(new EvaluateRequest("Python", null,
+                "def bool(x):\n    return True\ndef doubler(n):\n    return 0",
+                List.of(new TestCaseInput("t", "return doubler(5) == 10 and bool is not None", 1)),
+                null, "def bool(x):\n    pass\ndef doubler(n):\n    pass")).get(0).passed()).isFalse();
         assertThat(passes("Python", "def abs(x):\n    return 0\ndef moitie(n):\n    return 0",
                 "return abs(moitie(5) - 2.5) < 1e-9")).isFalse();
         assertThat(detail("Python", "def len(x):\n    return 3\ndef liste():\n    return []",
@@ -541,6 +557,7 @@ class ExecutionIntegrationTest {
     @Test
     void class_proxies_work() {
         requireRuntime("python");
+        requireRuntime("javascript");
         assertThat(passes("Python",
                 "class Rectangle:\n    def __init__(self, l, h):\n        self.l = l; self.h = h\n"
                         + "    def aire(self):\n        return self.l * self.h",
@@ -595,7 +612,8 @@ class ExecutionIntegrationTest {
         assertThat(passes("JSX",
                 "function Composant(){ try{ const fs = process.mainModule.require('fs');"
                         + " const m = fs.readFileSync('main.js','utf8').match(/MOODIT_OK_[0-9a-f]+/);"
-                        + " if(m) process.stderr.write(m[0]); }catch(e){} return React.createElement('div'); }",
+                        + " if(m){ process.stderr.write(m[0]); return React.createElement('h1', null, 'Bonjour'); }"
+                        + " }catch(e){} return React.createElement('div'); }",
                 h)).isFalse();
     }
 
@@ -652,18 +670,13 @@ class ExecutionIntegrationTest {
         requireRuntime("sqlite3");
         String roHarness = "CREATE TABLE t(n INTEGER);\nINSERT INTO t VALUES (1),(2),(3);\n"
                 + "SELECT (SELECT count(*) FROM solution1) = 3;";
-        // Sentinelle = « MOODIT_OK_ » + 48 hex + « _VERDICT_START » (72 caractères), cherchée
-        // par sa fin, écrite en deux morceaux pour ne pas trouver ce texte-ci dans main.sql.
-        String sentinel = "substr(src, instr(src, '_VERDICT_' || 'START') - 58, 72)";
         // Sortie de la vue par `go`, puis une vue TEMP qui masque solution1 : l'ancien découpage
         // (une seule vue) laissait cette forge réussir (revue #246).
         assertThat(passes("SQL", "SELECT n FROM t WHERE n > 1\ngo\n"
                 + "CREATE TEMP VIEW solution1 AS SELECT 1 AS n UNION SELECT 2 UNION SELECT 3",
                 roHarness)).isFalse();
-        String forge = "SELECT n FROM t WHERE n > 1\ngo\n"
-                + "SELECT " + sentinel + " || char(10) || '1' || char(10) || replace(" + sentinel
-                + ", 'START', 'END') FROM (SELECT CAST(data AS TEXT) AS src FROM fsdir('main.sql'))";
-        assertThat(passes("SQL", forge, roHarness)).isFalse();
+        // (La lecture de main.sql par fsdir n'est vérifiable qu'en mode modification, où le code
+        // soumis tourne tel quel : en lecture seule, tout est enfermé dans une vue jamais lue.)
         // Mode modification : le code soumis tourne tel quel en phase 1. Il ne doit pas non plus
         // pouvoir lire son programme, qui porte les sentinelles du dump : le harnais réussit
         // seulement si le texte lu les contient.

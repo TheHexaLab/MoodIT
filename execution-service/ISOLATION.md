@@ -196,8 +196,8 @@ voisins, selon la politique `ptrace` de l'hôte. La propriété « **verdict non
 donc que pour les six langages compilés avec un harnais booléen, qui séparent les UID (cf.
 `CodeAssembler.assembleBashRpc` et `docker/runners/README.md`).
 
-Les noteurs **Node** (JavaScript, TypeScript, JSX/TSX) ignorent `SIGUSR1` dès leur première
-instruction, et `node` est lancé avec `--disable-sigusr1` : sous le même UID, le code soumis
+Les noteurs **Node** (JavaScript, TypeScript, JSX/TSX) ignorent `SIGUSR1` avant de lancer le
+processus du code soumis, et `node` est lancé avec `--disable-sigusr1` : sous le même UID, le code soumis
 envoyait ce signal au noteur, dont Node ouvrait alors l'**inspecteur** sur `127.0.0.1:9229` (la
 boucle locale existe même sans réseau) — lecture du nonce et verdict forgé, sans `ptrace`
 (`ExecutionIntegrationTest.node_grader_inspector_cannot_be_opened_by_the_submission`). Le verdict

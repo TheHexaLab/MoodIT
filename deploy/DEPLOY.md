@@ -133,8 +133,8 @@ délai, chaque correction en file est abandonnée à son tour (tentative supprim
 plus long, attendre que la file soit vide (`SELECT count(*) FROM Attempt WHERE status =
 'pending';` rend 0) ou prévenir les enseignants. Une sandbox indisponible n'est pas comptée dans
 le plafond des échecs sans verdict (#116) : un arrêt ne fait passer aucune tentative « à revoir »,
-sauf une relance d'enseignant en cours sur un quiz sans reprise (la tentative y reste `review`,
-à relancer depuis l'éditeur de quiz).
+sauf une relance d'enseignant en cours (la tentative relancée reste `review`, sur tout quiz, à
+relancer depuis l'éditeur de quiz).
 
 ### Mettre à jour la prod
 
@@ -164,7 +164,11 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
 >
 > **Avant tout** : le contrôle préalable des harnais (section « Changement de schéma », étape 1)
-> doit être sorti en 0, et l'heure de la bascule notée EN UTC, comme `submitted_at` (commande
+> doit être sorti en 0. Les tentatives restées `pending` sous Piston (`SELECT id, quiz_id FROM
+> Attempt WHERE status = 'pending';`) seront corrigées AU DÉMARRAGE par le nouveau noteur, avant
+> l'étape 2 : si l'une porte sur un quiz que le contrôle a mis en cause (fermé plutôt que
+> corrigé), noter son id avec les tentatives de la fenêtre de l'étape 2, à rendre à l'étudiant
+> de la même façon. Noter aussi l'heure de la bascule EN UTC, comme `submitted_at` (commande
 > de l'étape 2 : `SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;` — pas `NOW()` seul, à l'heure
 > de Toronto dans ce conteneur) ; **juste après** le second `update.sh` vient son étape 2,
 > `check-compiled-harnesses.py --unpublish`, avec les mêmes `--ack`.
@@ -357,7 +361,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > même un retour fait à la main). Deux voies :
 >
 > - **durable** : un `git revert` de la fusion sur `main`, puis la PR `main → deploiement`
->   habituelle ; `update.sh` déploie alors l'ancienne version ;
+>   habituelle ; `update.sh` déploie alors l'ancienne version (sans `docker/runners/`, il n'y
+>   construit pas d'images runner ; pour `V5`, voir plus bas) ;
 > - **urgence**, en attendant : si un cron lance `update.sh` (`crontab -l`), suspendre cette
 >   ligne (`crontab -e`), puis
 >

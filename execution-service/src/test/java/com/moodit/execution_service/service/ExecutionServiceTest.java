@@ -319,6 +319,20 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void fails_when_nonce_present_but_grader_did_not_exit_zero() {
+        // La réussite exige AUSSI une sortie 0 du noteur (revue #246) : un nonce émis puis un
+        // noteur sorti en erreur (ou sans code) ne vaut pas réussite.
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 1, null, null));
+        assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isFalse();
+    }
+
+    @Test
+    void fails_when_nonce_present_but_grader_exit_code_unknown() {
+        pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), null, null, null));
+        assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isFalse();
+    }
+
+    @Test
     void fails_when_nonce_absent_even_though_exit_zero() {
         // ANTI-TRICHE : exit 0 mais AUCUN nonce (ex. sys.exit(0) anticipé) → échec.
         pistonRun(files -> new RunnerExec.Stage("", "", 0, null, null));
