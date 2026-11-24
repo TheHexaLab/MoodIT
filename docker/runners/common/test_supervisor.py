@@ -252,8 +252,12 @@ class ExitStateTest(unittest.TestCase):
         origin = supervisor.open_output
         supervisor.open_output = lambda fpath: Saturated()
         try:
-            supervisor.run_proc(["sh", "-c", "echo x"], ".", dict(os.environ), 10,
-                                "o.out", "e.err", None)
+            # Le vrai run_proc vide /tmp et /dev/shm et tue l'UID étudiant : neutralisés, sinon ce
+            # test effaçait les fichiers temporaires de la machine qui le lance.
+            with unittest.mock.patch.object(supervisor, "purge_shared_dirs"), \
+                    unittest.mock.patch.object(supervisor, "kill_student_survivors"):
+                supervisor.run_proc(["sh", "-c", "echo x"], ".", dict(os.environ), 10,
+                                    "o.out", "e.err", None)
         finally:
             supervisor.open_output = origin
         self.assertTrue(state_during.lost)               # impute au BON cas
@@ -655,6 +659,35 @@ class SignatureFormsTest(unittest.TestCase):
         self.assertIn("use crate::Forme as _;", server)
         # Sans trait : aucune importation, le gabarit reste valide.
         self.assertNotIn("as _;", supervisor.rust_server_source([("i32", "f", [])], "fn f() -> i32 { 1 }"))
+
+    def test_cpp_operator_multiline_members_and_qualifiers(self):
+        api = {n: (c, m) for n, c, m in supervisor.cpp_object_api(
+            "class Rect {\n  int l, h;\npublic:\n  Rect(int largeur,\n       int hauteur) : l(largeur), h(hauteur) {}\n"
+            "  int aire(int k,\n           int m) { return l * h * k * m; }\n"
+            "  [[nodiscard]] int cote() const noexcept { return l; }\n};\n"
+            "struct Carre { int operator()(int x) const { return x * x; } int f() { return 1; } };\n")}
+        self.assertEqual([["int", "int"]], api["Rect"][0])
+        self.assertEqual({("aire", ("int", "int")), ("cote", ())},
+                         {(n, tuple(t)) for _r, n, t in api["Rect"][1]})
+        # `operator()` n'est pas une méthode nommée `operator`.
+        self.assertEqual([("int", "f", [])], api["Carre"][1])
+        src = ("constexpr int carre(int x) { return x * x; }\nint cube(int x) noexcept { return x * x * x; }\n"
+               "[[nodiscard]] int moitie(int x) { return x / 2; }\nauto dbl(int x) -> int { return 2 * x; }\n")
+        self.assertEqual(["carre", "cube", "moitie", "dbl"],
+                         [n for _r, n, _t in supervisor.c_signatures(src, cpp=True)])
+        # Le retour en fin de signature est du C++ seulement.
+        self.assertEqual(["carre", "cube", "moitie"], [n for _r, n, _t in supervisor.c_signatures(src)])
+        self.assertEqual([("i32", "carre", ["i32"])], supervisor.rust_signatures(
+            "pub const fn carre(x: i32) -> i32 { x * x }\nfn main() {}\n"))
+
+    def test_java_default_method_through_a_parent_interface(self):
+        polygone = ('Compiled from "S.java"\ninterface Polygone extends Forme, java.io.Serializable {\n}\n')
+        self.assertEqual(["Forme", "java.io.Serializable"], supervisor.java_interfaces(polygone))
+        merged = supervisor.inherit_instance_methods(
+            {"Forme": ((), [("int", "doubleAire", [])]), "Polygone": ((), []),
+             "Carre": ([[]], [("int", "aire", [])])},
+            {"Carre": ["Polygone"], "Polygone": ["Forme"]})
+        self.assertIn(("int", "doubleAire", []), merged["Carre"])
 
     def test_java_interface_default_methods(self):
         iface = ('Compiled from "S.java"\ninterface Forme {\n  public abstract int aire();\n'
@@ -1278,6 +1311,10 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         du bruit à part entière. L'invariant est vérifié sur CHAQUE site de réponse de CHAQUE
         répartiteur : il ne valait, au départ, que sur un seul des neuf."""
         import re as _re
+        # Chaque langage du superviseur a son répartiteur dans la liste : un langage ajouté sans
+        # entrée échoue ici, au lieu d'échapper à l'invariant.
+        listed = {ident.split()[0] for ident, _ in self.DISPATCHERS}
+        self.assertEqual(set(supervisor.RUNNERS), listed)
         # Les écritures sur l'ERREUR standard ne sont pas des réponses : ce sont des diagnostics,
         # et le noteur ne les lit pas comme telles.
         emitted = _re.compile(
@@ -3024,8 +3061,12 @@ class Review246eTest(unittest.TestCase):
             class_statics={"Solution": [("int", "sommeCarres", ["int", "int"])]})
         solution = source.split("final class Solution {", 1)[1]
         self.assertIn("public static int sommeCarres(int a0, int a1) {", solution)
-        self.assertIn('MooditRpc.integer("%s"' % supervisor.rpc_name("sommeCarres", ["int", "int"]),
+        # La classe voyage avec le nom : le serveur cherche dans CETTE classe, et non d'abord
+        # dans la principale, qui peut avoir une statique homonyme.
+        self.assertIn('MooditRpc.integer("Solution#%s"' % supervisor.rpc_name("sommeCarres", ["int", "int"]),
                       solution)
+        server = supervisor.java_server_source(["Aide", "Solution"])
+        self.assertIn("int diese = appel.indexOf('#');", server)
         # Classe imbriquée : même règle, dans sa coquille.
         nested = supervisor.java_stub_source(
             "Solution", [], [("Solution.Outil", [[]], [])],

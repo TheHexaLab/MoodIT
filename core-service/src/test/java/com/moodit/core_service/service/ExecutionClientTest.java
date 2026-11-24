@@ -398,6 +398,10 @@ class ExecutionClientTest {
 
         client.evaluate("Python", "code", TWO_HARNESSES, -5);
         assertThat(receivedBody.get()).doesNotContain("timeoutMs");
+
+        // Borne exacte : 0 vaut « défaut du sandbox », pas un temps limite nul.
+        client.evaluate("Python", "code", TWO_HARNESSES, 0);
+        assertThat(receivedBody.get()).doesNotContain("timeoutMs");
     }
 
     @Test

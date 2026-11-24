@@ -187,10 +187,12 @@ public final class HarnessProjects {
      * Une déclaration compte aussi APRÈS un {@code ;} ou une {@code }} sur la même ligne
      * ({@code import java.util.*; public class Rectangle}, {@code class Aide { } public class
      * Solution}) : ancrée au seul début de ligne, elle n'était pas vue, le fichier prenait le nom
-     * d'un autre type, et javac refusait la classe publique — 0 sur une réponse juste.
+     * d'un autre type, et javac refusait la classe publique — 0 sur une réponse juste. Une
+     * annotation peut avoir une espace avant sa parenthèse ({@code @SuppressWarnings ("x")}) et
+     * une annotation imbriquée en argument ({@code @A(b = @B(1))}), sur un niveau.
      */
     private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
-            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\([^()\\n]*\\))?|public|protected|private|static"
+            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\s*\\((?:[^()\\n]|\\([^()\\n]*\\))*\\))?|public|protected|private|static"
             + "|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
             + "(?:class|interface|record|enum|@interface)\\s+"
             + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");

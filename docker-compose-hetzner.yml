@@ -120,7 +120,7 @@ services:
     environment:
       # Même mise en garde que dans le bloc d'execution-service, dans l'autre sens :
       # EXEC_INTERNAL_QUEUE_WAIT_MS et EXEC_INTERPRETED_BUDGET_MS sont PARTAGÉES entre les deux
-      # services et vont dans .env.docker (cf. .env.example). Posées ici, core attendrait une
+      # services et vont dans .env.docker (cf. deploy/env.docker.example). Posées ici, core attendrait une
       # autre valeur que le serveur et abandonnerait des corrections encore en cours (#216).
       JAVA_TOOL_OPTIONS: "-Xmx320m"
       # Corrections de quiz à harnais menées en parallèle par core : à garder ÉGAL à
@@ -228,7 +228,7 @@ services:
       # ces deux-là sont lus AUSSI par core-service (son délai de lecture de la correction, #216).
       # Posées dans ce bloc, elles ne vaudraient que pour execution-service, et core abandonnerait
       # des corrections encore en cours — tentatives d'étudiants supprimées. Elles vont dans le
-      # .env.docker commun (cf. .env.example), que les deux services chargent par env_file.
+      # .env.docker commun (cf. deploy/env.docker.example), que les deux services chargent par env_file.
       # QUIZ_CODE_GRADING_THREADS du bloc core-service doit valoir EXEC_MAX_CONCURRENT − 1.
       EXEC_MAX_CONCURRENT: "3"
       # Un appel public tient maintenant un conteneur entier (quelques secondes pour un

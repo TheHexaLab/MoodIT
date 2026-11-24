@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import styles from './QuizView.module.css';
 import { Check } from '../../../assets/Check';
 import { X } from '../../../assets/X';
@@ -21,6 +21,9 @@ interface QuizSummaryProps {
   onSelectAttempt: (attemptId: number) => void;
   /** Ouvre la révision de la question d'index donné. */
   onReview: (index: number) => void;
+  /** Puce à refocaliser après un changement de tentative (cf. AttemptBar). */
+  focusId?: number | null;
+  onFocused?: () => void;
   /** Textes (surcharge partielle des défauts). */
   labels?: Partial<QuizSummaryLabels>;
 }
@@ -29,6 +32,14 @@ interface AttemptBarProps {
   attempts: AttemptSummary[];
   currentAttemptId: number | null;
   onSelectAttempt: (attemptId: number) => void;
+  /**
+   * Puce à refocaliser après un changement de tentative. Passer d'une tentative corrigée à une
+   * tentative « à revoir » remplace tout le corps, barre comprise : la puce activée disparaissait
+   * et le focus retombait sur <body>. La nouvelle barre le rend à la puce du même id.
+   */
+  focusId?: number | null;
+  /** La puce demandée a été trouvée (focalisée si le focus était orphelin) : la demande est soldée. */
+  onFocused?: () => void;
   labels?: Partial<QuizSummaryLabels>;
 }
 
@@ -41,8 +52,19 @@ export function AttemptBar({
   attempts,
   currentAttemptId,
   onSelectAttempt,
+  focusId,
+  onFocused,
   labels,
 }: AttemptBarProps): React.ReactElement | null {
+  const chips = useRef(new Map<number, HTMLButtonElement>());
+  useEffect(() => {
+    if (focusId == null) return;
+    const chip = chips.current.get(focusId);
+    if (!chip) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) chip.focus();
+    onFocused?.();
+  });
   if (attempts.length < 2) return null;
   const t = { ...defaultQuizSummaryLabels, ...labels };
   return (
@@ -57,6 +79,10 @@ export function AttemptBar({
               .filter(Boolean)
               .join(' ')}
             aria-pressed={a.id === currentAttemptId}
+            ref={(el) => {
+              if (el) chips.current.set(a.id, el);
+              else chips.current.delete(a.id);
+            }}
             onClick={() => onSelectAttempt(a.id)}
           >
             {a.earned == null
@@ -80,6 +106,8 @@ export function QuizSummary({
   currentAttemptId,
   onSelectAttempt,
   onReview,
+  focusId,
+  onFocused,
   labels,
 }: QuizSummaryProps): React.ReactElement {
   const t = { ...defaultQuizSummaryLabels, ...labels };
@@ -143,6 +171,8 @@ export function QuizSummary({
         attempts={attempts}
         currentAttemptId={currentAttemptId}
         onSelectAttempt={onSelectAttempt}
+        focusId={focusId}
+        onFocused={onFocused}
         labels={labels}
       />
 

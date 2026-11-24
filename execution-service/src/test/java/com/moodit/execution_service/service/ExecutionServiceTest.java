@@ -239,12 +239,18 @@ class ExecutionServiceTest {
     @Test
     void student_output_imitating_an_interruption_does_not_count() throws Exception {
         // L'interruption se lit sur le SIGNAL de l'execution, plus sur le texte du detail : un
-        // stderr etudiant qui commence par « Interrompu » ne change pas la regle.
+        // stderr etudiant qui commence par « Interrompu » ne change pas la regle. Scenario qui
+        // TRANCHE : 300 ms d'attente de place, puis 800 ms d'execution qui imite le texte, sans
+        // signal. Lue sur le texte, l'interruption (800 ms) depasserait l'attente et donnerait une
+        // note partielle ; lue sur le signal, elle vaut 0 et l'attente l'emporte : 502.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
         ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
-        svc.interpretedBudgetMs = 200;
-        pistonRun(files -> new RunnerExec.Stage("", "Interrompu (signal SIGKILL)", 1, null, null));
-        Thread other = holdSlot(limiter, 600);
+        svc.interpretedBudgetMs = 1000;
+        pistonRun(files -> {
+            sleep(800);
+            return new RunnerExec.Stage("", "Interrompu (signal SIGKILL)", 1, null, null);
+        });
+        Thread other = holdSlot(limiter, 300);
 
         assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
                 .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class);

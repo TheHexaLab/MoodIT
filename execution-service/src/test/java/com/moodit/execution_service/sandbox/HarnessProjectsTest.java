@@ -252,6 +252,13 @@ class HarnessProjectsTest {
         assertThat(HarnessProjects.javaFileName(
                 "public class Solution { void f() { int x = 1; class Locale { } } }", "S"))
                 .isEqualTo("Solution.java");
+        // Annotation à espace avant la parenthèse, ou à annotation imbriquée (revue #246).
+        assertThat(HarnessProjects.javaFileName(
+                "class Aide { }\n@SuppressWarnings (\"x\") public class Rectangle { }", "S"))
+                .isEqualTo("Rectangle.java");
+        assertThat(HarnessProjects.javaFileName(
+                "class Aide { }\n@A(b = @B(1)) public class Rectangle { }", "S"))
+                .isEqualTo("Rectangle.java");
         // Annotation sur la meme ligne.
         assertThat(HarnessProjects.javaFileName("@SuppressWarnings public class Annotee { }", "S"))
                 .isEqualTo("Annotee.java");

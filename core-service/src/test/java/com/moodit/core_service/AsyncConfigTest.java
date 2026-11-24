@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -68,6 +69,21 @@ class AsyncConfigTest {
     } finally {
       release.countDown();
       executor.shutdown();
+    }
+  }
+
+  @Test
+  void lesExecutorsAcceptentLesTachesJusquaLeurDestruction() {
+    // Arrêtés dès la fermeture du contexte (défaut Spring), ils refusaient une soumission qui
+    // commit pendant l'arrêt gracieux du serveur web : tentative supprimée au lieu d'être reprise.
+    for (Executor e : List.of(new AsyncConfig().quizExecutor(), new AsyncConfig().quizCodeExecutor(1, 0))) {
+      ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) e;
+      try {
+        assertThat(org.springframework.test.util.ReflectionTestUtils.getField(
+            executor, "acceptTasksAfterContextClose")).isEqualTo(true);
+      } finally {
+        executor.shutdown();
+      }
     }
   }
 

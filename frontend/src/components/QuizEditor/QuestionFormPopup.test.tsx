@@ -343,6 +343,25 @@ describe('QuestionFormBody', () => {
     expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(5000);
   });
 
+  it('code : entrer puis sortir du temps limite sans rien changer ne marque rien comme modifié', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      execTimeoutMs: 8000,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const onDirty = vi.fn();
+    renderForm(draft, { onDirty });
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(onDirty).not.toHaveBeenCalled();
+    // Une vraie modification, elle, marque la question.
+    fireEvent.change(input, { target: { value: '9' } });
+    fireEvent.blur(input);
+    expect(onDirty).toHaveBeenCalled();
+  });
+
   it('code : vider le temps limite revient au défaut du sandbox', () => {
     const draft: QuestionDraft = {
       ...emptyQuestionDraft('coding'),

@@ -849,6 +849,52 @@ class RpcGradingIntegrationTest {
                 }
                 fn main() {}
                 """, "self.c * self.c", "self.c + self.c");
+        // Java : statique d'une classe secondaire homonyme d'une statique de la principale — le
+        // serveur exécutait celle de la principale (faux verdict muet).
+        gradedThenWrong("Java", "return Aide.calcul(3) == 9 && Solution.calcul(3) == 10;", """
+                class Aide {
+                    static int calcul(int n) { return n * n; }
+                }
+                public class Solution {
+                    static int calcul(int n) { return Aide.calcul(n) + 1; }
+                    public static void main(String[] args) { }
+                }
+                """, "n * n", "n + n");
+        // C++ : `operator()` dans une classe, constructeur sur deux lignes, qualificatifs.
+        gradedThenWrong("C++", "Rect r(3, 4); return somme_carres(3, 4) == 25 && r.aire() == 12;", """
+                struct Carre {
+                    int operator()(int x) const { return x * x; }
+                };
+                class Rect {
+                    int l, h;
+                public:
+                    Rect(int largeur,
+                         int hauteur) : l(largeur), h(hauteur) {}
+                    [[nodiscard]] int aire() const noexcept { return l * h; }
+                };
+                constexpr int somme_carres(int a, int b) noexcept { return Carre{}(a) + Carre{}(b); }
+                """, "l * h", "l + h");
+        // Rust : `const fn`.
+        gradedThenWrong("Rust", "carre(5) == 25", """
+                pub const fn carre(x: i32) -> i32 { x * x }
+                fn main() {}
+                """, "x * x", "x + x");
+        // Java : méthode `default` d'une interface MÈRE de celle que la classe implémente.
+        gradedThenWrong("Java", "return new Carre(3).doubleAire() == 18;", """
+                interface Forme {
+                    int aire();
+                    default int doubleAire() { return 2 * aire(); }
+                }
+                interface Polygone extends Forme { }
+                class Carre implements Polygone {
+                    private final int c;
+                    Carre(int c) { this.c = c; }
+                    public int aire() { return c * c; }
+                }
+                public class Solution {
+                    public static void main(String[] args) { }
+                }
+                """, "c * c", "c + c");
         // Java : méthode `default` d'une interface, non redéfinie.
         gradedThenWrong("Java", "return new Carre(3).doubleAire() == 18;", """
                 interface Forme {

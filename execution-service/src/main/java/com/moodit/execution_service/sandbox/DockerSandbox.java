@@ -200,6 +200,11 @@ public class DockerSandbox {
      * rien ne garantit que le {@code finally} de {@link #run} aille au bout avant la fin de la JVM.
      */
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+
+    /** Conteneurs en vol de CETTE instance (copie) : un test n'agit que sur les siens. */
+    Set<String> inFlightContainers() {
+        return Set.copyOf(inFlight);
+    }
     /** Arrêt du service engagé : plus aucun conteneur n'est lancé (cf. removeInFlight). */
     private volatile boolean closed;
     private volatile DockerClient client;

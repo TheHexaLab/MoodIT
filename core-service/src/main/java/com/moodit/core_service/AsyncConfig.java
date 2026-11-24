@@ -45,6 +45,7 @@ public class AsyncConfig {
     executor.setMaxPoolSize(4);
     executor.setQueueCapacity(100);
     executor.setThreadNamePrefix("quiz-grade-");
+    acceptUntilDestroyed(executor);
     executor.initialize();
     return executor;
   }
@@ -62,7 +63,20 @@ public class AsyncConfig {
     executor.setMaxPoolSize(threads);
     executor.setQueueCapacity(queueCapacity);
     executor.setThreadNamePrefix("quiz-code-grade-");
+    acceptUntilDestroyed(executor);
     executor.initialize();
     return executor;
+  }
+
+  /**
+   * Accepte les tâches jusqu'à la DESTRUCTION de l'executor, pas seulement jusqu'au début de la
+   * fermeture du contexte. Par défaut, Spring les arrête dès cet événement, AVANT l'arrêt gracieux
+   * du serveur web : une soumission (ou une relance) qui commit pendant cet arrêt était refusée
+   * par l'executor, puis {@code abandonGrading} SUPPRIMAIT la tentative — l'étudiant devait
+   * resoumettre. Acceptée, elle est soit corrigée, soit interrompue à la destruction : elle reste
+   * alors {@code pending} et la reprise au démarrage la corrige ({@code resumePendingGradings}).
+   */
+  static void acceptUntilDestroyed(ThreadPoolTaskExecutor executor) {
+    executor.setAcceptTasksAfterContextClose(true);
   }
 }

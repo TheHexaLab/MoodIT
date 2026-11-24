@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { type Course } from '../../CourseMenu/CourseMenu';
@@ -144,8 +144,23 @@ const QuizView: React.FC<QuizViewProps> = ({
   // Spinner PLEIN QUIZ : chargement initial, envoi en cours, ou réconciliation post-refresh.
   const busy = attempt.loading || attempt.submitting || attempt.reconciling;
 
+  // Changement de tentative par la barre : la puce activée est rendue au même id dans la barre
+  // suivante (cf. AttemptBar.focusRequest), sinon le focus retombait sur <body>.
+  const [chipFocus, setChipFocus] = useState<number | null>(null);
+  const clearChipFocus = () => setChipFocus(null);
+  const selectAttempt = (attemptId: number) => {
+    setChipFocus(attemptId);
+    attempt.selectAttempt(attemptId);
+  };
+  const awaitingReviewShown = attempt.phase === 'summary' && attempt.awaitingReview;
+
   return (
     <div className={styles.view}>
+      {/* Région annoncée TOUJOURS montée : un role=status inséré avec son texte déjà présent
+          n'est pas lu par la plupart des lecteurs d'écran ; seul le texte change ici. */}
+      <p className={styles.visuallyHidden} aria-live="polite">
+        {awaitingReviewShown ? `${t.awaitingReviewTitle}. ${t.awaitingReview}` : ''}
+      </p>
       {busy && (
         <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">
           <Spinner size={44} />
@@ -223,7 +238,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (phase === 'summary' && attempt.awaitingReview) {
       return (
         <div className={styles.centeredState}>
-          <div role="status">
+          <div>
             <p>
               <strong>{t.awaitingReviewTitle}</strong>
             </p>
@@ -232,7 +247,9 @@ const QuizView: React.FC<QuizViewProps> = ({
           <AttemptBar
             attempts={attempt.attempts}
             currentAttemptId={attempt.currentAttemptId}
-            onSelectAttempt={attempt.selectAttempt}
+            onSelectAttempt={selectAttempt}
+            focusId={chipFocus}
+            onFocused={clearChipFocus}
             labels={labels?.summary}
           />
         </div>
@@ -247,7 +264,9 @@ const QuizView: React.FC<QuizViewProps> = ({
             result={result}
             attempts={attempt.attempts}
             currentAttemptId={attempt.currentAttemptId}
-            onSelectAttempt={attempt.selectAttempt}
+            onSelectAttempt={selectAttempt}
+            focusId={chipFocus}
+            onFocused={clearChipFocus}
             onReview={attempt.reviewQuestion}
             labels={labels?.summary}
           />

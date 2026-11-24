@@ -116,7 +116,10 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   4 min pour un « Tester » public) : ce chemin prend une place et un conteneur **par harnais**, son
   pire cas croissait donc linéairement et sans borne. Passé l'échéance, les harnais restants ne sont
   pas lancés et reçoivent un verdict « Non évalué » avec leur poids conservé — mêmes verdicts
-  partiels que ceux rendus au mur d'un conteneur compilé. Variable lue par execution-service **et**
+  partiels que ceux rendus au mur d'un conteneur compilé — quand c'est le code soumis qui a
+  consommé le budget (harnais interrompus au temps limite). Si c'est l'ATTENTE d'une place qui l'a
+  mangé, en correction interne, la correction lève au contraire un 502 de cause `sans_verdict`,
+  compté par core (règle détaillée dans `deploy/DEPLOY.md`). Variable lue par execution-service **et**
   par core-service (son miroir de délai de lecture, #216) : ne jamais la régler d'un seul côté.
 - **Conteneurs runner** : réseau coupé (`--network none`), écritures de l'UID étudiant **confinées
   aux tmpfs bornés** `/box`, `/tmp` et `/dev/shm`, **dérivés de la mémoire du conteneur** (60 %,
@@ -188,6 +191,13 @@ noteur et ne reçoit pas le nonce, mais un étudiant déterminé peut encore ins
 voisins, selon la politique `ptrace` de l'hôte. La propriété « **verdict non falsifiable** » ne vaut
 donc que pour les six langages compilés avec un harnais booléen, qui séparent les UID (cf.
 `CodeAssembler.assembleBashRpc` et `docker/runners/README.md`).
+
+Les noteurs **Node** (JavaScript, TypeScript, JSX/TSX) ignorent `SIGUSR1` dès leur première
+instruction, et `node` est lancé avec `--disable-sigusr1` : sous le même UID, le code soumis
+envoyait ce signal au noteur, dont Node ouvrait alors l'**inspecteur** sur `127.0.0.1:9229` (la
+boucle locale existe même sans réseau) — lecture du nonce et verdict forgé, sans `ptrace`
+(`ExecutionIntegrationTest.node_grader_inspector_cannot_be_opened_by_the_submission`). Le verdict
+exige en outre que le noteur sorte en 0, ce qu'il ne fait que sur un harnais vrai.
 
 Concrètement, la protection du mode « exec » tient à `kernel.yama.ptrace_scope ≥ 1` **sur l'hôte**
 (les conteneurs en héritent) : à 0, le code soumis lit la mémoire du noteur, nonce et attendus

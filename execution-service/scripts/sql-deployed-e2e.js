@@ -4,7 +4,7 @@
 const http = require('http');
 const TOKEN = process.env.MOODIT_TOKEN || '';
 const HOST = process.env.EXEC_HOST || 'localhost';
-const PORT = parseInt(process.env.EXEC_PORT || '8084', 10);
+const PORT = parseInt(process.env.EXEC_PORT || '8085', 10);
 
 const MARK = "\n-" + "- @student\n"; // évite un littéral "-- @student" (fragile au collage shell)
 const RO = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n" +

@@ -1778,8 +1778,12 @@ JAVAP_DEFAULT = re.compile(
 
 
 def java_interfaces(javap_output):
-    """Interfaces qu'une classe implémente (forme source, génériques retirés). PURE (testée)."""
-    found = re.search(r"\bimplements\s+([^{]+)\{", javap_output or "")
+    """Interfaces qu'une classe implémente — ou qu'une INTERFACE étend (`interface Polygone
+    extends Forme`) — en forme source, génériques retirés. PURE (testée)."""
+    text = javap_output or ""
+    found = re.search(r"\bimplements\s+([^{]+)\{", text)
+    if not found and JAVAP_INTERFACE.search(text) and not JAVAP_CLASS.search(text):
+        found = re.search(r"\binterface\s+[\w.$]+(?:<[^{]*?>)?\s+extends\s+([^{]+)\{", text)
     if not found:
         return []
     names = re.sub(r"<[^<>]*>", "", re.sub(r"<[^<>]*>", "", found.group(1)))
@@ -1884,9 +1888,12 @@ def java_object_stub(source_name, ctors, method_list, statics=()):
     for ret, ident, types in statics:
         params = ", ".join("%s a%d" % (t, i) for i, t in enumerate(types))
         args = ", ".join("a%d" % i for i in range(len(types)))
+        # La CLASSE voyage avec le nom (`Aide#calcul(int)`) : sans elle, le serveur cherchait
+        # d'abord dans la classe principale, et une statique homonyme `Solution.calcul` y était
+        # exécutée à la place d'`Aide.calcul` — faux verdict, sans diagnostic.
         body += ["        public static %s %s(%s) {" % (ret, ident, params),
-                  "            return MooditRpc.%s(\"%s\", new Object[]{%s});"
-                  % (JAVA_RPC_FN[JSON_TYPES[ret]], rpc_name(ident, types), args),
+                  "            return MooditRpc.%s(\"%s#%s\", new Object[]{%s});"
+                  % (JAVA_RPC_FN[JSON_TYPES[ret]], source_name, rpc_name(ident, types), args),
                   "        }"]
     body.append("    }")
     return "\n".join(body)
@@ -2286,6 +2293,13 @@ public final class MooditServer {
         if (op.equals("method")) { return methode(ligne); }
         String id = entre(ligne, "\\"id\\":\\"", "\\"");
         String appel = entre(ligne, "\\"name\\":\\"", "\\"");
+        // `Aide#calcul(int)` : statique d'une classe NOMMEE par le bouchon, cherchee la seulement.
+        String[] classes = new String[] {__CLASSES__};
+        int diese = appel.indexOf('#');
+        if (diese >= 0) {
+            classes = new String[] {appel.substring(0, diese).replace('.', '$')};
+            appel = appel.substring(diese + 1);
+        }
         String nom = base(appel);
         String brut = entre(ligne, "\\"args\\":[", "]");
         Object[] args = decoupe(brut);
@@ -2294,7 +2308,7 @@ public final class MooditServer {
         // statiques de toutes les classes dans la classe principale, la recherche doit couvrir
         // le meme perimetre — sinon une statique d'une classe secondaire etait declaree par le
         // bouchon puis introuvable ici, et une reponse juste etait notee 0.
-        for (String __c : new String[] {__CLASSES__}) {
+        for (String __c : classes) {
             for (Method m : Class.forName(__c).getDeclaredMethods()) {
                 // STATIQUE exigee : une methode d'instance de meme signature dans une autre
                 // classe etait retenue la premiere, et son invocation sans objet levait.
@@ -3278,8 +3292,19 @@ def go_student_without_main(source):
 # Qualificatifs bornes a huit, comme CS_MODS : leur `\s+` franchit les fins de ligne, et une
 # source faite de `const` un par ligne faisait repartir le motif de chaque ligne jusqu'au bout
 # (temps quadratique : 8 s par cas pour 100 000 caracteres).
-C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+){0,8}"
-                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)\s*\{", re.M)
+# Qualificatifs et attributs d'une fonction libre : `constexpr int f(int)`, `[[nodiscard]] int
+# f(int)`, `int f(int) noexcept` étaient ignorés — « Aucune fonction exploitable », 0 sur une
+# réponse juste. Attributs bornés (pas de retour arrière coûteux).
+C_ATTRIBUTES = r"(?:\[\[[^\[\]\n]{0,80}\]\]\s*)*"
+C_FUNC = re.compile(r"^[ \t]*" + C_ATTRIBUTES
+                    + r"(?:(?:static|inline|extern|const|constexpr|consteval)\s+){0,8}"
+                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)"
+                    r"\s*(?:noexcept(?:\s*\([^()]*\))?\s*)?\{", re.M)
+# Retour en fin de signature (C++) : `auto f(int x) -> int {`.
+C_FUNC_TRAILING = re.compile(r"^[ \t]*" + C_ATTRIBUTES
+                             + r"(?:(?:static|inline|constexpr|consteval)\s+){0,8}"
+                             r"auto\s+(\w+)\s*\(([^()]*)\)\s*(?:noexcept(?:\s*\([^()]*\))?\s*)?"
+                             r"->\s*(int|long|double)\s*\{", re.M)
 # `%.17g` et non `%g` : ce format est celui des ARGUMENTS comme des RETOURS, relus par atof.
 # `%g` s'arrête à 6 chiffres significatifs — 3.14159265 arrivait tronqué chez l'étudiant et
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
@@ -3503,10 +3528,14 @@ def c_signatures(source, cpp=False):
     verdict)."""
     cover = span_cover(cpp_class_spans(source) + cpp_namespace_spans(source) if cpp else [])
     hits = []
-    for hit in C_FUNC.finditer(source or ""):
-        if covered(cover, hit.start()):
+    found = [(h.start(), h.group(1), h.group(2), h.group(3)) for h in C_FUNC.finditer(source or "")]
+    if cpp:
+        found += [(h.start(), h.group(3), h.group(1), h.group(2))
+                  for h in C_FUNC_TRAILING.finditer(source or "")]
+        found.sort()
+    for start, ret, ident, params in found:
+        if covered(cover, start):
             continue
-        ret, ident, params = hit.group(1), hit.group(2), hit.group(3)
         ret = ret.replace(" ", "")
         if ident == "main" or ret not in C_TYPES:
             continue
@@ -3528,7 +3557,7 @@ def c_signatures(source, cpp=False):
     return unique
 
 
-CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
+CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+|\[\[[^\[\]\n]{0,80}\]\]\s*)+")
 CPP_CLASS = re.compile(r"^[ \t]*(?:class|struct)\s+(\w+)", re.M)
 # Debut d'un `template <...>`, et fins d'instruction ou de bloc : cf. cpp_follows_template.
 CPP_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<")
@@ -3655,7 +3684,7 @@ def cpp_object_api(source):
                 unhidden.add(using.group(1))
             else:
                 declared = re.search(r"(~?\w+)\s*\(", head)
-                if declared and declared.group(1) not in (class_ident, "~" + class_ident):
+                if declared and declared.group(1) not in (class_ident, "~" + class_ident, "operator"):
                     declared_names.add(declared.group(1))
             # Un constructeur DECLARE, meme prive ou non transportable, retire le constructeur
             # par defaut implicite (voir plus bas).
@@ -3672,6 +3701,11 @@ def cpp_object_api(source):
                     ctors.append(types)
                 continue
             meth = re.match(r"(int|long|double)\s+(\w+)\s*\(([^()]*)\)", bare_line)
+            # `int operator()(int)` : un opérateur n'est pas une méthode nommée `operator` — le
+            # serveur générait `->operator()`, qui ne compilait pas même sans que le harnais
+            # nomme la classe.
+            if meth and meth.group(2) == "operator":
+                meth = None
             if meth:
                 types = _c_param_types(meth.group(3))
                 if types is not None:
@@ -3703,14 +3737,24 @@ def _member_pieces(body, offset, depths, level):
     premier, le constructeur faisait sauter la ligne, la méthode n'était pas proxifiée et une
     réponse juste notait 0. `offset` est la position de `body` dans le source, `depths` vient de
     code_depths (une `}` porte la profondeur APRÈS sa fermeture). Les morceaux, mis bout à bout,
-    redonnent `body`."""
+    redonnent `body`.
+
+    Une fin de ligne ne coupe qu'à parenthèses ÉQUILIBRÉES : un membre déclaré sur plusieurs
+    lignes (`Rect(int largeur,` puis `int hauteur)`) était coupé en deux, le constructeur vu comme
+    déclaré mais pas lu, et la classe n'était plus proxifiée — 0 sur une réponse juste."""
     pieces = []
     start = 0
+    parens = 0
     for i, c in enumerate(body):
-        cut = c == chr(10) or (c in ";}" and depths[offset + i] == level)
+        if c == "(":
+            parens += 1
+        elif c == ")" and parens > 0:
+            parens -= 1
+        cut = (c == chr(10) and parens == 0) or (c in ";}" and depths[offset + i] == level)
         if cut:
             pieces.append(body[start:i + 1])
             start = i + 1
+            parens = 0
     if start < len(body):
         pieces.append(body[start:])
     return pieces
@@ -4192,7 +4236,8 @@ int main(void) {
 # ligne : sans borne, `;pub(` repete repartait de chaque `;` jusqu'au bout du texte — 8 s par
 # cas pour 100 Ko.
 RUST_FN = re.compile(
-    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
+    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?(?:(?:const|unsafe)\s+){0,2}"
+    r"fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
     re.M)
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
 
@@ -5838,8 +5883,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     for block in re.split(r"(?=^Compiled from )", javap, flags=re.M):
         interface, defaults = java_interface_defaults(block)
         if interface:
-            # Interface du code soumis : ses méthodes `default` comptent comme héritées.
+            # Interface du code soumis : ses méthodes `default` comptent comme héritées, et
+            # celles des interfaces qu'elle étend aussi (`interface Polygone extends Forme`).
             apis[interface] = ((), defaults)
+            parents[interface] = java_interfaces(block)
             continue
         source_name, ctors, instance = java_class_api(block)
         if not source_name:
@@ -6432,14 +6479,17 @@ def exec_commands(runtime, entry):
         # dossier ; student_server.py est lancé à part (sys.executable), sans cette option.
         return None, ["python3", "-I", entry]
     if runtime == "javascript":
-        return None, ["node", entry]
+        # --disable-sigusr1 : un SIGUSR1 n'ouvre pas l'inspecteur (défense en profondeur : les
+        # noteurs Node l'ignorent déjà). Sous le même UID, le code soumis pouvait l'envoyer au
+        # noteur et lire le nonce par l'inspecteur.
+        return None, ["node", "--disable-sigusr1", entry]
     if runtime == "typescript":
         # Transpile tous les .ts côte à côte (le grader spawn `node student_server` → .js résolu).
         # --noCheck : transpilation seule, typage permissif à l'exécution (parité avec l'ancien
         # runtime Piston ; les erreurs de SYNTAXE restent des erreurs de compilation).
         return (["sh", "-c", "tsc --noCheck --target es2020 --module commonjs --esModuleInterop "
                              "--skipLibCheck *.ts"],
-                ["node", entry[:-3] + ".js" if entry.endswith(".ts") else entry])
+                ["node", "--disable-sigusr1", entry[:-3] + ".js" if entry.endswith(".ts") else entry])
     if runtime == "php":
         return None, ["php", entry]
     if runtime == "bash":

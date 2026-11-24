@@ -494,6 +494,8 @@ class CodeAssemblerTest {
         assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "f")).isFalse();
         assertThat(CodeAssembler.harnessMentions("return $f(1) === 2;", "$f")).isTrue();
         assertThat(CodeAssembler.harnessMentions(null, "f")).isFalse();
+        // Un appel de MÉTHODE n'emploie pas la fonction homonyme.
+        assertThat(CodeAssembler.harnessMentions("return p.max() == 7", "max")).isFalse();
         // Dans le doute (chaîne, commentaire), le nom compte comme employé.
         assertThat(CodeAssembler.harnessMentions("return f() == 'max'", "max")).isTrue();
     }

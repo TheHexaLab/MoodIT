@@ -331,8 +331,11 @@ public class ExecutionService {
 
         // Verdict ANTI-TRICHE : réussi SEULEMENT si le harnais a émis le nonce secret (sur stderr ;
         // stdout par sécurité). Un exit(0) anticipé ou une neutralisation d'exit n'émet pas le nonce
-        // → échec. Un signal (timeout/OOM) → échec.
+        // → échec. Un signal (timeout/OOM) → échec. Le noteur sort aussi en 0 — chaque noteur ne
+        // le fait que sur un harnais vrai : un nonce obtenu par un autre chemin (le code soumis
+        // partage le stderr) ne suffit plus si le harnais, lui, a rendu faux.
         boolean passed = run != null && run.signal() == null
+                && Integer.valueOf(0).equals(run.code())
                 && (contains(run.stderr(), nonce) || contains(run.stdout(), nonce));
         return new TestResult(testCase.name(), weight, passed, passed ? null : runFailureDetail(run));
     }

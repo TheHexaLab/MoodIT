@@ -339,6 +339,51 @@ class ExecutionIntegrationTest {
         assertThat(head.get(0).detail()).contains("réservé").contains("head");
     }
 
+    /** Code soumis qui sonde un inspecteur Node : `doubler` rend la bonne valeur SEULEMENT s'il l'atteint. */
+    private static String inspectorProbe(String launch) {
+        return "const cp = require('child_process');\n"
+                + "const PROBE = \"" + launch + " (async () => { for (let i = 0; i < 60; i++) {"
+                + " try { await (await fetch(TARGET)).json(); process.exit(0); }"
+                + " catch (e) { await new Promise(r => setTimeout(r, 50)); } } process.exit(3); })();\";\n"
+                + "function doubler(n) {\n"
+                + "  try {\n"
+                + "    cp.execFileSync(process.execPath, ['-e', PROBE], { stdio: 'ignore', timeout: 4000,\n"
+                + "      env: Object.assign({}, process.env, { GRADER_PID: String(process.ppid) }) });\n"
+                + "    return n * 2;\n"
+                + "  } catch (e) { return 0; }\n"
+                + "}\n";
+    }
+
+    @Test
+    void node_grader_inspector_cannot_be_opened_by_the_submission() {
+        // Revue #246 : sous le même UID, le code soumis envoyait SIGUSR1 au noteur Node, dont
+        // l'inspecteur s'ouvrait sur 127.0.0.1:9229 (boucle locale présente sans réseau) ; il y
+        // lisait le nonce et forgeait la note. La sonde ne rend la bonne valeur que si elle
+        // atteint l'inspecteur du NOTEUR.
+        requireRuntime("javascript");
+        String grader = inspectorProbe("process.kill(+process.env.GRADER_PID, 'SIGUSR1');"
+                + " const TARGET = 'http://127.0.0.1:9229/json/list';");
+        // 10 s : quatre Node démarrent (noteur, serveur, sonde, inspecteur) — au défaut de 3 s, un
+        // échec pouvait venir du temps limite et non de la protection.
+        assertThat(passesWithin("JavaScript", grader, "return doubler(5) === 10;", 10_000)).isFalse();
+        assertThat(passesWithin("TypeScript", grader, "return doubler(5) === 10;", 10_000)).isFalse();
+        // TÉMOIN : la même sonde atteint l'inspecteur d'un Node qu'elle lance elle-même — fetch
+        // et la boucle locale fonctionnent, le refus ci-dessus vient bien du noteur.
+        String own = inspectorProbe("const c = require('child_process').spawn(process.execPath,"
+                + " ['--inspect=127.0.0.1:9230', '-e', 'setTimeout(() => {}, 5000)'], { stdio: 'ignore' });"
+                + " process.on('exit', () => c.kill());"
+                + " const TARGET = 'http://127.0.0.1:9230/json/list';");
+        List<TestResult> witness = service.evaluate(new EvaluateRequest("JavaScript", null, own,
+                List.of(new TestCaseInput("t", "return doubler(5) === 10;", 1)), 10_000));
+        assertThat(witness.get(0).passed()).as("témoin : %s", witness.get(0).detail()).isTrue();
+    }
+
+    private boolean passesWithin(String language, String code, String harness, int timeoutMs) {
+        List<TestResult> res = service.evaluate(new EvaluateRequest(language, null, code,
+                List.of(new TestCaseInput("t", harness, 1)), timeoutMs));
+        return !res.isEmpty() && res.stream().allMatch(TestResult::passed);
+    }
+
     @Test
     void sql_answer_with_a_nul_byte_cannot_forge_the_verdict() {
         // #23 : sqlite3 lit son programme ligne par ligne et s'arrête au NUL. La chaîne que le

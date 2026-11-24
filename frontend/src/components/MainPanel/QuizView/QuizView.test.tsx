@@ -260,9 +260,18 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
     await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
     expect(onFetchAttemptResult).toHaveBeenCalledWith(55, 8);
 
-    // Et retour à la tentative à revoir depuis le résumé.
-    fireEvent.click(screen.getByText('#2 · à revoir'));
+    // Et retour à la tentative à revoir depuis le résumé, au clavier : la puce activée
+    // disparaît avec le résumé, le focus est rendu à la puce du même id dans la nouvelle barre.
+    const reviewChip = screen.getByText('#2 · à revoir');
+    reviewChip.focus();
+    fireEvent.click(reviewChip);
     expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy();
+    expect(reviewChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#2 · à revoir');
+    // Le message est annoncé par une région toujours montée.
+    expect(document.querySelector('[aria-live="polite"]:not([role])')?.textContent).toContain(
+      'Tentative transmise à votre enseignant'
+    );
   });
 });
 

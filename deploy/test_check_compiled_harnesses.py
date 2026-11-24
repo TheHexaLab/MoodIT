@@ -308,6 +308,19 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(set(), chk.parse_ack(""))
         self.assertEqual(set(), chk.parse_ack(None))
 
+    def test_inventaire_vide_echoue_sauf_allow_empty(self):
+        # Un dump non chargé donnait « 0 question », bilan vide, sortie 0 : un faux feu vert.
+        with mock.patch.object(chk, "psql", return_value="[]"), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk.sys, "argv", ["check"]):
+            self.assertEqual(2, chk.main())
+        with mock.patch.object(chk, "psql", return_value="[]"), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk.sys, "argv", ["check", "--allow-empty"]):
+            self.assertEqual(0, chk.main())
+
     def test_worst(self):
         self.assertEqual(chk.OK, chk.worst([chk.OK, chk.OK]))
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.OK, chk.TO_CHECK]))

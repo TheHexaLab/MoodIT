@@ -646,14 +646,14 @@ export function QuestionFormBody({
             onBlur={() => {
               // Borné comme à l'enregistrement (1 à 60 s, entier) : « Tester » utilise la même
               // valeur que la correction réelle — pas d'aperçu qui diverge (0 s, 120 s…).
-              if (timeoutText.trim() === '') {
-                patch({ execTimeoutMs: undefined });
-                return;
-              }
               const seconds = Number(timeoutText.trim());
-              const clamped = Number.isNaN(seconds) ? null : clampTimeoutSeconds(seconds);
-              patch({ execTimeoutMs: clamped == null ? undefined : clamped * 1000 });
+              const clamped =
+                timeoutText.trim() === '' || Number.isNaN(seconds) ? null : clampTimeoutSeconds(seconds);
+              const next = clamped == null ? undefined : clamped * 1000;
               setTimeoutText(clamped == null ? '' : String(clamped));
+              // Rien de changé (clic puis sortie) : pas de patch, donc pas de « modifications
+              // non enregistrées » à la fermeture.
+              if (next !== draft.execTimeoutMs) patch({ execTimeoutMs: next });
             }}
           />
           <span id={`${timeoutId}-hint`} className={styles.fieldHint}>

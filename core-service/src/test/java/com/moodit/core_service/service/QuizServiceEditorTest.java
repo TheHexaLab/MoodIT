@@ -308,7 +308,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
             service.createQuiz(1, QuizDetailDTO.builder().title("T")
                     .questions(List.of(q.apply(-5_000), q.apply(999_999), q.apply(30_000), q.apply(null),
-                            q.apply(1_500), q.apply(1), q.apply(Integer.MAX_VALUE)))
+                            q.apply(1_500), q.apply(1), q.apply(Integer.MAX_VALUE), q.apply(0)))
                     .build());
 
             org.mockito.ArgumentCaptor<Quiz> saved = org.mockito.ArgumentCaptor.forClass(Quiz.class);
@@ -316,7 +316,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             // 1 500 ms → 2 s : le runner tronquait à 1 s ce que core budgétait à 1,5 s.
             assertThat(saved.getValue().getQuestions())
                     .extracting(com.moodit.core_service.model.Question::getExecTimeoutMs)
-                    .containsExactly(null, 60_000, 30_000, null, 2_000, 1_000, 60_000);
+                    .containsExactly(null, 60_000, 30_000, null, 2_000, 1_000, 60_000, null);
         }
 
         @Test

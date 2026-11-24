@@ -342,7 +342,9 @@ public class CodeAssembler {
      * le doute, le nom compte comme employé et garde son mandataire (comportement d'avant).
      */
     static boolean harnessMentions(String harnessCode, String name) {
-        return Pattern.compile("(?<![\\w$])" + Pattern.quote(name) + "(?![\\w$])")
+        // Pas après un point : `p.max()` appelle une MÉTHODE, il n'emploie pas la fonction `max`
+        // (lui donner un mandataire la faisait refuser comme « Nom réservé », 0 sur une réponse juste).
+        return Pattern.compile("(?<![\\w$.])" + Pattern.quote(name) + "(?![\\w$])")
                 .matcher(harnessCode == null ? "" : harnessCode).find();
     }
 
@@ -547,6 +549,10 @@ public class CodeAssembler {
                                 + "classe, puis resoumettre.\n")
                 + "; try{ process.stderr.write(__moodit_msg); process.exit(1); }catch(e){}"
                 + " throw __moodit_msg; }\n"
+                // SIGUSR1 IGNORÉ, avant que le code soumis n'existe : sous le même UID, il pouvait
+                // l'envoyer au noteur, dont Node ouvrait alors l'INSPECTEUR sur 127.0.0.1:9229 (la
+                // boucle locale existe même sans réseau) — lecture du nonce, verdict forgé.
+                + "process.on('SIGUSR1', function(){});\n"
                 + "const __moodit_cp=require('child_process'), __moodit_fs=require('fs');\n"
                 + "try { __moodit_fs.unlinkSync('grader.js'); } catch(e) {}\n"    // hors de portée du serveur
                 + "try { __moodit_fs.unlinkSync('grader.ts'); } catch(e) {}\n"    // (source TS, si présente)
@@ -1301,7 +1307,9 @@ public class CodeAssembler {
                 + "    r.id=m.id;\n"
                 + "    process.stdout.write(NL+JSON.stringify(r)+NL);\n"
                 + "  }});\n";
-        String grader = "const cp=require('child_process'), fs=require('fs');\n"
+        // SIGUSR1 ignoré avant le lancement du composant (cf. assembleJsRpc : inspecteur Node).
+        String grader = "process.on('SIGUSR1', function(){});\n"
+                + "const cp=require('child_process'), fs=require('fs');\n"
                 + "try{fs.unlinkSync('main.js');}catch(e){}\n"
                 + "const NL=String.fromCharCode(10);\n"
                 + "const child=cp.spawn(process.execPath,['jsx-server.js'],{stdio:['pipe','pipe','inherit']});\n"

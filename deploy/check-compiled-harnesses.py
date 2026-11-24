@@ -38,7 +38,7 @@ Un harnais compilé qui teste une EXCEPTION du code soumis (catch, assertThrows,
 sort À VÉRIFIER : le noteur séparé n'en reçoit pas le type, toute bonne réponse échouerait.
 
 Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER non acquitté, 1 sinon, 2 si l'inventaire est
-impossible.
+impossible ou VIDE (--allow-empty pour accepter une base sans aucune question).
 Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
 pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié sans cette option.
 
@@ -396,6 +396,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--unpublish", action="store_true",
                         help="fermer les quiz publiés qui portent une question BLOQUANT")
+    parser.add_argument("--allow-empty", action="store_true",
+                        help="accepter un inventaire VIDE (base sans question compilée ni "
+                             "interprétée) : sans cette option, c'est une erreur (sortie 2), un "
+                             "dump non chargé donnant sinon un faux feu vert")
     parser.add_argument("--ack", default="",
                         help="ids de questions À VÉRIFIER déjà rejouées à la main avec une "
                              "solution, séparés par des virgules : elles ne bloquent plus la "
@@ -412,6 +416,12 @@ def main():
         print("Inventaire impossible : %s" % e, file=sys.stderr)
         return 2
 
+    if not questions and not args.allow_empty:
+        # Une base où le dump ne s'est pas chargé (fichier mal recopié, chargement interrompu)
+        # n'a aucune question : sortir en 0 donnait le feu vert sans rien avoir rejoué.
+        print("Inventaire vide : aucune question à rejouer. Le dump est-il chargé ? "
+              "(--allow-empty si la base n'en a vraiment aucune)", file=sys.stderr)
+        return 2
     print("%d question(s) à rejouer." % len(questions))
     counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0}
     blocked_published = set()

@@ -88,9 +88,9 @@ sed -i 's/moodit.example.com/TON_DOMAINE/' deploy/Caddyfile
 Depuis la **racine** du repo :
 
 ```bash
-# Images du RUNNER des langages compilés (#116) : moodit-runner-{java,csharp,go,rust,c}.
-# Conteneurs jetables lancés par execution-service pour noter Go/Rust/C/C++/C#/Java
-# (les 10 images, ~8,5 Go au total ; à relancer quand docker/runners/ change).
+# Les 10 images RUNNER (#116) : moodit-runner-{java,csharp,go,rust,c,python,node,php,bash,sqlite}.
+# Conteneurs jetables lancés par execution-service pour TOUTE exécution de code étudiant
+# (~8,5 Go au total ; à relancer quand docker/runners/ change).
 ./docker/runners/build.sh
 
 docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build
@@ -162,6 +162,10 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > `moodit_piston`. Sans images, toute exécution rend 502 et les tentatives sont supprimées. Et
 > le clone du serveur est encore sur l'ancien commit, où `docker/runners/` n'existe pas : les
 > images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
+>
+> **Avant tout** : le contrôle préalable des harnais (section « Changement de schéma », étape 1)
+> doit être sorti en 0, et l'heure de la bascule notée (`SELECT NOW()` sur la base) ; **juste
+> après** le second `update.sh` vient son étape 2, `check-compiled-harnesses.py --unpublish`.
 >
 > Aucun `update.sh` ne doit partir seul pendant cette procédure : si une ligne de cron le lance
 > sur ce serveur (`crontab -l`), la suspendre AVANT la fusion `main → deploiement` — l'ancien
@@ -249,20 +253,29 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > la prod contre une **base jetable** chargée de son dernier dump. Pas la base de
 > `docker-compose-dev.yml` : son `db-migrate` y ajouterait les données de démo.
 >
+> Sous Git Bash (Windows), préfixer les commandes `docker` qui montent un chemin par
+> `MSYS_NO_PATHCONV=1`, sinon Flyway ne trouve aucune migration ; WSL ou Linux n'en ont pas
+> besoin.
+>
 > ```bash
+> set -o pipefail   # un dump illisible doit ARRÊTER la recette, pas charger une base vide
 > # Mêmes POSTGRES_USER / POSTGRES_DB que la prod (.env.docker), pour que le dump s'applique tel quel.
 > docker run -d --name moodit_precheck -e POSTGRES_USER="$POSTGRES_USER" \
 >   -e POSTGRES_PASSWORD=precheck -e POSTGRES_DB="$POSTGRES_DB" postgres:16
 > # L'image redémarre une fois après son initialisation : attendre le DEUXIÈME « ready ».
 > until [ "$(docker logs moodit_precheck 2>&1 | grep -c 'ready to accept connections')" -ge 2 ]; do sleep 1; done
 > # Dernier dump pris par update.sh sur le serveur (backups/db-*.sql.gz), copié en local.
-> gunzip -c db-AAAAMMJJ-HHMMSS.sql.gz | docker exec -i moodit_precheck psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+> gunzip -c db-AAAAMMJJ-HHMMSS.sql.gz \
+>   | docker exec -i moodit_precheck psql -q -v ON_ERROR_STOP=1 -1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+> # Preuve que c'est bien le dump de la prod qui est chargé (historique Flyway jusqu'à V3) :
+> docker exec moodit_precheck psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+>   "SELECT version FROM flyway_schema_history WHERE version = '3';" | grep -qx 3
 > # Migrations de CETTE version seulement (V4 et suivantes), sans la démo.
 > docker run --rm --network container:moodit_precheck -v "$PWD/db:/flyway/db:ro" flyway/flyway:13.10.0 \
 >   -url="jdbc:postgresql://localhost:5432/$POSTGRES_DB" -user="$POSTGRES_USER" -password=precheck \
 >   -locations=filesystem:/flyway/db/migration -placeholderReplacement=false migrate
 > PG_CONTAINER=moodit_precheck EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… \
->   python3 deploy/check-compiled-harnesses.py
+>   python3 deploy/check-compiled-harnesses.py   # inventaire vide = sortie 2, jamais un faux 0
 > docker rm -f moodit_precheck
 > ```
 >
@@ -453,8 +466,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
   tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
   comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,
-  `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur, dont
-  aucune capacité au-delà du minimum du superviseur root). Dans le conteneur, le code étudiant
+  `no-new-privileges` ; toutes les capacités retirées sauf le minimum du superviseur root). Dans le conteneur, le code étudiant
   tourne sous un UID dédié sans toolchain, harnais verrouillé en 700 root ; le verdict est
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Capacité : une correction compilée tient une place (au plus `EXEC_MAX_CONCURRENT − 1`, 2 en

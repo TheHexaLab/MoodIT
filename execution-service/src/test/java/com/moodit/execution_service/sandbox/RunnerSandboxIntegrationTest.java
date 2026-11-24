@@ -33,8 +33,8 @@ class RunnerSandboxIntegrationTest {
     private static final boolean SANDBOX_REQUIRED =
             Boolean.parseBoolean(System.getenv().getOrDefault("SANDBOX_REQUIRED", "false"));
 
-    private final DockerEvaluator evaluator = new DockerEvaluator(
-            new DockerSandbox("", 1536, 512, 2.0), "moodit-runner-",
+    private final DockerSandbox sandbox = new DockerSandbox("", 1536, 512, 2.0);
+    private final DockerEvaluator evaluator = new DockerEvaluator(sandbox, "moodit-runner-",
             System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
 
     /** Harnais booléen de référence : `doubler(5) == 10`, dans la forme de chaque langage. */
@@ -593,8 +593,11 @@ class RunnerSandboxIntegrationTest {
         // l'appel de suppression au démon : le conteneur restait vivant jusqu'à son mur, puis
         // en « Exited » jusqu'au balayage. Un mock ne le voit pas (son `exec()` réussit
         // toujours) : seul un vrai démon le montre.
-        java.util.Set<String> before = runnerContainers();
+        // N'agit que sur le conteneur de CE sandbox : sur un démon partagé (pile e2e, autre suite
+        // de tests), « tout conteneur runner apparu depuis » désignait aussi ceux des autres, et
+        // le nettoyage les supprimait en pleine notation.
         String infiniteLoop = "package main\n\nfunc doubler(n int) int { for {} }\n\nfunc main() {}\n";
+        java.util.Set<String> mine = new java.util.HashSet<>();
         var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         Thread worker = new Thread(() -> {
             try {
@@ -610,20 +613,25 @@ class RunnerSandboxIntegrationTest {
             long deadline = System.nanoTime() + java.time.Duration.ofSeconds(60).toNanos();
             while (created.isEmpty() && System.nanoTime() < deadline) {
                 Thread.sleep(250);
-                created = newSince(before);
+                created = sandbox.inFlightContainers();
             }
             assertThat(created).as("le conteneur de notation doit avoir démarré").isNotEmpty();
+            mine.addAll(created);
             Thread.sleep(2000);   // en pleine attente du conteneur, pas pendant sa création
             worker.interrupt();
             worker.join(java.time.Duration.ofSeconds(60).toMillis());
             assertThat(worker.isAlive()).as("la notation interrompue doit rendre la main").isFalse();
             assertThat(thrown.get()).isInstanceOf(SandboxException.class);
-            assertThat(newSince(before))
+            java.util.Set<String> remaining = new java.util.HashSet<>(runnerContainers());
+            remaining.retainAll(mine);
+            assertThat(remaining)
                     .as("aucun conteneur de cette notation ne doit rester, même arrêté")
                     .isEmpty();
         } finally {
             worker.interrupt();
-            for (String id : newSince(before)) {   // ne rien laisser derrière un test en échec
+            java.util.Set<String> left = new java.util.HashSet<>(runnerContainers());
+            left.retainAll(mine);
+            for (String id : left) {   // ne rien laisser derrière un test en échec — les siens seuls
                 new ProcessBuilder("docker", "rm", "-f", id).inheritIO().start().waitFor();
             }
         }
@@ -639,12 +647,6 @@ class RunnerSandboxIntegrationTest {
         assertThat(ps.waitFor()).as("docker ps : %s", out).isZero();
         return out.lines().map(String::trim).filter(l -> !l.isEmpty())
                 .collect(java.util.stream.Collectors.toSet());
-    }
-
-    private static java.util.Set<String> newSince(java.util.Set<String> before) throws Exception {
-        java.util.Set<String> now = new java.util.HashSet<>(runnerContainers());
-        now.removeAll(before);
-        return now;
     }
 
     @Test
