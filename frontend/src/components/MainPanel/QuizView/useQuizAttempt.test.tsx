@@ -176,6 +176,8 @@ describe('submit refusé par le serveur', () => {
     ['400 motivé → message du serveur, refus', new SubmissionRejectedError('Question 2 : code trop long.'),
       'Question 2 : code trop long.', true],
     ['400 sans message → message de refus', new SubmissionRejectedError(''), 'REFUSE', true],
+    ['413 du gateway → libellé « trop volumineux »', new SubmissionRejectedError('', 'tooLarge'),
+      'TROP_GROS', true],
     ['autre échec (réseau, 409, 5xx) → message générique, pas un refus', new Error('boom'), 'POST_KO', false],
   ])('%s, rien en vol', async (_cas, error, expected, rejected) => {
     const onFetchQuiz = vi.fn(async () => makeQuiz());
@@ -186,7 +188,7 @@ describe('submit refusé par le serveur', () => {
     const { result } = renderHook(() =>
       useQuizAttempt({
         initialQuiz, onFetchQuiz, onFetchAttempts, onSubmitQuiz, submitErrorMessage: 'POST_KO',
-        submitRejectedMessage: 'REFUSE',
+        submitRejectedMessage: 'REFUSE', submitTooLargeMessage: 'TROP_GROS',
       })
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -561,6 +563,33 @@ describe('tentative à revoir par l\'enseignant', () => {
     await waitFor(() => expect(result.current.result?.attemptId).toBe(56));
     expect(result.current.awaitingReview).toBe(false);
     expect(result.current.phase).toBe('summary');
+  });
+
+  it('relance réussie d\'une AUTRE tentative que celle affichée : seule la barre se met à jour', async () => {
+    // Quiz avec reprise : #56 à revoir, #57 corrigée et affichée. L'enseignant relance #56.
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56), summary(57, 2)])
+      .mockResolvedValue([summary(56), summary(57, 2)]);
+    const onFetchAttemptResult = vi.fn(async (_q: number, id: number) => makeResult(id));
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })), onFetchAttempts,
+        onFetchAttemptResult, attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
+    expect(result.current.attempts.find((a) => a.id === 56)?.status).toBe('review');
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() =>
+      expect(result.current.attempts.find((a) => a.id === 56)?.status).not.toBe('review')
+    );
+    // La vue reste sur #57 : pas de rechargement complet.
+    expect(result.current.result?.attemptId).toBe(57);
+    expect(onFetchAttempts).toHaveBeenCalledTimes(2);
   });
 
   it('quiz avec reprise : « refaire » quitte le message d\'attente', async () => {

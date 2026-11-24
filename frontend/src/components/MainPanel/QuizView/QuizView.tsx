@@ -89,6 +89,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
     submitRejectedMessage: t.submitRejected,
+    submitTooLargeMessage: t.submitTooLarge,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
   });

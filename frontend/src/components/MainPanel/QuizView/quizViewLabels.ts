@@ -23,6 +23,8 @@ export interface QuizViewLabels {
   submitError: string;
   /** Soumission refusée par le serveur sans motif lisible : renvoyer telle quelle ne sert à rien. */
   submitRejected: string;
+  /** Soumission refusée car trop volumineuse (413 du gateway, au-delà de 1 Mo). */
+  submitTooLarge: string;
   /** Message d'erreur quand la vérification du code est indisponible (503) : la tentative
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
@@ -72,6 +74,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   loadError: 'Impossible de charger le quiz. Réessayez.',
   submitError: 'La soumission a échoué. Réessayez.',
   submitRejected: 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
+  submitTooLarge: 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
   codeVerificationUnavailable:
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:

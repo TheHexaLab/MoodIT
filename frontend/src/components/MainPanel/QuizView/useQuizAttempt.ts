@@ -148,6 +148,8 @@ interface UseQuizAttemptParams {
    * renvoyer la même réponse ne servirait à rien (label, surchargeable).
    */
   submitRejectedMessage?: string;
+  /** Message d'une soumission trop volumineuse (413 du gateway) — label, surchargeable. */
+  submitTooLargeMessage?: string;
   /**
    * Message affiché si la vérification du code est indisponible (503) : la tentative n'a pas été
    * enregistrée, l'étudiant peut renvoyer (label, surchargeable).
@@ -256,6 +258,7 @@ export function useQuizAttempt({
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
   submitRejectedMessage = 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
+  submitTooLargeMessage = 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
   codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
 }: UseQuizAttemptParams): QuizAttemptApi {
@@ -502,6 +505,30 @@ export function useQuizAttempt({
     }
   }, [attemptOutcome, awaitingReview, currentAttemptId, initialQuiz.id, reload]);
 
+  // Relance réussie d'une tentative à revoir qui n'est PAS celle affichée (l'étudiant regarde
+  // une autre tentative) : seule la barre des tentatives se met à jour. Sans cela, la puce
+  // restait « à revoir » et son clic affichait encore le message d'attente.
+  useEffect(() => {
+    if (
+      !attemptOutcome?.ok ||
+      attemptOutcome.quizId !== initialQuiz.id ||
+      (awaitingReview && attemptOutcome.attemptId === currentAttemptId) ||
+      !attempts.some((a) => a.id === attemptOutcome.attemptId && isAwaitingReview(a))
+    ) {
+      return;
+    }
+    const refresh = fetchAttemptsRef.current;
+    if (!refresh) return;
+    void (async () => {
+      try {
+        const list = await refresh(initialQuiz.id);
+        if (mountedRef.current) setAttempts(list);
+      } catch {
+        // Barre laissée telle quelle : le prochain rechargement la recale.
+      }
+    })();
+  }, [attemptOutcome, attempts, awaitingReview, currentAttemptId, initialQuiz.id]);
+
   // Persiste le brouillon de passation (réponses + touched + position) à chaque changement, tant
   // qu'on est en train de répondre. Gardé par `hydratedRef` pour ne pas écraser un brouillon stocké
   // avec l'état pristine du montage (avant restauration). En dehors de `taking` (résumé/révision),
@@ -602,7 +629,9 @@ export function useQuizAttempt({
       // Refus (400, 413) : le message du serveur dit quoi corriger, « réessayez » non.
       if (e instanceof SubmissionRejectedError) {
         setSubmitRejected(true);
-        setSubmitError(e.message || submitRejectedMessage);
+        setSubmitError(
+          e.reason === 'tooLarge' ? submitTooLargeMessage : e.message || submitRejectedMessage
+        );
       } else {
         setSubmitError(submitErrorMessage);
       }
@@ -611,7 +640,7 @@ export function useQuizAttempt({
     }
   }, [
     quiz, initialQuiz.id, answers, attempts.length, onSubmitQuiz, submitErrorMessage,
-    submitRejectedMessage, reconcilePending,
+    submitRejectedMessage, submitTooLargeMessage, reconcilePending,
   ]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */

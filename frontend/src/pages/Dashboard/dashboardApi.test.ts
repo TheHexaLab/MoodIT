@@ -19,7 +19,6 @@ vi.mock('../../helpers/api.ts', () => ({
 import { apiFetch } from '../../helpers/api.ts';
 import {
   ExecutionBusyError,
-  SUBMISSION_TOO_LARGE_MESSAGE,
   SubmissionRejectedError,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import {
@@ -384,11 +383,11 @@ describe('submitQuiz', () => {
     expect((error as Error).message).toBe(message);
   });
 
-  it('413 du gateway (corps trop gros) → SubmissionRejectedError à message fixe', async () => {
+  it('413 du gateway (corps trop gros) → SubmissionRejectedError de raison tooLarge', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes(413));
     const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SubmissionRejectedError);
-    expect((error as Error).message).toBe(SUBMISSION_TOO_LARGE_MESSAGE);
+    expect((error as SubmissionRejectedError).reason).toBe('tooLarge');
   });
 
   it('400 dont le corps ne se lit pas → SubmissionRejectedError sans message', async () => {

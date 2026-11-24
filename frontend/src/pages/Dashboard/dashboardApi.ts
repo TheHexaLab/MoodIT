@@ -77,7 +77,6 @@ import {
   ExecutionBusyError,
   type QuizResult,
   type QuizSubmission,
-  SUBMISSION_TOO_LARGE_MESSAGE,
   SubmissionRejectedError,
   type RunCodeInput,
   type RunResult,
@@ -267,7 +266,8 @@ export async function fetchLanguages(): Promise<Language[]> {
  * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
  * via {@link fetchAttemptResult}. 409 si déjà soumise ou déjà en cours de correction. 400
  * (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ; 413
- * (corps au-delà de la limite du gateway) → `SubmissionRejectedError` à message fixe.
+ * (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`
+ * (texte pris dans les libellés de la vue).
  */
 export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
@@ -275,7 +275,7 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(submission),
   });
-  if (res.status === 413) throw new SubmissionRejectedError(SUBMISSION_TOO_LARGE_MESSAGE);
+  if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
   if (res.status === 400) {
     // Refus métier de core : texte brut, en français, qui dit quoi corriger. Un corps JSON est
     // une erreur générique de Spring (anglais, technique) : message vide, l'écran affiche le sien.
