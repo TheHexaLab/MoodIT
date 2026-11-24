@@ -985,6 +985,88 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void abstract_intermediates_preprocessor_macros_embedding_and_attributes_are_graded() {
+        // Revue #246 (4e tour) : chacune de ces écritures notait 0 une réponse juste.
+        // C++ : classe intermédiaire restée abstraite sans le déclarer (`new` illégal dans le
+        // serveur), constructeur par défaut protégé de la base, type de retour seul sur sa ligne,
+        // `long int`.
+        gradedThenWrong("C++", "Carre k(3); Derivee d; Calc c;"
+                + " return k.aire() == 9 && k.cotes() == 4 && d.deux() == 2"
+                + " && c.somme(2, 3) == 5 && c.grand(7) == 7000;", """
+                class Forme {
+                public:
+                    virtual int aire() = 0;
+                    virtual ~Forme() {}
+                };
+                class Polygone : public Forme {
+                protected:
+                    int n;
+                public:
+                    Polygone(int n) : n(n) {}
+                    int cotes() { return n; }
+                };
+                class Carre : public Polygone {
+                    int c;
+                public:
+                    Carre(int c) : Polygone(4), c(c) {}
+                    int aire() { return c * c; }
+                };
+                class Base {
+                protected:
+                    Base() {}
+                public:
+                    int un() { return 1; }
+                };
+                class Derivee : public Base {
+                public:
+                    int deux() { return un() + 1; }
+                };
+                class Calc {
+                public:
+                    int
+                    somme(int a, int b) const { return a + b; }
+                    long int grand(long int x) { return x * 1000; }
+                };
+                """, "c * c", "c + c");
+        // C++ : `#define int long long` (programmation compétitive) ne déborde plus sur le serveur.
+        gradedThenWrong("C++", "return carre(5) == 25;", """
+                #define int long long
+                int carre(int x) { return x * x; }
+                signed main() { return 0; }
+                """, "x * x", "x + x");
+        // C : fonction écartée par le préprocesseur, que le serveur appelait.
+        gradedThenWrong("C", "return doubler(4) == 8;", """
+                #ifdef DEBUG
+                int trace(int x) { return x; }
+                #endif
+                int doubler(int x) { return 2 * x; }
+                """, "2 * x", "3 * x");
+        // Go : méthode promue par composition.
+        gradedThenWrong("Go", "return NewCarre(3).Aire() == 9", """
+                package main
+
+                type Rectangle struct {
+                    l, h int
+                }
+
+                func (r *Rectangle) Aire() int { return r.l * r.h }
+
+                type Carre struct {
+                    Rectangle
+                }
+
+                func NewCarre(c int) *Carre { return &Carre{Rectangle{c, c}} }
+
+                func main() {}
+                """, "r.l * r.h", "r.l + r.h");
+        // Rust : attribut sur la ligne de la fonction.
+        gradedThenWrong("Rust", "doubler(4) == 8", """
+                #[inline] pub fn doubler(x: i32) -> i32 { 2 * x }
+                fn main() {}
+                """, "2 * x", "3 * x");
+    }
+
+    @Test
     void java_public_class_declared_after_an_import_on_the_same_line_is_graded() {
         // Revue #246 : la classe publique n'était reconnue qu'en début de ligne. Le fichier
         // déposé prenait un autre nom, et javac refusait « class Rectangle is public, should be
@@ -1646,18 +1728,17 @@ class RpcGradingIntegrationTest {
         for (String language : List.of("C", "C++")) {
             assertThat(note(language, h, "int doubler(int n) { return n * 2; }\n").passed())
                     .as(language + " : témoin juste").isTrue();
-            // `return` : c'est le programme SOUMIS (etu_build) qui ne compile plus.
+            // La macro ne détraque que la fonction SOUMISE : le serveur généré s'en débarrasse
+            // (`#undef`, revue #246), répond normalement, et c'est le harnais du noteur, intact,
+            // qui juge la réponse fausse. Atteint par la macro, il aurait renvoyé vrai.
             TestResult ret = note(language, h,
                     "#define return return 1 ||\nint doubler(int n) { return n * 3; }\n");
             assertThat(ret.passed()).as(language + " : return").isFalse();
-            assertThat(ret.detail()).as(language + " : return")
-                    .contains("etu_build").doesNotContain("noteur");
-            // `if` : le programme soumis compile, le noteur le questionne, et c'est le programme
-            // soumis, détraqué par sa propre macro, qui ne répond plus.
+            assertThat(ret.detail()).as(language + " : return").isEqualTo("Le harnais a renvoyé faux");
             TestResult cond = note(language, h,
                     "#define if(c) if (0)\nint doubler(int n) { return n * 3; }\n");
             assertThat(cond.passed()).as(language + " : if").isFalse();
-            assertThat(cond.detail()).as(language + " : if").contains("appel refuse par le code soumis");
+            assertThat(cond.detail()).as(language + " : if").isEqualTo("Le harnais a renvoyé faux");
         }
     }
 

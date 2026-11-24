@@ -493,16 +493,43 @@ export function useQuizAttempt({
 
   // Tentative à revoir (#116) affichée : l'enseignant peut relancer sa correction à tout moment.
   // Son verdict arrive par le même événement qu'une soumission, alors qu'aucune n'est en cours
-  // ici (reconcilePending ne l'attend pas) : on recharge pour afficher le résultat.
+  // ici (reconcilePending ne l'attend pas). On affiche le résultat de CETTE tentative — `reload`
+  // ouvrait la dernière de l'historique, pas forcément celle que l'étudiant regardait —, sans
+  // écran de chargement : la barre reste montée et le focus clavier sur sa puce. Rechargement
+  // complet en repli si l'une des deux lectures échoue.
   useEffect(() => {
     if (
-      awaitingReview &&
-      attemptOutcome?.ok &&
-      attemptOutcome.quizId === initialQuiz.id &&
-      attemptOutcome.attemptId === currentAttemptId
+      !awaitingReview ||
+      !attemptOutcome?.ok ||
+      attemptOutcome.quizId !== initialQuiz.id ||
+      attemptOutcome.attemptId !== currentAttemptId
     ) {
-      void reload();
+      return;
     }
+    const attemptId = attemptOutcome.attemptId;
+    const refresh = fetchAttemptsRef.current;
+    const fetchResult = fetchAttemptResultRef.current;
+    if (!refresh || !fetchResult) {
+      void reload();
+      return;
+    }
+    void (async () => {
+      try {
+        const [list, attemptResult] = await Promise.all([
+          refresh(initialQuiz.id),
+          fetchResult(initialQuiz.id, attemptId),
+        ]);
+        if (!mountedRef.current) return;
+        setAttempts(list);
+        setResult(attemptResult);
+        setCurrentAttemptId(attemptId);
+        setCurrentIndex(0);
+        setAwaitingReview(false);
+        setPhase('summary');
+      } catch {
+        if (mountedRef.current) void reload();
+      }
+    })();
   }, [attemptOutcome, awaitingReview, currentAttemptId, initialQuiz.id, reload]);
 
   // Relance réussie d'une tentative à revoir qui n'est PAS celle affichée (l'étudiant regarde

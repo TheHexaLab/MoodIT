@@ -168,8 +168,10 @@ public class CodeAssembler {
     // ── Python ─────────────────────────────────────────────────────────────────
 
     /** Noms de fonctions et classes de PREMIER NIVEAU définis par l'étudiant (pour créer les proxys). */
-    private static final Pattern PY_DEF = Pattern.compile("(?m)^(?:async\\s+)?def\\s+([A-Za-z_]\\w*)");
-    private static final Pattern PY_CLASS = Pattern.compile("(?m)^class\\s+([A-Za-z_]\\w*)");
+    // Identifiants Unicode (`def carré`) : en ASCII seul, le mandataire s'appelait `carr`, et
+    // la réponse juste notait 0 (revue #246). `(?U)` rend `\\w` Unicode.
+    private static final Pattern PY_DEF = Pattern.compile("(?mU)^(?:async\\s+)?def\\s+([\\p{L}_]\\w*)");
+    private static final Pattern PY_CLASS = Pattern.compile("(?mU)^class\\s+([\\p{L}_]\\w*)");
 
     /**
      * Python : exécution ISOLÉE en deux processus (cf. proxy/RPC). Le harnais du prof tourne
@@ -223,15 +225,16 @@ public class CodeAssembler {
             String startCode) {
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        java.util.Set<String> mentioned = harnessNames(harnessCode);
         for (String f : matchAll(PY_DEF, studentCode)) {
             if (f.startsWith("__moodit")) continue;   // pas de collision avec l'infra du noteur
-            if (!harnessMentions(harnessCode, f)) continue;   // mandataire inutile, cf. la méthode
+            if (!mentioned.contains(f)) continue;   // mandataire inutile, cf. harnessMentions
             names.add(f);
             proxies.append(pyFunctionProxy(f));
         }
         for (String c : matchAll(PY_CLASS, studentCode)) {
             if (c.startsWith("__moodit")) continue;
-            if (!harnessMentions(harnessCode, c)) continue;
+            if (!mentioned.contains(c)) continue;
             names.add(c);
             proxies.append(pyClassProxy(c));
         }
@@ -342,10 +345,34 @@ public class CodeAssembler {
      * le doute, le nom compte comme employé et garde son mandataire (comportement d'avant).
      */
     static boolean harnessMentions(String harnessCode, String name) {
-        // Pas après un point : `p.max()` appelle une MÉTHODE, il n'emploie pas la fonction `max`
-        // (lui donner un mandataire la faisait refuser comme « Nom réservé », 0 sur une réponse juste).
-        return Pattern.compile("(?<![\\w$.])" + Pattern.quote(name) + "(?![\\w$])")
-                .matcher(harnessCode == null ? "" : harnessCode).find();
+        return harnessNames(harnessCode).contains(name);
+    }
+
+    /** Suite maximale de caractères d'identifiant (Unicode, `$` compris). */
+    private static final Pattern NAME_RUN = Pattern.compile("(?U)[\\w$]+");
+
+    /**
+     * Noms que le harnais EMPLOIE, extraits en UN passage (cf. {@link #harnessMentions}) : une
+     * regex par nom soumis relisait tout le harnais à chaque fois — des milliers de noms soumis
+     * contre un harnais de 50 Ko, plusieurs secondes de CPU par cas, hors de toute place du
+     * sandbox. Un nom précédé d'un point n'en est pas un : `p.max()` appelle une MÉTHODE (lui
+     * donner un mandataire la faisait refuser comme « Nom réservé », 0 sur une réponse juste) —
+     * sauf après `...` : `Math.max(...valeurs())` appelle bien la fonction `valeurs`, et sans
+     * mandataire l'appel échouait sans bruit (0 sur une réponse juste, revue #246).
+     */
+    static java.util.Set<String> harnessNames(String harnessCode) {
+        String code = harnessCode == null ? "" : harnessCode;
+        java.util.Set<String> found = new java.util.HashSet<>();
+        Matcher m = NAME_RUN.matcher(code);
+        while (m.find()) {
+            int at = m.start();
+            boolean member = at > 0 && code.charAt(at - 1) == '.'
+                    && !(at >= 3 && code.startsWith("...", at - 3));
+            if (!member) {
+                found.add(m.group());
+            }
+        }
+        return found;
     }
 
     /**
@@ -478,10 +505,10 @@ public class CodeAssembler {
     // ne trouvait pas `f`, et une réponse juste était notée fausse.
     private static final String JS_EXPORT = "(?:export\\s+(?:default\\s+)?)?";
     private static final Pattern JS_CALLABLE = Pattern.compile(
-            "(?m)^" + JS_EXPORT + "(?:async\\s+)?function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)"
-                    + "|(?m)^" + JS_EXPORT + "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=");
+            "(?mU)^" + JS_EXPORT + "(?:async\\s+)?function\\s*\\*?\\s*([\\p{L}_$][\\w$]*)"
+                    + "|(?mU)^" + JS_EXPORT + "(?:const|let|var)\\s+([\\p{L}_$][\\w$]*)\\s*=");
     private static final Pattern JS_CLASS = Pattern.compile(
-            "(?m)^" + JS_EXPORT + "(?:abstract\\s+)?class\\s+([A-Za-z_$][\\w$]*)");
+            "(?mU)^" + JS_EXPORT + "(?:abstract\\s+)?class\\s+([\\p{L}_$][\\w$]*)");
 
     /**
      * JavaScript : exécution ISOLÉE en deux processus (cf. {@link #assemblePython} pour le principe).
@@ -522,8 +549,9 @@ public class CodeAssembler {
         callables.removeIf(n -> n.startsWith("__moodit"));   // pas de collision avec l'infra du noteur
         classes.removeIf(n -> n.startsWith("__moodit"));
         // Mandataires des seuls noms que le harnais emploie (cf. harnessMentions).
-        callables.removeIf(n -> !harnessMentions(harnessCode, n));
-        classes.removeIf(n -> !harnessMentions(harnessCode, n));
+        java.util.Set<String> mentioned = harnessNames(harnessCode);
+        callables.removeIf(n -> !mentioned.contains(n));
+        classes.removeIf(n -> !mentioned.contains(n));
         for (String f : callables) {
             proxies.append(jsFunctionProxy(f));
         }
@@ -648,8 +676,8 @@ public class CodeAssembler {
     // ── PHP ──────────────────────────────────────────────────────────────────────
 
     /** Symboles PHP de premier niveau (colonne 0) : fonctions et classes. */
-    private static final Pattern PHP_FUNC = Pattern.compile("(?m)^function\\s+([A-Za-z_]\\w*)");
-    private static final Pattern PHP_CLASS = Pattern.compile("(?m)^(?:abstract\\s+|final\\s+)?class\\s+([A-Za-z_]\\w*)");
+    private static final Pattern PHP_FUNC = Pattern.compile("(?mU)^function\\s+([\\p{L}_]\\w*)");
+    private static final Pattern PHP_CLASS = Pattern.compile("(?mU)^(?:abstract\\s+|final\\s+)?class\\s+([\\p{L}_]\\w*)");
 
     /**
      * PHP : exécution ISOLÉE en deux processus (cf. {@link #assemblePython}). Le NOTEUR (grader.php)
@@ -759,9 +787,10 @@ public class CodeAssembler {
             String startCode) {
         StringBuilder proxies = new StringBuilder();
         java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        java.util.Set<String> mentioned = harnessNames(harnessCode);
         for (String f : matchAll(BASH_FUNC, studentCode)) {
             if (f.startsWith("__moodit")) continue;
-            if (!harnessMentions(harnessCode, f)) continue;   // cf. harnessMentions
+            if (!mentioned.contains(f)) continue;   // cf. harnessMentions
             names.add(f);
             proxies.append(bashProxy(f));
         }
@@ -918,11 +947,15 @@ public class CodeAssembler {
      * en capturant le NOM de la table ciblée (groupe 1) pour ne garder que les tables de travail.
      */
     private static final Pattern SQL_DUMP_TARGET = Pattern.compile(
-            "(?is)^\\s*(?:CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?|INSERT(?:\\s+OR\\s+\\w+)?\\s+INTO)"
+            "(?isU)^\\s*(?:CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?|INSERT(?:\\s+OR\\s+\\w+)?\\s+INTO)"
                     + "\\s+[\"'`\\[]?(\\w+)");
-    /** {@code CREATE TABLE <nom>} — pour lister les tables de travail déclarées par le prof (setup). */
+    /**
+     * {@code CREATE TABLE <nom>} — pour lister les tables de travail déclarées par le prof (setup).
+     * Nom Unicode compris (`(?U)`) : `CREATE TABLE élèves` donnait une liste vide, la phase 2
+     * rechargeait une base vide et notait 0 une réponse juste (revue #246).
+     */
     private static final Pattern SQL_CREATE_TABLE = Pattern.compile(
-            "(?is)CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+[\"'`\\[]?(\\w+)");
+            "(?isU)CREATE\\s+TABLE(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+[\"'`\\[]?(\\w+)");
 
     /** Vrai si le harnais porte {@code -- @student} → mode modification (exécution ISOLÉE en 2 phases). */
     public static boolean sqlHasStudentMarker(String harnessCode) {

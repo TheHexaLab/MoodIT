@@ -265,11 +265,12 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > clone (`.env.docker` chargé) :
 >
 > ```bash
-> set -o pipefail
+> ( set -euo pipefail   # un pg_dump en échec ne doit pas laisser un dump tronqué passer pour bon
 > { docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --schema-only "$POSTGRES_DB" &&
 >   docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --data-only --disable-triggers \
 >     -t quiz -t question -t language -t test_case -t flyway_schema_history "$POSTGRES_DB"
 > } | gzip > precheck-$(date +%Y%m%d-%H%M%S).sql.gz
+> )
 > ```
 >
 > (`pg_dump` avertit d'une clé étrangère circulaire sur `language` : `--disable-triggers` est
@@ -282,7 +283,12 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > besoin.
 >
 > ```bash
-> set -o pipefail   # un dump illisible doit ARRÊTER la recette, pas charger une base vide
+> # Sous-shell `set -euo pipefail` : la PREMIÈRE étape en échec arrête tout (dump illisible,
+> # base qui n'est pas celle de la prod, migration refusée), et la base jetable est supprimée
+> # à la sortie dans tous les cas. Le code de sortie du bloc est celui du contrôle.
+> (
+> set -euo pipefail
+> trap 'docker rm -f moodit_precheck >/dev/null 2>&1' EXIT
 > # Mêmes POSTGRES_USER / POSTGRES_DB que la prod (.env.docker), pour que le dump s'applique tel quel.
 > docker run -d --name moodit_precheck -e POSTGRES_USER="$POSTGRES_USER" \
 >   -e POSTGRES_PASSWORD=precheck -e POSTGRES_DB="$POSTGRES_DB" postgres:16
@@ -291,16 +297,19 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > # Dump frais pris ci-dessus sur le serveur, copié en local.
 > gunzip -c precheck-AAAAMMJJ-HHMMSS.sql.gz \
 >   | docker exec -i moodit_precheck psql -q -v ON_ERROR_STOP=1 -1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-> # Preuve que c'est bien le dump de la prod qui est chargé (historique Flyway jusqu'à V3) :
-> docker exec moodit_precheck psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
->   "SELECT version FROM flyway_schema_history WHERE version = '3';" | grep -qx 3
+> # Preuve que c'est bien le dump de la prod : sa DERNIÈRE migration appliquée est celle de la
+> # prod avant cette version (3 pour #116). Une base vide, ou déjà migrée plus loin, échoue ici.
+> PROD_VERSION=3
+> [ "$(docker exec moodit_precheck psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+>   "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1;")" \
+>   = "$PROD_VERSION" ]
 > # Migrations de CETTE version seulement (V4 et suivantes), sans la démo.
 > docker run --rm --network container:moodit_precheck -v "$PWD/db:/flyway/db:ro" flyway/flyway:13.10.0 \
 >   -url="jdbc:postgresql://localhost:5432/$POSTGRES_DB" -user="$POSTGRES_USER" -password=precheck \
 >   -locations=filesystem:/flyway/db/migration -placeholderReplacement=false migrate
 > PG_CONTAINER=moodit_precheck EXEC_URL=http://localhost:8085 INTERNAL_TOKEN=… \
 >   python3 deploy/check-compiled-harnesses.py   # inventaire vide = sortie 2, jamais un faux 0
-> docker rm -f moodit_precheck
+> )
 > ```
 >
 > `EXEC_URL` est obligatoire sous Docker Desktop : l'IP d'un conteneur n'y est pas joignable

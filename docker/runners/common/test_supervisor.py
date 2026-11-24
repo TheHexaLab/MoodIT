@@ -693,18 +693,86 @@ class SignatureFormsTest(unittest.TestCase):
             "struct Base { int un() { return 1; } };\n"
             "struct Derivee final : virtual public Base { };\n")}
         self.assertEqual(([["int"]], [("int", "aire", [])]), api["Carre"])
-        self.assertEqual(([["int"]], [("int", "aire", [])]), api["Cube"])
+        # Aucun constructeur déclaré : le défaut (vérifié par moodit_cree), plus ceux repris.
+        self.assertEqual(([[], ["int"]], [("int", "aire", [])]), api["Cube"])
         self.assertEqual([("int", "add", ["int", "int"])], api["Calc"][1])
         # Dérivée sans constructeur déclaré, base constructible sans argument : défaut implicite.
         self.assertEqual(([[]], [("int", "un", [])]), api["Derivee"])
-        # Base sans constructeur par défaut : la dérivée n'en reçoit pas (il ne compilerait pas).
-        sans_defaut = {n: c for n, c, _m in supervisor.cpp_object_api(
-            "class Forme {\npublic:\n  Forme(int c) {}\n  int aire() { return 1; }\n};\n"
+        # Base sans constructeur par défaut, ou au constructeur protégé : la dérivée reçoit le
+        # sien ; moodit_cree tranche à la compilation (revue #246).
+        protege = {n: c for n, c, _m in supervisor.cpp_object_api(
+            "class Forme {\nprotected:\n  Forme() {}\npublic:\n  int aire() { return 1; }\n};\n"
             "class Carre : public Forme {\npublic:\n  int cote() { return 2; }\n};\n")}
-        self.assertNotIn("Carre", sans_defaut)
+        self.assertEqual([[]], protege["Carre"])
         # `public::x` n'est pas une étiquette.
         self.assertEqual([], [n for n, _c, _m in supervisor.cpp_object_api(
             "class K {\n  int f() { return 1; }\n};\n")])
+
+    def test_c_scalar_spellings(self):
+        for text, expected in (("long int", "long"), ("signed", "int"), ("signed int", "int"),
+                               ("long signed int", "long"), ("signed long", "long"),
+                               ("double", "double"), ("long long", None), ("long double", None),
+                               ("unsigned int", None), ("int int", None), ("", None)):
+            with self.subTest(text=text):
+                self.assertEqual(expected, supervisor.c_scalar_type(text))
+        self.assertEqual([("long", "f", ["long", "int"]), ("int", "g", ["int"])],
+                         supervisor.c_signatures("long int f(long int a, signed b) { return a; }\n"
+                                                 "signed int g(signed int x) { return x; }\n"))
+        self.assertEqual([], supervisor.c_signatures("long long h(long long x) { return x; }\n"
+                                                     "long double k(long double x) { return x; }\n"))
+        self.assertEqual(["long", "int"], supervisor._c_param_types("long int a, signed"))
+        self.assertIsNone(supervisor._c_param_types("unsigned int a"))
+
+    def test_cpp_return_type_on_its_own_line(self):
+        api = {n: m for n, _c, m in supervisor.cpp_object_api(
+            "class C {\npublic:\n  int\n  somme(int a) const { return a; }\n"
+            "  [[nodiscard]]\n  long int\n  grand() { return 1; }\n"
+            "#ifdef X\n  int cache() { return 0; }\n#endif\n};\n")}
+        self.assertEqual({("int", "somme"), ("long", "grand"), ("int", "cache")},
+                         {(r, n) for r, n, _t in api["C"]})
+
+    def test_c_server_neutralizes_submitted_keyword_macros(self):
+        server = supervisor.c_server_source([("int", "f", ["int"])], "#define int long long\n",
+                                            cpp=True)
+        self.assertLess(server.index("#define int long long"), server.index("#undef int\n"))
+        self.assertLess(server.index("#undef int\n"), server.index("moodit_lit_int"))
+        self.assertIn("(int) ::f(moodit_a0)", server)
+
+    def test_c_preprocessor_segment_and_dropped_names(self):
+        pre = ('# 1 "pp.c"\n# 1 "<built-in>"\nint builtin_noise;\n# 1 "/usr/include/stdio.h" 1 3\n'
+               "int printf(const char *, ...);\n# 3 \"pp.c\" 2\nint doubler(int x) { return 2 * x; }\n")
+        self.assertEqual("int doubler(int x) { return 2 * x; }",
+                         supervisor.c_student_segment(pre, "pp.c"))
+        present = {"int", "doubler", "x", "return"}
+        methods = [("int", "trace", ["int"]), ("int", "doubler", ["int"]), ("int", "FN", ["int"])]
+        objects = [("Cache", [[]], []), ("doubler", [[]], [])]
+        kept_m, kept_o = supervisor.c_drop_absent(
+            methods, objects, present, "#ifdef DEBUG\nint trace(int x);\n#endif\n#define FN doubler\n")
+        self.assertEqual(["doubler", "FN"], [m[1] for m in kept_m])
+        self.assertEqual(["doubler"], [o[0] for o in kept_o])
+        # Sans directive conditionnelle : pas de préprocesseur (None), rien n'est écarté.
+        self.assertIsNone(supervisor.c_preprocessed_names("int f(int x) { return x; }", "gcc",
+                                                          "-std=gnu17", ".", "c"))
+        self.assertTrue(supervisor.C_CONDITIONAL.search("int a;\n  #  ifdef X\n"))
+        self.assertFalse(supervisor.C_CONDITIONAL.search("#include <stdio.h>\n#define A 1\n"))
+
+    def test_go_promoted_methods_through_embedding(self):
+        src = ("type Rectangle struct {\n\tl, h int\n}\n"
+               "func (r *Rectangle) Aire() int { return r.l * r.h }\n"
+               "func (r Rectangle) Perimetre() int { return 2 * (r.l + r.h) }\n"
+               "type Carre struct {\n\t*Rectangle `json:\"r\"`\n\tnom string\n}\n"
+               "func NewCarre(c int) *Carre { return &Carre{&Rectangle{c, c}, \"c\"} }\n"
+               "func (c Carre) Perimetre(k int) int { return k }\n")
+        self.assertEqual({"Carre": ["Rectangle"]}, supervisor.go_embedded_types(src))
+        api = {t: m for t, _c, m in supervisor.go_object_api(src)}
+        # `Aire` promue ; `Perimetre` de Carre MASQUE celle de Rectangle (règle de Go).
+        self.assertEqual({("Perimetre", ("int",)), ("Aire", ())},
+                         {(m[1], tuple(m[2])) for m in api["Carre"]})
+
+    def test_rust_attribute_before_fn(self):
+        self.assertEqual(["doubler", "tripler"], [n for _r, n, _t in supervisor.rust_signatures(
+            "#[inline] pub fn doubler(x: i32) -> i32 { 2 * x }\n"
+            "#[must_use] #[inline(always)] fn tripler(x: i32) -> i32 { 3 * x }\nfn main() {}\n")])
 
     def test_go_method_with_unnamed_receiver(self):
         src = ("type Calculatrice struct{}\n"
@@ -1754,7 +1822,7 @@ class Review24Test(unittest.TestCase):
     def test_rust_field_comment_loses_nothing(self):
         # PRECONDITION seulement : la capture fonctionne sur la source NETTOYEE. Le defaut etait
         # a l'APPEL (run_rust_rpc lui passait la source brute), invisible ici : il est garde par
-        # rust_champ_commente_note_juste dans RpcGradingIntegrationTest.
+        # rust_commented_field_graded_correctly dans RpcGradingIntegrationTest.
         src = self.NL.join(["struct Rectangle {",
                             "    largeur: i32, // en cm, environ",
                             "    hauteur: i32,",
@@ -1777,7 +1845,7 @@ class Review24Test(unittest.TestCase):
 
     def test_go_field_tag_loses_nothing(self):
         # PRECONDITION seulement, comme ci-dessus : l'appel (run_go_rpc) est garde par
-        # go_champ_etiquete_note_juste dans RpcGradingIntegrationTest.
+        # go_tagged_field_graded_correctly dans RpcGradingIntegrationTest.
         label = self.BT + "json:" + self.Q + "l" + self.Q + self.BT
         src = self.NL.join(["type Rectangle struct {",
                             self.TAB + "Largeur int " + label,
@@ -3089,12 +3157,18 @@ class Review246eTest(unittest.TestCase):
             "    int h() { return 2; }",
             "};", ""])
         obj_list = supervisor.cpp_object_api(supervisor.blank_code(src))
+        # La DÉRIVÉE reçoit aussi le constructeur par défaut : le serveur le construit par
+        # moodit_cree, qui le refuse à l'exécution s'il ne compile pas (ici, Base(int) seul),
+        # au lieu de casser le programme de l'étudiant.
         self.assertEqual(obj_list, [
             ("Calculatrice", [[]], [("int", "additionner", ["int", "int"])]),
-            ("Base", [["int"]], [("int", "g", [])])])
+            ("Base", [["int"]], [("int", "g", [])]),
+            ("Derivee", [[]], [("int", "h", []), ("int", "g", [])])])
         self.assertIn("    Calculatrice() {", supervisor.cpp_object_stub(obj_list))
-        self.assertIn("moodit_objets_Calculatrice[moodit_n_Calculatrice++] = new ::Calculatrice();",
-                      supervisor.cpp_object_dispatch(obj_list)[1])
+        stacks, branches = supervisor.cpp_object_dispatch(obj_list)
+        self.assertIn("::Calculatrice *moodit_o = moodit_cree< ::Calculatrice >();", branches)
+        self.assertIn("__is_constructible(moodit_K, moodit_A...)", stacks)
+        self.assertNotIn("new ::", branches)
 
     # ── Rust ─────────────────────────────────────────────────────────────────────────────
     def test_rust_unit_struct_is_proxied(self):
@@ -3217,8 +3291,8 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
             # En C++, l'appel est qualifié : `using namespace std;` rendait ambiguë une fonction
             # soumise au nom d'un type de la bibliothèque (`divides`, `modulus`, `plus`…).
             scope = "::" if cpp else ""
-            self.assertIn('moodit_id, %sid(moodit_a0));' % scope, server)
-            self.assertIn('moodit_id, %snom(moodit_a0));' % scope, server)
+            self.assertIn('moodit_id, (int) %sid(moodit_a0));' % scope, server)
+            self.assertIn('moodit_id, (int) %snom(moodit_a0));' % scope, server)
             traite = server.split("static void moodit_traite(", 1)[1].split("\nint main(void)")[0]
             self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|a0)(?![\w(\"])", traite))
 
@@ -3291,6 +3365,7 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
         # `remove`, `div`, `rand`, `exit`…, une macro `abs(x)`), et sa réponse ne compilait plus.
         keywords = set("""static extern const char int long double void if else return while for
             sizeof new ifdef endif __asm__ __SIZE_TYPE__ __cplusplus define undef main C
+            template class constexpr __is_constructible
             __moodit_student_main""".split())
         cases = (
             (False, [("int", "f", ["int", "long", "double"])], ()),
@@ -3382,7 +3457,7 @@ class ServerLocalsDoNotShadowSubmittedFunctionsTest(unittest.TestCase):
         _, branches = supervisor.cpp_object_dispatch([("Rect", [["int"]], [("int", "aire", [])])])
         self.assertIn("int moodit_h = moodit_lit_int(moodit_jeton());", branches)
         self.assertIn("moodit_objets_Rect[moodit_h]->aire()", branches)
-        self.assertIn("new ::Rect(moodit_a0)", branches)
+        self.assertIn("moodit_cree< ::Rect >(moodit_a0)", branches)
         self.assertIsNone(re.search(r"(?<![\w\"|])(id|op|nom|h|a0)(?![\w(\"])", branches))
 
 

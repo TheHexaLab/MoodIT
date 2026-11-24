@@ -194,9 +194,12 @@ public final class HarnessProjects {
      * par paire (au plus huit), jamais caractère par caractère : un groupe répété à chaque
      * caractère est récursif dans le moteur Java, et une annotation de quelques milliers de
      * caractères faisait déborder la pile (StackOverflowError, 500, tentative supprimée).
+     * Une déclaration compte encore après une {@code )} : celle d'une annotation écrite sur
+     * plusieurs lignes ({@code @SuppressWarnings({…\n}) public class R}) ou imbriquée sur plus
+     * d'un niveau ; et un saut de page peut la précéder.
      */
     private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
-            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:@[\\p{javaJavaIdentifierPart}.]+(?:\\s*\\([^()\\n]*(?:\\([^()\\n]*\\)[^()\\n]*){0,8}\\)\\s*|\\s+)"
+            "(?m)(?:^|(?<=[;})]))[ \\t\\f]*((?:@[\\p{javaJavaIdentifierPart}.]+(?:\\s*\\([^()\\n]*(?:\\([^()\\n]*\\)[^()\\n]*){0,8}\\)\\s*|\\s+)"
             + "|(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
             + "(?:class|interface|record|enum|@interface)\\s+"
             + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");

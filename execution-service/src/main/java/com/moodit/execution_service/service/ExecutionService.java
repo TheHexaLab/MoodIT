@@ -31,10 +31,12 @@ import java.util.List;
  *       (FAIL-CLOSED), ce que le code soumis ne peut pas produire : il ne détient ni le nonce,
  *       ni le harnais. Le harnais du prof est un CORPS qui renvoie un booléen — un harnais au
  *       format framework est refusé en amont, avec un diagnostic.</li>
- *   <li><b>Interprétés / SQL / vues</b> → mode « exec » du runner (ex-Piston), verdict par NONCE ALÉATOIRE : il ne dépend PAS
- *       de l'exit code (falsifiable par un {@code exit(0)} anticipé), mais de la présence d'un
- *       nonce secret que SEUL le harnais émet en cas de succès ; le code étudiant vit dans un
- *       processus séparé qui ne voit jamais le nonce (cf. {@link CodeAssembler}).</li>
+ *   <li><b>Interprétés / SQL / vues</b> → mode « exec » du runner (ex-Piston), verdict par NONCE ALÉATOIRE : un
+ *       code de sortie 0 seul ne suffit pas (falsifiable par un {@code exit(0)} anticipé) ; il
+ *       faut le nonce secret que SEUL le harnais émet en cas de succès, ET une sortie 0 du
+ *       noteur (un noteur interrompu après avoir émis le nonce ne vaut pas réussite). Le code
+ *       étudiant vit dans un processus séparé qui ne voit jamais le nonce (cf.
+ *       {@link CodeAssembler}).</li>
  * </ul>
  */
 @Service

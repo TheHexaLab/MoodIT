@@ -565,6 +565,58 @@ describe('tentative à revoir par l\'enseignant', () => {
     expect(result.current.phase).toBe('summary');
   });
 
+  it('relance réussie de la tentative affichée, qui n\'est pas la dernière : son résultat reste affiché', async () => {
+    // Revue #246 : `reload` ouvrait la DERNIÈRE tentative (#57), pas celle que l'étudiant
+    // regardait (#56).
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56), summary(57, 2)])
+      .mockResolvedValue([summary(56), summary(57, 2)]);
+    const onFetchAttemptResult = vi.fn(async (_q: number, id: number) => makeResult(id));
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })), onFetchAttempts,
+        onFetchAttemptResult, attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
+    act(() => result.current.selectAttempt(56));
+    expect(result.current.awaitingReview).toBe(true);
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(56));
+    expect(result.current.currentAttemptId).toBe(56);
+    expect(result.current.awaitingReview).toBe(false);
+    expect(result.current.phase).toBe('summary');
+    expect(result.current.attempts.find((a) => a.id === 56)?.status).not.toBe('review');
+    // Sans écran de chargement (la barre et le focus restent en place).
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('relance réussie, résultat illisible : rechargement complet en repli', async () => {
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56)])
+      .mockResolvedValue([summary(56)]);
+    const onFetchAttemptResult = vi
+      .fn<(quizId: number, attemptId: number) => Promise<ReturnType<typeof makeResult>>>()
+      .mockRejectedValueOnce(new Error('réseau'))
+      .mockResolvedValue(makeResult(56));
+    const onFetchQuiz = vi.fn(async () => makeQuiz());
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({ initialQuiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, attemptOutcome: outcome })
+    );
+    await waitFor(() => expect(result.current.awaitingReview).toBe(true));
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(56));
+    expect(onFetchQuiz).toHaveBeenCalledTimes(2);
+  });
+
   it('relance réussie d\'une AUTRE tentative que celle affichée : seule la barre se met à jour', async () => {
     // Quiz avec reprise : #56 à revoir, #57 corrigée et affichée. L'enseignant relance #56.
     const onFetchAttempts = vi

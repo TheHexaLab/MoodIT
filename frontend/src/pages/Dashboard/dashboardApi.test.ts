@@ -17,6 +17,7 @@ vi.mock('../../helpers/api.ts', () => ({
 }));
 
 import { apiFetch } from '../../helpers/api.ts';
+import { QuizSaveRejectedError } from '../../components/QuizEditor/editorTypes.ts';
 import {
   ExecutionBusyError,
   SubmissionRejectedError,
@@ -580,6 +581,35 @@ describe('updateQuiz', () => {
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(updateQuiz(5, {} as never)).rejects.toThrow('Échec modification du quiz');
+  });
+});
+
+describe('createQuiz / updateQuiz — refus métier (400)', () => {
+  const save = [
+    ['createQuiz', () => createQuiz(9, {} as never), 'Échec création du quiz'],
+    ['updateQuiz', () => updateQuiz(5, {} as never), 'Échec modification du quiz'],
+  ] as const;
+
+  it.each(save)('%s : texte brut → QuizSaveRejectedError portant ce texte', async (_n, call) => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => ' Question 2 : un harnais dépasse 50000 caractères.\n',
+    } as Response);
+    const error = await call().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QuizSaveRejectedError);
+    expect((error as Error).message).toBe('Question 2 : un harnais dépasse 50000 caractères.');
+  });
+
+  it.each(save)('%s : JSON de Spring, corps vide ou illisible → erreur générique', async (_n, call, generic) => {
+    for (const text of [async () => '{"status":400}', async () => '  ', async () => {
+      throw new Error('flux coupé');
+    }]) {
+      mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 400, text } as unknown as Response);
+      const error = await call().catch((e: unknown) => e);
+      expect(error).not.toBeInstanceOf(QuizSaveRejectedError);
+      expect((error as Error).message).toBe(generic);
+    }
   });
 });
 

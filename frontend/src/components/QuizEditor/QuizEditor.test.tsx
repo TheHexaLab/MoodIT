@@ -7,6 +7,7 @@ import { defaultQuizFormLabels } from './quizFormLabels';
 import { defaultQuestionFormLabels } from './questionFormLabels';
 import { defaultHarnessLabels } from './harnessLabels';
 import { type Quiz, type QuestionTypeOption } from '../../types/domain';
+import { QuizSaveRejectedError } from './editorTypes';
 import './editorTestSetup';
 
 afterEach(cleanup);
@@ -221,6 +222,25 @@ describe('QuizEditor — persistance méta (un seul appel)', () => {
     fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
     fireEvent.click(screen.getByText(formT.save));
     await screen.findByText(editorT.saveError);
+    expect(screen.getByText(editorT.editQuizTitle)).toBeTruthy();
+  });
+});
+
+describe('QuizEditor — refus métier de l’enregistrement', () => {
+  it('affiche le message du serveur, qui nomme la question à corriger', async () => {
+    const message = 'Question 2 : un harnais dépasse 50000 caractères.';
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: {
+        onUpdateQuiz: vi.fn(async () => {
+          throw new QuizSaveRejectedError(message);
+        }),
+      },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByText(formT.save));
+    await screen.findByText(message);
+    expect(screen.queryByText(editorT.saveError)).toBeNull();
     expect(screen.getByText(editorT.editQuizTitle)).toBeTruthy();
   });
 });

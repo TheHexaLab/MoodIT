@@ -221,8 +221,9 @@ class CodeAssemblerTest {
     void student_name_colliding_with_internals_is_not_proxied() {
         // Un étudiant qui nomme un symbole « __moodit… » n'est PAS proxifié → pas de collision avec
         // l'infrastructure du noteur (fs, _rpc…).
+        // Le harnais NOMME __moodit_x : sans le filtre de préfixe, il recevrait un mandataire.
         var a = assembler.assemble("JavaScript", "function __moodit_x(){}\nfunction doubler(n){ return n*2; }",
-                "return doubler(5) === 10;", "MOODIT_OK_x");
+                "return doubler(5) === 10 && typeof __moodit_x !== 'function';", "MOODIT_OK_x");
         assertThat(a.files().get(0).content())
                 .contains("function doubler(...a)")
                 .doesNotContain("function __moodit_x(...a)");
@@ -496,6 +497,14 @@ class CodeAssemblerTest {
         assertThat(CodeAssembler.harnessMentions(null, "f")).isFalse();
         // Un appel de MÉTHODE n'emploie pas la fonction homonyme.
         assertThat(CodeAssembler.harnessMentions("return p.max() == 7", "max")).isFalse();
+        // Décomposition `...f()` : la FONCTION est employée (revue #246) ; `a?.f()`, `...p.f()`
+        // restent des appels de méthode.
+        assertThat(CodeAssembler.harnessMentions("return Math.max(...valeurs()) === 3;", "valeurs")).isTrue();
+        assertThat(CodeAssembler.harnessMentions("return [...trier([3])].length === 1;", "trier")).isTrue();
+        assertThat(CodeAssembler.harnessMentions("return a?.f() === 1;", "f")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return [...p.f()].length;", "f")).isFalse();
+        assertThat(CodeAssembler.harnessMentions("return carré(3) == 9", "carré")).isTrue();
+        assertThat(CodeAssembler.harnessMentions("return carrée(3) == 9", "carré")).isFalse();
         // Dans le doute (chaîne, commentaire), le nom compte comme employé.
         assertThat(CodeAssembler.harnessMentions("return f() == 'max'", "max")).isTrue();
     }

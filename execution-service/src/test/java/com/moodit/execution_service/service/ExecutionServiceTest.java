@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -566,15 +567,37 @@ class ExecutionServiceTest {
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionService routed = new ExecutionService(assembler, runner, docker);
 
+        Map<String, String> examples = Map.of("Java", "(@Test)", "C#", "([Test])",
+                "Go", "(func TestXxx(t *testing.T))", "Rust", "(#[test])",
+                "C", "(MOODIT_TEST(nom))", "C++", "(MOODIT_TEST(nom))");
         for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
             List<TestResult> results = routed.evaluate(
                     oneTest(language, "code", frameworkHarness(language)));
             assertThat(results).as("refus en " + language).hasSize(1);
             assertThat(results.get(0).passed()).isFalse();
+            // L'exemple cité au prof est celui de SON langage.
             assertThat(results.get(0).detail())
-                    .contains("classe de test du framework")
+                    .contains("classe de test du framework " + examples.get(language))
                     .contains("renvoie un booléen");
         }
+        verifyNoInteractions(docker);
+    }
+
+    @Test
+    void framework_harness_mixed_with_a_boolean_one_rejects_the_whole_question() {
+        // Une question qui mêle un harnais booléen et une classe de test du framework : aucun
+        // cas n'est noté, et le booléen dit pourquoi (sans se dire fautif lui-même).
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        List<TestResult> results = routed.evaluate(new EvaluateRequest("Java", null, "code",
+                List.of(new TestCaseInput("booleen", booleanHarness("Java"), 1),
+                        new TestCaseInput("framework", frameworkHarness("Java"), 2))));
+        assertThat(results).extracting(TestResult::name).containsExactly("booleen", "framework");
+        assertThat(results).extracting(TestResult::passed).containsExactly(false, false);
+        assertThat(results).extracting(TestResult::weight).containsExactly(1, 2);
+        assertThat(results.get(0).detail()).isEqualTo(
+                "Non évalué : un autre harnais de cette question est une classe de test du framework.");
+        assertThat(results.get(1).detail()).contains("(@Test)");
         verifyNoInteractions(docker);
     }
 

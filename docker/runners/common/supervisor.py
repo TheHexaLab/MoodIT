@@ -2738,7 +2738,30 @@ def go_object_api(source):
         types = _go_param_types(params)
         if types is not None:
             by_type[receiver][1].append((ret, ident, types))
+    # Méthodes PROMUES par composition (`type Carre struct { Rectangle }`) : l'héritage de Go.
+    # `NewCarre(3).Aire()` compile chez l'étudiant, mais le bouchon ne portait pas `Aire` — 0
+    # sur une réponse juste. Une méthode du type lui-même masque toute méthode promue du même
+    # nom (règle de Go), quels que soient ses paramètres.
+    parents = {t: [e for e in embedded if e in structs]
+               for t, embedded in go_embedded_types(source).items()}
+    hiding = {t: {m[1] for m in by_type[t][1]} for t in by_type}
+    merged = inherit_instance_methods(by_type, parents, hiding)
+    for t in by_type:
+        by_type[t][1][:] = merged[t]
     return [(t, c, m) for t, (c, m) in sorted(by_type.items()) if m and (c or t in field_list)]
+
+
+def go_embedded_types(source):
+    """Types EMBARQUÉS de chaque structure (champ anonyme `T` ou `*T`, étiquette admise).
+    FONCTION PURE (testée)."""
+    found = {}
+    for typ, body in GO_STRUCT_BODY.findall(source or ""):
+        for src_line in body.splitlines():
+            bare_line = src_line.split("//")[0].strip()
+            field = re.fullmatch(r"\*?([A-Za-z_]\w*)(?:\s+`[^`]*`)?", bare_line)
+            if field:
+                found.setdefault(typ, []).append(field.group(1))
+    return found
 
 
 def _go_param_types(params):
@@ -3300,9 +3323,14 @@ def go_student_without_main(source):
 # f(int)`, `int f(int) noexcept` étaient ignorés — « Aucune fonction exploitable », 0 sur une
 # réponse juste. Attributs bornés (pas de retour arrière coûteux).
 C_ATTRIBUTES = r"(?:\[\[[^\[\]\n]{0,80}\]\]\s*)*"
+# Écritures d'un même type scalaire : `long int` est un `long`, `signed` un `int` (revue #246 :
+# non reconnues, la fonction n'était pas proxifiée). `long long`, `long double`, `unsigned`
+# restent hors liste (types non transportables). Plus longue d'abord.
+C_SCALAR_RET = (r"(?:signed\s+)?long(?:\s+signed)?(?:\s+int)?(?!\s+(?:long|double)\b)"
+                r"|signed(?:\s+int)?|int|double")
 C_FUNC = re.compile(r"^[ \t]*" + C_ATTRIBUTES
                     + r"(?:(?:static|inline|extern|const|constexpr|consteval)\s+){0,8}"
-                    r"(int|long|double|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)"
+                    r"(" + C_SCALAR_RET + r"|float|char\s*\*)\s+(\w+)\s*\(([^()]*)\)"
                     r"\s*(?:noexcept(?:\s*\([^()]*\))?\s*)?\{", re.M)
 # Retour en fin de signature (C++) : `auto f(int x) -> int {`.
 C_FUNC_TRAILING = re.compile(r"^[ \t]*" + C_ATTRIBUTES
@@ -3314,6 +3342,18 @@ C_FUNC_TRAILING = re.compile(r"^[ \t]*" + C_ATTRIBUTES
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
 # 17 chiffres suffisent à garantir l'aller-retour exact d'un double IEEE 754.
 C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
+
+
+def c_scalar_type(text):
+    """`long int` → `long`, `signed` → `int`… ; None hors des trois types transportables. PURE."""
+    words = (text or "").split()
+    if words == ["double"]:
+        return "double"
+    if not words or any(w not in ("signed", "long", "int") for w in words):
+        return None
+    if words.count("long") > 1 or words.count("int") > 1 or words.count("signed") > 1:
+        return None
+    return "long" if "long" in words else "int"
 # Mots qui composent un type C/C++ : en deuxieme position, ils ne sont pas un NOM de parametre.
 C_TYPE_WORDS = {"int", "long", "double", "short", "unsigned", "signed", "char", "float", "bool",
                 "void", "auto", "wchar_t"}
@@ -3540,7 +3580,7 @@ def c_signatures(source, cpp=False):
     for start, ret, ident, params in found:
         if covered(cover, start):
             continue
-        ret = ret.replace(" ", "")
+        ret = c_scalar_type(ret) or ret.replace(" ", "")
         if ident == "main" or ret not in C_TYPES:
             continue
         # Le MEME lecteur que le chemin objet C++ (_c_param_types) : deux copies divergeaient.
@@ -3628,7 +3668,7 @@ def cpp_object_api(source):
     # Première base de chaque dérivée (tout accès), dérivées qui reprennent les constructeurs de
     # leur base (`using Forme::Forme;`) et classes qui n'en déclarent aucun : de quoi leur donner,
     # après coup, les constructeurs que C++ leur fournit (voir la fin).
-    bases, inheriting_ctors, without_ctor = {}, set(), set()
+    bases, inheriting_ctors = {}, set()
     cover = span_cover(cpp_class_spans(src_text) + cpp_namespace_spans(src_text))
     heads = [m.start() for m in CPP_TEMPLATE_HEAD.finditer(src_text)]
     bounds = [m.start() for m in CPP_STATEMENT_END.finditer(src_text)]
@@ -3715,7 +3755,7 @@ def cpp_object_api(source):
                 if types is not None:
                     ctors.append(types)
                 continue
-            meth = re.match(r"(int|long|double)\s+(\w+)\s*\(([^()]*)\)", bare_line)
+            meth = re.match(r"(" + C_SCALAR_RET + r")\s+(\w+)\s*\(([^()]*)\)", bare_line)
             # `int operator()(int)` : un opérateur n'est pas une méthode nommée `operator` — le
             # serveur générait `->operator()`, qui ne compilait pas même sans que le harnais
             # nomme la classe.
@@ -3724,15 +3764,17 @@ def cpp_object_api(source):
             if meth:
                 types = _c_param_types(meth.group(3))
                 if types is not None:
-                    method_list.append((meth.group(1), meth.group(2), types))
+                    method_list.append((c_scalar_type(meth.group(1)), meth.group(2), types))
         # AUCUN constructeur declare : C++ fournit le constructeur par defaut, comme Java et
         # C#. Sans lui, `Calculatrice c; c.additionner(2, 3)` n'etait pas notable. Pas pour une
         # classe DERIVEE : sa construction par defaut depend de celle de sa base, et un `K()`
         # genere qui ne compile pas casserait le programme de l'etudiant.
-        if not declares_ctor and ":" not in src_text[klass.end():begin]:
-            ctors = [[]]
+        # DÉRIVÉE comprise : le serveur construit par moodit_cree, qui vérifie à la compilation
+        # que la classe se construit ainsi (base au constructeur protégé, base sans constructeur
+        # par défaut) et répond une erreur sinon — un `new K()` impossible ne casse plus le
+        # programme de l'étudiant.
         if not declares_ctor:
-            without_ctor.add(class_ident)
+            ctors = [[]]
         if class_ident not in apis:
             apis[class_ident] = (ctors, method_list)
             hiding[class_ident] = declared_names - unhidden
@@ -3742,22 +3784,17 @@ def cpp_object_api(source):
     # portait pas — et une derivee sans methode propre n'etait meme pas proxifiee (« 'Carre'
     # was not declared »). 0 sur une reponse juste qui herite au lieu de redefinir.
     merged = inherit_instance_methods(apis, parents, hiding)
-    # Constructeurs fournis par C++ à une DÉRIVÉE, d'après ceux (publics) de sa base du code
-    # soumis : ceux qu'elle reprend par `using Base::Base;`, et son constructeur par défaut
-    # implicite quand elle n'en déclare aucun et que sa base se construit sans argument. Jusqu'à
-    # stabilité, pour les chaînes de dérivation. 0 sur une réponse juste sinon : « 'Carre' was
-    # not declared ».
+    # Constructeurs qu'une DÉRIVÉE reprend de sa base du code soumis par `using Base::Base;`
+    # (ceux, publics, que la base déclare). Jusqu'à stabilité, pour les chaînes de dérivation.
+    # 0 sur une réponse juste sinon : « 'Carre' was not declared ».
     changed = True
     while changed:
         changed = False
         for name, (ctors, _methods) in apis.items():
             base_api = apis.get(bases.get(name))
-            if base_api is None:
+            if base_api is None or name not in inheriting_ctors:
                 continue
-            wanted = [t for t in base_api[0] if t] if name in inheriting_ctors else []
-            if name in without_ctor and [] in base_api[0]:
-                wanted.append([])
-            for types in wanted:
+            for types in [t for t in base_api[0] if t]:
                 if types not in ctors:
                     ctors.append(types)
                     changed = True
@@ -3777,7 +3814,10 @@ def _member_pieces(body, offset, depths, level):
 
     Une fin de ligne ne coupe qu'à parenthèses ÉQUILIBRÉES : un membre déclaré sur plusieurs
     lignes (`Rect(int largeur,` puis `int hauteur)`) était coupé en deux, le constructeur vu comme
-    déclaré mais pas lu, et la classe n'était plus proxifiée — 0 sur une réponse juste."""
+    déclaré mais pas lu, et la classe n'était plus proxifiée — 0 sur une réponse juste. Ni
+    après une ligne qui n'est qu'une TÊTE de déclaration (`int`, `[[nodiscard]]`, `virtual`,
+    puis le nom et les paramètres à la ligne suivante) : sans parenthèse, `;`, accolade, `=`
+    ni `:` (étiquette d'accès), et pas une directive du préprocesseur."""
     pieces = []
     start = 0
     parens = 0
@@ -3786,7 +3826,11 @@ def _member_pieces(body, offset, depths, level):
             parens += 1
         elif c == ")" and parens > 0:
             parens -= 1
-        cut = (c == chr(10) and parens == 0) or (c in ";}" and depths[offset + i] == level)
+        head = body[start:i].strip() if c == chr(10) and parens == 0 else ""
+        only_head = (bool(head) and not head.startswith("#")
+                     and not any(ch in head for ch in "();{}=:"))
+        cut = ((c == chr(10) and parens == 0 and not only_head)
+               or (c in ";}" and depths[offset + i] == level))
         if cut:
             pieces.append(body[start:i + 1])
             start = i + 1
@@ -3812,15 +3856,17 @@ def _c_param_types(params):
             return None
         pieces = [m for m in param_group.split("=")[0].split() if m != "const"]
         # Un type SEUL (parametre sans nom : `Rect(int, int);`, declaration dans la classe et
-        # definition dehors — l'ecriture C++ la plus courante), ou un type et un NOM. Deux mots
-        # de type (`long double`, `unsigned int`, `long long`) ne sont pas un type transportable :
-        # `long double` passait pour un `long`, le bouchon tronquait 2.5 a 2, faux verdict muet.
-        if len(pieces) == 1 and pieces[0] in C_TYPES:
-            types.append(pieces[0])
-            continue
-        if len(pieces) != 2 or pieces[0] not in C_TYPES or pieces[1] in C_TYPE_WORDS:
+        # definition dehors — l'ecriture C++ la plus courante), ou un type et un NOM. Le type
+        # peut s'ecrire en plusieurs mots (`long int`, `signed`) ; `long double`, `unsigned int`
+        # et `long long` ne sont pas transportables : `long double` passait pour un `long`, le
+        # bouchon tronquait 2.5 a 2, faux verdict muet.
+        n_words = 0
+        while n_words < len(pieces) and pieces[n_words] in C_TYPE_WORDS:
+            n_words += 1
+        scalar = c_scalar_type(" ".join(pieces[:n_words]))
+        if scalar is None or len(pieces) - n_words > 1:
             return None
-        types.append(pieces[0])
+        types.append(scalar)
     return types
 
 
@@ -3871,6 +3917,14 @@ def c_dispatch_key(ident, types):
     return "%s(%s)" % (ident, ",".join(types))
 
 
+# Mots-clés dont le serveur se sert, débarrassés d'une macro du code soumis du même nom :
+# `#define int long long` (idiome de programmation compétitive) débordait sur le serveur,
+# « 'long long long' is too long », 0 sur une réponse juste. Les retours sont convertis vers
+# le type annoncé (`(int) f(…)`) : la fonction de l'étudiant rend alors un `long long`.
+C_SERVER_KEYWORDS = ("static", "extern", "const", "char", "int", "long", "double", "void", "if",
+                     "else", "return", "while", "for", "sizeof", "new", "template", "class",
+                     "constexpr")
+
 # Lecture d'un argument côté SERVEUR : fonctions du runtime sans en-tête (C_SERVER_RUNTIME).
 C_SERVER_READ = {"int": "moodit_lit_int", "long": "moodit_lit_long", "double": "moodit_lit_double"}
 
@@ -3881,6 +3935,20 @@ def cpp_object_dispatch(obj_list):
     Table de pointeurs et `new`, sans `<vector>` : le serveur n'inclut AUCUN en-tête (cf.
     C_SERVER_RUNTIME), et `new K(…)` ne demande à la classe ni copie ni déplacement."""
     stacks, branches = [], []
+    if obj_list:
+        # Construction VÉRIFIÉE à la compilation : une classe restée abstraite sans le déclarer
+        # (`Polygone` hérite d'un `aire() = 0` qu'elle ne redéfinit pas), ou dont le
+        # constructeur demandé n'est pas accessible, rendait `new K(…)` illégal — « Échec de
+        # compilation » dans du code que l'étudiant n'a pas écrit, 0 sur une réponse juste. Le
+        # trait intégré de gcc évite tout en-tête ; la branche écartée n'est pas instanciée.
+        stacks.append("template <class moodit_K, class... moodit_A>\n"
+                      "static moodit_K *moodit_cree(moodit_A... moodit_x) {\n"
+                      "    if constexpr (__is_constructible(moodit_K, moodit_A...)) {\n"
+                      "        return new moodit_K(moodit_x...);\n"
+                      "    } else {\n"
+                      "        return 0;\n"
+                      "    }\n"
+                      "}")
     for klass, ctors, method_list in obj_list:
         # `::K` : avec un `using namespace std;` soumis, une classe `list` ou `pair` était
         # ambiguë pour le serveur ; le nom qualifié désigne celle du code soumis.
@@ -3894,14 +3962,20 @@ def cpp_object_dispatch(obj_list):
             args = ", ".join("moodit_a%d" % i for i in range(len(types)))
             branches.append("""    if (moodit_egal(moodit_op, "new") && moodit_egal(moodit_nom, "%s")) {
 %s
+        ::%s *moodit_o = moodit_cree< ::%s >(%s);
+        if (!moodit_o) {
+            moodit_printf("\\n%%s|err|construction impossible\\n", moodit_id);
+            moodit_fflush(moodit_stdout);
+            return;
+        }
         moodit_objets_%s = (::%s **) moodit_realloc(
             moodit_objets_%s, (moodit_n_%s + 1) * sizeof(::%s *));
-        moodit_objets_%s[moodit_n_%s++] = new ::%s(%s);
+        moodit_objets_%s[moodit_n_%s++] = moodit_o;
         moodit_printf("\\n%%s|ok|%%d\\n", moodit_id, moodit_n_%s - 1);
         moodit_fflush(moodit_stdout);
         return;
-    }""" % (c_dispatch_key(klass, types), reads, klass, klass, klass, klass, klass, klass, klass,
-            klass, args, klass))
+    }""" % (c_dispatch_key(klass, types), reads, klass, klass, args, klass, klass, klass, klass,
+            klass, klass, klass, klass))
         for ret, ident, types in method_list:
             reads = "\n".join(
                 "        %s moodit_a%d = %s(moodit_jeton());"
@@ -3916,10 +3990,11 @@ def cpp_object_dispatch(obj_list):
             return;
         }
 %s
-        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, moodit_objets_%s[moodit_h]->%s(%s));
+        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, (%s) moodit_objets_%s[moodit_h]->%s(%s));
         moodit_fflush(moodit_stdout);
         return;
-    }""" % (klass, c_dispatch_key(ident, types), klass, reads, C_TYPES[ret], klass, ident, args))
+    }""" % (klass, c_dispatch_key(ident, types), klass, reads, C_TYPES[ret], ret, klass, ident,
+            args))
     return "\n".join(stacks), "\n\n".join(branches)
 
 
@@ -4228,14 +4303,16 @@ def c_server_source(methods, student_source, cpp=False, obj_list=()):
         scope = "::" if cpp else ""
         branches.append("""    if (moodit_egal(moodit_op, "call") && moodit_egal(moodit_nom, "%s")) {
 %s
-        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, %s%s(%s));
+        moodit_printf("\\n%%s|ok|%s\\n", moodit_id, (%s) %s%s(%s));
         moodit_fflush(moodit_stdout);
         return;
-    }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], scope, ident, args))
+    }""" % (c_dispatch_key(ident, types), "\n".join(reads), C_TYPES[ret], ret, scope, ident,
+            args))
     stacks, object_branches = cpp_object_dispatch(obj_list)
     return ("#define main __moodit_student_main\n"
             + (student_source or "")
             + "\n#undef main\n"
+            + "".join("#undef %s\n" % word for word in C_SERVER_KEYWORDS)
             + C_SERVER_RUNTIME + stacks + r"""
 
 /* Protocole : id|op|nom|[poignée]|args… — `op` vaut call, new ou method. */
@@ -4271,8 +4348,10 @@ int main(void) {
 # Restriction de visibilite BORNEE (`pub(crate)`, `pub(in chemin::du::module)`) et sans fin de
 # ligne : sans borne, `;pub(` repete repartait de chaque `;` jusqu'au bout du texte — 8 s par
 # cas pour 100 Ko.
+# Attributs sur la ligne de la fonction (`#[inline] pub fn`) admis, bornés comme RUST_MAIN.
 RUST_FN = re.compile(
-    r"(?:^|(?<=[{};]))[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?(?:(?:const|unsafe)\s+){0,2}"
+    r"(?:^|(?<=[{};]))[ \t]*(?:#\[[^\]\n]{0,200}\][ \t]*){0,8}"
+    r"(?:pub(?:\([^)\n]{0,80}\))?\s+)?(?:(?:const|unsafe)\s+){0,2}"
     r"fn\s+(\w+)\s*\(([^()]*)\)\s*->\s*([\w:]+)",
     re.M)
 RUST_TYPES = {"i32": "i32", "i64": "i64", "f64": "f64", "bool": "bool", "String": "String"}
@@ -6233,6 +6312,86 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin
     return CaseOutcome(passed, detail, ran=True, killed=grader_dead), None
 
 
+C_CONDITIONAL = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else)\b", re.M)
+C_DEFINED_NAME = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)", re.M)
+C_LINE_MARKER = re.compile(r'#\s*\d+\s+"((?:[^"\\]|\\.)*)"')
+# Le préprocesseur seul est rapide ; une bombe d'inclusions ou de macros, elle, tiendrait la
+# compilation réelle jusqu'à son délai : on ne lui en laisse pas autant ici, sans conclure.
+C_PREPROCESS_TIMEOUT_S = 10
+C_PREPROCESS_CAP = 16 * 1024 * 1024
+# Une fois par job : les cas d'un job ont le même code soumis (comme compile_student).
+C_PREPROCESSED = {}
+
+
+def c_student_segment(preprocessed, file_name):
+    """Lignes que les marqueurs de `gcc -E` attribuent à `file_name`. FONCTION PURE (testée)."""
+    keep, current = [], None
+    for line in (preprocessed or "").splitlines():
+        marker = C_LINE_MARKER.match(line)
+        if marker:
+            current = marker.group(1)
+        elif current == file_name:
+            keep.append(line)
+    return chr(10).join(keep)
+
+
+def c_drop_absent(method_list, obj_list, present, source):
+    """Fonctions et classes dont le nom a disparu au préprocesseur, retirées. PURE (testée).
+
+    Un nom que le code soumis `#define` est gardé : le préprocesseur l'a remplacé, il ne l'a
+    pas écarté (`#define FN doubler` puis `int FN(int x)`)."""
+    macros = set(C_DEFINED_NAME.findall(source or ""))
+
+    def kept(name):
+        return name in present or name in macros
+    return ([m for m in method_list if kept(m[1])], [o for o in obj_list if kept(o[0])])
+
+
+def c_preprocessed_names(student_source, compiler, std, case_dir, ext):
+    """Identifiants du code soumis APRÈS préprocesseur, ou None : pas de directive
+    conditionnelle (rien à écarter), ou préprocesseur en échec — la compilation réelle dira
+    pourquoi. Sous l'UID étudiant, dans son chantier, comme sa compilation."""
+    if not C_CONDITIONAL.search(student_source or ""):
+        return None
+    key = (compiler, std, student_source)
+    if key in C_PREPROCESSED:
+        return C_PREPROCESSED[key]
+    lock_src_dir(case_dir)
+    build_area = student_build_dir(case_dir)
+    name = "pp." + ext
+    source = os.path.join(build_area, name)
+    target = os.path.join(build_area, "pp.i")
+    with open(source, "w", encoding="utf-8") as f:
+        f.write(student_source)
+    set_owner_mode(source, STUDENT_UID, STUDENT_GID, 0o600)
+    names = None
+    try:
+        code, expired = run_proc([compiler, std, "-E", name, "-o", "pp.i"], build_area,
+                                 student_build_env(build_area), C_PREPROCESS_TIMEOUT_S,
+                                 os.path.join(case_dir, "pp.out"), os.path.join(case_dir, "pp.err"),
+                                 preexec_student_compile)
+        if code == 0 and not expired:
+            # Sans suivre de lien, fichier ordinaire seulement (chantier de l'UID étudiant).
+            fd = os.open(target, os.O_RDONLY | O_NO_LINK)
+            with os.fdopen(fd, "rb") as f:
+                if stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                    data = f.read(C_PREPROCESS_CAP + 1)
+                    if len(data) <= C_PREPROCESS_CAP:
+                        text = data.decode("utf-8", "replace")
+                        names = set(re.findall(r"[A-Za-z_]\w*",
+                                               blank_code(c_student_segment(text, name))))
+    except OSError:
+        names = None
+    finally:
+        for leftover in (source, target):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
+    C_PREPROCESSED[key] = names
+    return names
+
+
 def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     """Notation NON FALSIFIABLE d'un cas C/C++ : harnais booléen, deux binaires, deux UID.
 
@@ -6248,6 +6407,12 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     extraction = blank_code(student_source)
     obj_list = cpp_object_api(extraction) if ext == "cpp" else []
     method_list = c_signatures(extraction, cpp=(ext == "cpp"))
+    # Lecture sur le TEXTE : une fonction sous `#ifdef DEBUG` y figure, absente une fois le code
+    # préprocessé — le serveur l'appelait, « implicit declaration of function », 0 sur une
+    # réponse juste. Le préprocesseur dit ce qui reste.
+    present = c_preprocessed_names(student_source, compiler, std, case_dir, ext)
+    if present is not None:
+        method_list, obj_list = c_drop_absent(method_list, obj_list, present, student_source)
     if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")

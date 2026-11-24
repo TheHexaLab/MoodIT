@@ -16,6 +16,7 @@ import {
 } from '../../types/domain';
 import {
   FALLBACK_LANGUAGES,
+  QuizSaveRejectedError,
   defaultHarness,
   draftToQuestion,
   emptyQuestionDraft,
@@ -296,8 +297,10 @@ export function QuizEditor({
       setView({ kind: 'list' });
       // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
       onQuizzesChange?.(next);
-    } catch {
-      setError(t.saveError);
+    } catch (e) {
+      // Refus métier de core (taille d'un code ou d'un harnais…) : son message nomme la question
+      // à corriger, alors que « Réessayez » ferait renvoyer le même quiz.
+      setError(e instanceof QuizSaveRejectedError ? e.message : t.saveError);
     } finally {
       setSaving(false);
     }

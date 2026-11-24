@@ -178,9 +178,17 @@ class RunnerExecTest {
     }
 
     @Test
-    void null_runtime_normalized_in_job() {
+    void runtime_normalized_in_job_and_null_runtime_rejected_before_any_container() {
         supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
+        // Casse et blancs retirés DANS job.json aussi : le superviseur compare le runtime tel quel.
+        runner.execute("  PyThOn ", List.of(new RunnerExec.File("grader.py", "G")));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
+        verify(sandbox).run(eq("moodit-runner-python:latest"), files.capture(), anyLong());
+        assertThat(files.getValue().get("job.json")).contains("\"runtime\":\"python\"");
+        // Runtime absent : langage non pris en charge, refusé sans lancer de conteneur.
         assertThatThrownBy(() -> runner.execute(null, List.of(new RunnerExec.File("x", "y"))))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(UnsupportedLanguageException.class);
+        verify(sandbox, org.mockito.Mockito.times(1)).run(any(), anyMap(), anyLong());
     }
 }

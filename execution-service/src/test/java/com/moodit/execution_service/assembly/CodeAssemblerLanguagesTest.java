@@ -129,7 +129,8 @@ class CodeAssemblerLanguagesTest {
     void python_ignore_les_fonctions_et_classes_internes_de_l_etudiant() {
         var a = assembler.assemble("Python",
                 "def __moodit_rpc(x):\n    return 1\nclass __moodit_Faux:\n    pass\nasync def lire():\n    return 2",
-                "return lire() == 2 and __moodit_Faux is not None", "MOODIT_OK_py");
+                "return lire() == 2 and __moodit_Faux is not None and __moodit_rpc is not None",
+                "MOODIT_OK_py");
         String grader = a.files().get(0).content();
 
         // Le vrai __moodit_rpc du noteur n'est pas écrasé par un proxy portant le même nom.
@@ -141,7 +142,7 @@ class CodeAssemblerLanguagesTest {
     @Test
     void bash_ignore_les_fonctions_internes_et_accepte_le_mot_cle_function() {
         var a = assembler.assemble("Bash", "function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }",
-                "[ \"$(doubler)\" = 2 ]", "MOODIT_OK_sh");
+                "[ \"$(doubler)\" = 2 ] && type __moodit_rpc >/dev/null", "MOODIT_OK_sh");
         String grader = a.files().get(0).content();
 
         assertThat(grader).contains("doubler() { __moodit_rpc doubler \"$@\"; }\n")
@@ -362,6 +363,24 @@ class CodeAssemblerLanguagesTest {
         assertThat(CodeAssembler.filterDumpToData(dump, Set.of("t"))).isEqualTo(
                 "CREATE TABLE IF NOT EXISTS [T](n INT)\n;\nINSERT OR REPLACE INTO \"T\" VALUES(1)\n;\n");
         assertThat(CodeAssembler.filterDumpToData("", Set.of("t"))).isEmpty();
+    }
+
+    @Test
+    void noms_unicode_lus_en_entier() {
+        // Revue #246 : en ASCII seul, `def carré` donnait un mandataire `carr`, et la table
+        // `élèves` n'était pas une table de travail (base vide en phase 2) — 0 sur une réponse juste.
+        assertThat(assembler.assemble("Python", "def carré(x):\n    return x * x",
+                "return carré(3) == 9", "N").files().get(0).content()).contains("def carré(*a):");
+        assertThat(assembler.assemble("JavaScript", "function carré(x) { return x * x; }",
+                "return carré(3) === 9;", "N").files().get(0).content())
+                .contains("function carré(...a)");
+        assertThat(assembler.assemble("PHP", "<?php\nfunction carré($x) { return $x * $x; }",
+                "return carré(3) === 9;", "N").files().get(0).content()).contains("function carré(");
+        assertThat(CodeAssembler.sqlWorkingTables("CREATE TABLE élèves (nom TEXT);\n-- @student\n"))
+                .containsExactly("élèves");
+        assertThat(CodeAssembler.filterDumpToData(
+                "CREATE TABLE élèves (nom TEXT);\nINSERT INTO \"élèves\" VALUES('a');\n", Set.of("élèves")))
+                .isEqualTo("CREATE TABLE élèves (nom TEXT)\n;\nINSERT INTO \"élèves\" VALUES('a')\n;\n");
     }
 
     @Test

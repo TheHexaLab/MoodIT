@@ -228,6 +228,15 @@ class HarnessProjectsTest {
     @Test
     void file_name_follows_top_level_public_type_in_any_form() {
         // Chaque forme etait notee 0 : fichier mal nomme, javac refusait la classe publique.
+        // Revue #246 : après la `)` d'une annotation sur plusieurs lignes ou imbriquée sur deux
+        // niveaux, et après un saut de page.
+        for (String source : List.of(
+                "class Aide { }\n@SuppressWarnings({\n    \"unused\"\n}) public class Rect { }",
+                "class Aide { }\n@A(b = @B(c = @C(1))) public class Rect { }",
+                "class Aide { }\n\fpublic class Rect { }")) {
+            assertThat(HarnessProjects.javaFileName(source, "Solution")).as(source)
+                    .isEqualTo("Rect.java");
+        }
         // Identifiant Unicode (\w ne reconnait que l'ASCII : « Réponse » donnait R.java).
         assertThat(HarnessProjects.javaFileName("public class Réponse { }", "Solution"))
                 .isEqualTo("Réponse.java");
@@ -325,7 +334,9 @@ class HarnessProjectsTest {
                 // Argument d'annotation géant (revue #246) : lu caractère par caractère par un
                 // groupe répété, il faisait déborder la pile dès ~2 400 caractères.
                 "@A(" + " ".repeat(100_000) + ")\npublic class Solution { }",
-                "@A(" + "x".repeat(100_000) + "\npublic class Solution { }")) {
+                "@A(" + "x".repeat(100_000) + "\npublic class Solution { }",
+                // Une tentative à chaque `)` (revue #246) : toujours bornée.
+                ")@a(".repeat(40_000), ") ".repeat(60_000), ")@A(b = @B(".repeat(20_000))) {
             assertTimeoutPreemptively(Duration.ofSeconds(2),
                     () -> HarnessProjects.javaFileName(source, "Solution"));
         }

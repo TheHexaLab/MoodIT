@@ -81,7 +81,10 @@ import {
   type RunCodeInput,
   type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
-import type { ReviewAttempt } from '../../components/QuizEditor/editorTypes.ts';
+import {
+  QuizSaveRejectedError,
+  type ReviewAttempt,
+} from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 import type { Program as AddCourseProgram } from '../../components/AddCoursePopup/types.ts';
@@ -376,6 +379,18 @@ export async function runCode(input: RunCodeInput): Promise<RunResult> {
 // (il ignore les ids temporaires négatifs de l'éditeur, ainsi que les harnais de code).
 
 /**
+ * Refus métier d'un enregistrement de quiz (400, texte brut en français de core) →
+ * `QuizSaveRejectedError` ; `null` sinon. Un corps JSON est une erreur générique de Spring
+ * (anglais, technique) et un corps vide ou illisible ne dit rien : l'éditeur garde alors son
+ * message générique.
+ */
+async function quizSaveRejection(res: Response): Promise<QuizSaveRejectedError | null> {
+  if (res.status !== 400) return null;
+  const body = (await res.text().catch(() => '')).trim();
+  return body && !body.startsWith('{') ? new QuizSaveRejectedError(body) : null;
+}
+
+/**
  * Créer un quiz COMPLET (méta + questions) dans un cours ; renvoie le quiz persisté
  * (ids serveur, questions comprises).
  */
@@ -385,7 +400,7 @@ export async function createQuiz(courseId: number, quiz: Quiz): Promise<Quiz> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(quiz),
   });
-  if (!res.ok) throw new Error('Échec création du quiz');
+  if (!res.ok) throw (await quizSaveRejection(res)) ?? new Error('Échec création du quiz');
   return toQuiz(await res.json());
 }
 
@@ -399,7 +414,7 @@ export async function updateQuiz(quizId: number, quiz: Quiz): Promise<Quiz> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(quiz),
   });
-  if (!res.ok) throw new Error('Échec modification du quiz');
+  if (!res.ok) throw (await quizSaveRejection(res)) ?? new Error('Échec modification du quiz');
   return toQuiz(await res.json());
 }
 

@@ -42,6 +42,23 @@ class DockerSandboxTest {
     }
 
     @Test
+    void tar_keeps_paths_longer_than_100_bytes() throws IOException {
+        // Revue #246 : un nom de classe accepté de 200 caractères donne un chemin de plus de 100
+        // octets ; sans le mode POSIX des noms longs, commons-compress refusait l'archive (502,
+        // tentative supprimée).
+        String path = "cases/0/src/" + "A".repeat(200) + ".java";
+        List<String> names = new ArrayList<>();
+        try (TarArchiveInputStream tar = new TarArchiveInputStream(
+                new ByteArrayInputStream(DockerSandbox.tarOf(Map.of(path, "class A {}"))))) {
+            TarArchiveEntry entry;
+            while ((entry = tar.getNextEntry()) != null) {
+                names.add(entry.getName());
+            }
+        }
+        assertThat(names).containsExactly("staging/" + path, "staging/.ready");
+    }
+
+    @Test
     void default_docker_host_depends_on_os() {
         String host = DockerSandbox.defaultDockerHost();
         if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {

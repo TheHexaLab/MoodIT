@@ -62,6 +62,19 @@ export interface QuestionDraft {
 }
 
 /**
+ * Enregistrement d'un quiz refusé par core (HTTP 400) avec un message lisible, en français, qui
+ * nomme ce qu'il faut corriger (« Question 2 : un harnais dépasse 50000 caractères. »). L'éditeur
+ * l'affiche tel quel : le « Réessayez » générique faisait renvoyer le même quiz, refusé à chaque
+ * fois, sans dire quelle question corriger (#116).
+ */
+export class QuizSaveRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuizSaveRejectedError';
+  }
+}
+
+/**
  * Tentative « à revoir » d'un quiz, vue par l'enseignant (#116) : sa correction automatique a
  * échoué sans verdict trop souvent. `noVerdictFailures` = échecs sans verdict de l'étudiant sur ce
  * quiz.

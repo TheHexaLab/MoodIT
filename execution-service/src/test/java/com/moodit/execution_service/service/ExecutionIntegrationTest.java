@@ -661,6 +661,27 @@ class ExecutionIntegrationTest {
     }
 
     @Test
+    void spread_calls_and_unicode_names_are_graded() {
+        // Revue #246 : `...valeurs()` n'était pas compté comme un emploi (pas de mandataire,
+        // l'appel échouait sans bruit), `def carré` recevait un mandataire `carr`, et la table
+        // `élèves` n'était pas rechargée en phase 2 — 0 sur une réponse juste à chaque fois.
+        requireRuntime("javascript");
+        assertThat(passes("JavaScript", "function valeurs() { return [1, 3, 2]; }",
+                "return Math.max(...valeurs()) === 3;")).isTrue();
+        assertThat(passes("JavaScript", "function valeurs() { return [1, 2]; }",
+                "return Math.max(...valeurs()) === 3;")).isFalse();
+        requireRuntime("python");
+        assertThat(passes("Python", "def carré(x):\n    return x * x", "return carré(3) == 9")).isTrue();
+        assertThat(passes("Python", "def carré(x):\n    return x + x", "return carré(3) == 9")).isFalse();
+        requireRuntime("sqlite3");
+        String harness = "CREATE TABLE élèves (nom TEXT, actif INTEGER);\n"
+                + "INSERT INTO élèves VALUES ('a', 1), ('b', 1);\n-- @student\n"
+                + "SELECT (SELECT count(*) FROM élèves WHERE actif = 0) = 2;";
+        assertThat(passes("SQL", "UPDATE élèves SET actif = 0;", harness)).isTrue();
+        assertThat(passes("SQL", "UPDATE élèves SET actif = 0 WHERE nom = 'a';", harness)).isFalse();
+    }
+
+    @Test
     void sql_rewritten_schema_cannot_run_sql_in_the_grading_phase() {
         // Revue #246 : en phase 1, le code soumis réécrit sqlite_master (writable_schema). `.dump`
         // recopie ce texte ; `$x(/*)` est un paramètre pour SQLite, un commentaire pour un
