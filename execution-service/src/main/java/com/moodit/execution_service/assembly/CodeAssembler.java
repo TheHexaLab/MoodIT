@@ -375,10 +375,33 @@ public class CodeAssembler {
         // mandataire remplacerait l'outil dans la boucle RPC, qui s'appellerait elle-même à
         // l'infini ou lèverait — 0 pour tous, délai dépassé au lieu d'un refus expliqué. Le
         // rejeu d'avant déploiement (deploy/check-compiled-harnesses.py) signale la question.
-        imposed.removeIf(name -> harnessMentions(graderInfrastructure, name));
+        imposed.removeAll(freeIdentifiers(graderInfrastructure));
         java.util.Set<String> checked = new java.util.LinkedHashSet<>(names);
         checked.removeAll(imposed);
         return checked;
+    }
+
+    /** Chaîne entre guillemets doubles ou simples, échappements compris (une seule ligne). */
+    private static final Pattern QUOTED = Pattern.compile(
+            "\"(?:[^\"\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\n]|\\\\.)*'");
+    /** Identifiant LIBRE : ni nom de propriété (précédé d'un point), ni morceau d'identifiant. */
+    private static final Pattern FREE_IDENTIFIER = Pattern.compile("(?<![\\w$.])[A-Za-z_$][\\w$]*");
+
+    /**
+     * Identifiants que le code du noteur NOMME comme des noms libres, donc qu'une déclaration de
+     * même nom au niveau du module remplacerait. Chaînes (clés `payload['id']`, messages,
+     * `require('crypto')`) et noms de propriété (`.toString(…)`, `sys.exit`) n'en sont pas :
+     * les compter refusait un nom imposé que le noteur n'emploie pas (« Écris `id(x)` ») et
+     * notait 0 toute réponse juste.
+     */
+    static java.util.Set<String> freeIdentifiers(String code) {
+        String bare = QUOTED.matcher(code == null ? "" : code).replaceAll(" ");
+        java.util.Set<String> found = new java.util.HashSet<>();
+        Matcher m = FREE_IDENTIFIER.matcher(bare);
+        while (m.find()) {
+            found.add(m.group());
+        }
+        return found;
     }
 
     /** Emplacement de la liste (ou de la vérification) des noms refusés dans un gabarit de noteur. */

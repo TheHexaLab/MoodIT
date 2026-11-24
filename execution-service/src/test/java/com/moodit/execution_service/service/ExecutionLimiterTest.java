@@ -312,19 +312,44 @@ class ExecutionLimiterTest {
     @Test
     void public_wait_does_not_exceed_configured_delay() throws Exception {
         // Les deux acquisitions (place publique puis place globale) partagent UNE échéance :
-        // sinon l'appelant patientait 2 × queue-wait-ms avant son 429.
-        ExecutionLimiter limiter = new ExecutionLimiter(2, 300, 5);
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        CountDownLatch release = new CountDownLatch(1);
+        // sinon l'appelant patientait jusqu'à 2 × queue-wait-ms avant son 429. Scénario qui les
+        // exerce TOUTES LES DEUX : la place publique se libère à mi-délai, mais la place globale
+        // qu'elle rend est aussitôt prise par une correction interne en attente — l'appel public
+        // attend alors la globale, sur le RESTE du délai seulement.
+        ExecutionLimiter limiter = new ExecutionLimiter(3, 600, 600, 5);   // 3 globales, 2 publiques
+        ExecutorService pool = Executors.newFixedThreadPool(5);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch releaseAll = new CountDownLatch(1);
+        CountDownLatch internalStarted = new CountDownLatch(1);
         try {
-            occupy(pool, release, limiter::withSandboxSlot);   // occupe l'unique place publique
+            occupy(pool, releaseFirst, limiter::withSandboxSlot);          // publique 1, globale 1
+            occupy(pool, releaseAll, limiter::withSandboxSlot);            // publique 2, globale 2
+            occupy(pool, releaseAll, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));  // globale 3
+            pool.submit(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {   // attend une globale
+                internalStarted.countDown();
+                try {
+                    releaseAll.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return "interne";
+            })));
+            pool.submit(() -> {
+                Thread.sleep(300);
+                releaseFirst.countDown();                                  // publique libérée à 300 ms
+                return null;
+            });
             long start = System.nanoTime();
             assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
                     .isInstanceOf(ExecutionBusyException.class);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
-            assertThat(elapsedMs).isLessThan(600);            // < 2 × 300 ms
+            // La place globale rendue est bien allée à la correction interne (scénario atteint).
+            assertThat(internalStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            // Une échéance : ~600 ms. Deux attentes complètes : ~300 + 600 = 900 ms.
+            assertThat(elapsedMs).isBetween(500L, 800L);
         } finally {
-            release.countDown();
+            releaseFirst.countDown();
+            releaseAll.countDown();
             pool.shutdownNow();
         }
     }

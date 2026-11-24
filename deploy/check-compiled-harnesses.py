@@ -34,12 +34,19 @@ déclare. De même pour un cas dont le harnais n'emploie AUCUN nom déclaré par
 (gabarit laissé tel quel) : le rejeu ne peut pas voir le refus que recevra l'étudiant. Tout autre
 verdict y vaut OK — le format de ces harnais n'a pas changé.
 
-Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER, 1 sinon, 2 si l'inventaire est impossible.
+Un harnais compilé qui teste une EXCEPTION du code soumis (catch, assertThrows, catch_unwind…)
+sort À VÉRIFIER : le noteur séparé n'en reçoit pas le type, toute bonne réponse échouerait.
+
+Code de sortie : 0 si aucun BLOQUANT ni À VÉRIFIER non acquitté, 1 sinon, 2 si l'inventaire est
+impossible.
 Avec --unpublish, les quiz publiés qui portent un BLOQUANT sont fermés (is_published = false),
 pour qu'aucun étudiant ne les soumette avant correction ; rien n'est modifié sans cette option.
 
-À lancer sur l'hôte de prod, APRÈS la mise en ligne de cette version (le noteur interrogé doit
-être le nouveau) : `python3 deploy/check-compiled-harnesses.py`. Variables d'environnement :
+Deux temps (deploy/DEPLOY.md, « Changement de schéma ») : (1) AVANT la mise en prod, obligatoire,
+contre execution-service de CETTE version lancé en local et une base jetable chargée du dernier
+dump de prod (PG_CONTAINER, EXEC_URL) ; (2) juste APRÈS la mise en ligne, sur l'hôte de prod,
+contre le nouveau noteur, avec --unpublish. Une question À VÉRIFIER rejouée à la main avec une
+solution s'acquitte par --ack (ids séparés par des virgules). Variables d'environnement :
   PG_CONTAINER    conteneur Postgres (défaut moodit_postgres) ;
   EXEC_CONTAINER  conteneur execution-service (défaut moodit_execution) ;
   EXEC_URL        URL d'execution-service, sinon l'IP du conteneur sur son réseau Docker et
@@ -76,6 +83,27 @@ DECLARATIONS = {
     "Bash": (r"(?m)^(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)",),
 }
 DECLARATIONS["TypeScript"] = DECLARATIONS["JavaScript"]
+
+
+# Un harnais compilé qui TESTE UNE EXCEPTION du code soumis ne peut plus réussir : le noteur est
+# un autre programme, et l'exception ne lui parvient pas avec son type (Java la relance en
+# RuntimeException générique ; C, C++, C#, Rust et Go s'arrêtent à l'appel refusé). Le rejeu du
+# code de départ, qui ne lève rien, rend « faux » comme pour tout harnais normal : sans ce
+# contrôle statique, la question sortait OK et notait 0 à toute bonne réponse après la bascule.
+EXCEPTION_HARNESS = {
+    "Java": r"\bcatch\s*\(|\bassertThrows\b",
+    "C#": r"\bcatch\b|\bAssert\.Throws\b",
+    "C++": r"\bcatch\s*\(",
+    "C": r"\bsetjmp\b|\bsignal\s*\(",
+    "Rust": r"\bcatch_unwind\b|\bshould_panic\b",
+    "Go": r"\brecover\s*\(",
+}
+
+
+def tests_an_exception(language, harness):
+    """Le harnais compilé attrape-t-il une exception (ou un panic) ? FONCTION PURE (testée)."""
+    pattern = EXCEPTION_HARNESS.get(language)
+    return bool(pattern and re.search(pattern, without_comments(harness or "")))
 
 
 def declared_names(language, start_code):
@@ -327,6 +355,13 @@ def check_question(base_url, token, question):
         # script s'arrêtait là, sans rejouer les questions suivantes ni fermer les quiz bloquants.
         return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
     lines, statuses = [], []
+    for case in question["cases"]:
+        if tests_an_exception(question["language"], case["harnessCode"]):
+            statuses.append(TO_CHECK)
+            lines.append("cas %s « %s » : le harnais teste une exception du code soumis ; le "
+                         "noteur séparé n'en reçoit pas le type, toute bonne réponse échouera. "
+                         "Réécrire le harnais (valeur de retour sentinelle) et le rejouer avec "
+                         "une solution" % (case["id"], case["name"]))
     if question["language"] in PROXIED_LANGUAGES:
         for case in question["cases"]:
             if not harness_uses_start_code(question["language"], question["start_code"],
@@ -352,11 +387,21 @@ def check_question(base_url, token, question):
     return worst(statuses), lines
 
 
+def parse_ack(text):
+    """Ids de questions acquittées (« 12,15 ») → ensemble d'entiers. FONCTION PURE (testée)."""
+    return {int(part) for part in (text or "").replace(" ", "").split(",") if part}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--unpublish", action="store_true",
                         help="fermer les quiz publiés qui portent une question BLOQUANT")
+    parser.add_argument("--ack", default="",
+                        help="ids de questions À VÉRIFIER déjà rejouées à la main avec une "
+                             "solution, séparés par des virgules : elles ne bloquent plus la "
+                             "sortie en 0 (un BLOQUANT ne s'acquitte pas)")
     args = parser.parse_args()
+    acknowledged = parse_ack(args.ack)
     pg = os.environ.get("PG_CONTAINER", "moodit_postgres")
     ex = os.environ.get("EXEC_CONTAINER", "moodit_execution")
     try:
@@ -372,6 +417,9 @@ def main():
     blocked_published = set()
     for question in questions:
         status, lines = check_question(base_url, token, question)
+        if status == TO_CHECK and int(question["question_id"]) in acknowledged:
+            status = OK
+            lines = ["acquittée (--ack) : rejouée à la main"] + lines
         counts[status] += 1
         print("[%s] quiz %s « %s »%s, question %s (%s)" % (
             status, question["quiz_id"], question["quiz_title"],

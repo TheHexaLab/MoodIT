@@ -68,13 +68,6 @@ public class ExecutionService {
     @Value("${app.exec.interpreted-budget-ms:900000}")
     long interpretedBudgetMs = 15 * 60_000;
 
-    /**
-     * Plafond du budget configurable (24 h) : au-delà, la conversion en nanosecondes sature et
-     * l'échéance déborde. Très au-dessus de tout réglage sensé — c'est un garde-fou, pas un
-     * réglage ; le délai de lecture de core (ExecutionClient.DEFAULT_EXEC_BUDGET_MS) reste la vraie borne.
-     */
-    private static final long MAX_BUDGET_MS = 24L * 60 * 60 * 1000;
-
     /** Sans borne de charge ni runner de notation compilée (tests unitaires de la logique de verdict). */
     public ExecutionService(CodeAssembler assembler, RunnerExec runner) {
         this(assembler, runner, new ExecutionLimiter(Integer.MAX_VALUE, 0, Integer.MAX_VALUE), null);
@@ -217,12 +210,10 @@ public class ExecutionService {
         // les compilés (PUBLIC_WALL_MS) — la route accepte jusqu'à 100 cas fournis par l'appelant.
         long budgetMs = limiter.isInternal() ? interpretedBudgetMs
                 : Math.min(interpretedBudgetMs, DockerEvaluator.PUBLIC_WALL_MS);
-        // Budget BORNÉ avant conversion : toNanos SATURE à Long.MAX_VALUE au-delà de ~292 ans,
-        // et l'addition déborderait alors silencieusement en une échéance NÉGATIVE — déjà
-        // dépassée, donc un seul harnais évalué sur cent. Une valeur de configuration absurde
-        // doit être ramenée, pas transformée en corruption de note.
-        long clampedBudgetMs = Math.max(0, Math.min(budgetMs, MAX_BUDGET_MS));
-        long budgetNs = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(clampedBudgetMs);
+        // Un budget absurde (Long.MAX_VALUE) fait SATURER toNanos et déborder l'addition : la
+        // comparaison par DIFFÉRENCE ci-dessous (`nanoTime() - deadline >= 0`) reste juste malgré
+        // le débordement — ne jamais l'écrire `nanoTime() >= deadline`.
+        long budgetNs = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budgetMs);
         long startNs = System.nanoTime();
         long deadline = startNs + budgetNs;
         WAIT_NS.get()[0] = 0;
@@ -385,8 +376,11 @@ public class ExecutionService {
         // phase 2 aurait noté un état partiel — une ligne fautive retirée par la coupe passait
         // pour supprimée (#23). La borne en caractères ci-dessous ne le voyait pas : des
         // caractères de 3 octets franchissent le plafond en octets bien avant elle. Refusé fermé ;
-        // un code soumis qui imprime lui-même le marqueur ne pénalise que lui.
-        if (dump.length() > maxSqlDumpChars || run1.stdout().contains(SUPERVISOR_TRUNCATION_MARKER)) {
+        // un code soumis qui imprime lui-même le marqueur ne pénalise que lui. Cherché DANS le
+        // dump seulement : une coupe qui ampute l'état y laisse forcément sa ligne, alors qu'une
+        // sortie de débogage géante AVANT le dump peut être tronquée sans toucher à l'état — la
+        // refuser notait 0 une réponse juste.
+        if (dump.length() > maxSqlDumpChars || dump.contains(SUPERVISOR_TRUNCATION_MARKER)) {
             return new TestResult(testCase.name(), weight, false, "État de la base trop volumineux");
         }
         // Liste blanche = tables déclarées par le prof ; découple le filtrage des internes de sqlite.

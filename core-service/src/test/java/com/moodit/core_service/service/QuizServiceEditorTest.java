@@ -345,9 +345,9 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                     .isInstanceOf(InvalidQuizException.class)
                     .hasMessage("Question 1 : un harnais dépasse 50000 caractères.");
             assertThatThrownBy(() -> service.createQuiz(1,
-                    quizWith.apply(null, List.of(tc.apply("n".repeat(501), "return true;")))))
+                    quizWith.apply(null, List.of(tc.apply("n".repeat(129), "return true;")))))
                     .isInstanceOf(InvalidQuizException.class)
-                    .hasMessage("Question 1 : un nom de harnais dépasse 500 caractères.");
+                    .hasMessage("Question 1 : un nom de harnais dépasse 128 caractères.");
             verify(quizRepository, never()).save(any());
 
             // Aux bornes exactes : accepté.
@@ -355,7 +355,8 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
             List<TestCaseDTO> atLimit = new java.util.ArrayList<>(java.util.stream.IntStream.range(0, 99)
                     .mapToObj(i -> tc.apply("c" + i, "return true;")).toList());
-            atLimit.add(tc.apply("n".repeat(500), "x".repeat(50_000)));
+            // 128 : la colonne Test_Case.name, plus courte que la borne d'execution-service.
+            atLimit.add(tc.apply("n".repeat(128), "x".repeat(50_000)));
             service.createQuiz(1, quizWith.apply("x".repeat(100_000), atLimit));
             verify(quizRepository).save(any(Quiz.class));
         }

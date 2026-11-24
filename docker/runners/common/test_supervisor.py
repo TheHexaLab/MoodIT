@@ -13,6 +13,7 @@ import subprocess
 import time
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import inspect
@@ -606,6 +607,131 @@ class ReadCappedTest(unittest.TestCase):
             os.unlink(f.name)
 
 
+class SignatureFormsTest(unittest.TestCase):
+    """Revue #246 : écritures légitimes qui n'étaient pas reconnues, d'où « aucune fonction
+    exploitable » ou un bouchon faux — 0 (voire faux verdict muet) sur une réponse juste."""
+
+    def test_c_unnamed_parameters_and_multiword_types(self):
+        self.assertEqual(["int", "int"], supervisor._c_param_types("int, int"))
+        self.assertEqual(["double"], supervisor._c_param_types("const double"))
+        self.assertEqual(["int", "long"], supervisor._c_param_types("int a, long b = 3"))
+        # `long double` n'est pas un `long` : plus de 2.5 tronqué en 2 sans diagnostic.
+        self.assertIsNone(supervisor._c_param_types("long double"))
+        self.assertIsNone(supervisor._c_param_types("long double x"))
+        self.assertIsNone(supervisor._c_param_types("unsigned int"))
+        api = {n: (c, m) for n, c, m in supervisor.cpp_object_api(
+            "class Rect { int l, h; public: Rect(int, int); int aire(); int ajoute(int); };\n"
+            "Rect::Rect(int a, int b) : l(a), h(b) {}\nint Rect::aire() { return l * h; }\n")}
+        self.assertEqual([["int", "int"]], api["Rect"][0])
+        self.assertIn(("int", "ajoute", ["int"]), api["Rect"][1])
+
+    def test_c_function_defined_in_two_preprocessor_branches_is_stubbed_once(self):
+        src = "#if 0\nint fact(int n) { return 0; }\n#else\nint fact(int n) { return n; }\n#endif\n"
+        self.assertEqual([("int", "fact", ["int"])], supervisor.c_signatures(src))
+        self.assertEqual([("int", "fact", ["int"])], supervisor.c_signatures(src, cpp=True))
+        # C++ garde les vraies surcharges.
+        both = "int f(int a) { return a; }\nint f(double a) { return 1; }\n"
+        self.assertEqual(2, len(supervisor.c_signatures(both, cpp=True)))
+
+    def test_go_parenthesized_or_named_result(self):
+        src = ("func A(n int) (r int) {\n\treturn n\n}\nfunc B(n int) (int) {\n\treturn n\n}\n"
+               "func C(n int) (int, error) {\n\treturn n, nil\n}\n"
+               "type R struct{ a int }\nfunc NewR(a int) *R { return &R{a} }\n"
+               "func (r *R) Aire() (v int) { return r.a }\n")
+        self.assertEqual({"A", "B"}, {n for _, n, _ in supervisor.go_signatures(src)})
+        self.assertEqual([("int", "Aire", [])], supervisor.go_object_api(src)[0][2])
+
+    def test_rust_trait_impl_and_default_methods(self):
+        src = ("pub trait Forme {\n    fn aire(&self) -> i32;\n"
+               "    fn double_aire(&self) -> i32 { 2 * self.aire() }\n}\n"
+               "pub struct Carre { c: i32 }\n"
+               "impl Carre {\n    pub fn new(c: i32) -> Self { Carre { c } }\n}\n"
+               "impl Forme for Carre {\n    fn aire(&self) -> i32 { self.c * self.c }\n}\n")
+        api = {t: (c, m) for t, c, m in supervisor.rust_object_api(src)}
+        names = {m[1] for m in api["Carre"][1]}
+        self.assertEqual({"aire", "double_aire"}, names)
+        self.assertEqual(["Forme"], supervisor.rust_implemented_traits(src))
+        server = supervisor.rust_server_source([], src, supervisor.rust_object_api(src))
+        self.assertIn("use crate::Forme as _;", server)
+        # Sans trait : aucune importation, le gabarit reste valide.
+        self.assertNotIn("as _;", supervisor.rust_server_source([("i32", "f", [])], "fn f() -> i32 { 1 }"))
+
+    def test_java_interface_default_methods(self):
+        iface = ('Compiled from "S.java"\ninterface Forme {\n  public abstract int aire();\n'
+                 '  public default int doubleAire();\n}\n')
+        self.assertEqual(("Forme", [("int", "doubleAire", [])]),
+                         supervisor.java_interface_defaults(iface))
+        self.assertEqual((None, []), supervisor.java_interface_defaults(
+            'Compiled from "S.java"\nclass Carre implements Forme {\n}\n'))
+        self.assertEqual(["Forme", "java.lang.Comparable"], supervisor.java_interfaces(
+            "class Cube extends Carre implements Forme, java.lang.Comparable<Cube> {\n"))
+        merged = supervisor.inherit_instance_methods(
+            {"Forme": ((), [("int", "doubleAire", [])]), "Carre": ([[]], [("int", "aire", [])])},
+            {"Carre": ["Forme"]})
+        self.assertEqual([("int", "aire", []), ("int", "doubleAire", [])], merged["Carre"])
+
+
+class IsolationInvariantsTest(unittest.TestCase):
+    """Revue #246 : ces propriétés de cloisonnement pouvaient régresser sans qu'aucun test
+    unitaire ne rougisse (seuls les tests d'intégration contre les images les voyaient)."""
+
+    def test_grader_runs_under_its_own_uid(self):
+        self.assertNotEqual(supervisor.grader_uid(), supervisor.STUDENT_UID)
+        calls = []
+        with unittest.mock.patch.object(supervisor, "mark_oom_victim"), \
+                unittest.mock.patch.object(supervisor, "resource", create=True), \
+                unittest.mock.patch.object(supervisor.os, "setsid", create=True), \
+                unittest.mock.patch.object(supervisor.os, "setgroups", create=True), \
+                unittest.mock.patch.object(supervisor.os, "setgid", create=True,
+                                           side_effect=lambda g: calls.append(("gid", g))), \
+                unittest.mock.patch.object(supervisor.os, "setuid", create=True,
+                                           side_effect=lambda u: calls.append(("uid", u))):
+            supervisor.demote_grader()
+        self.assertEqual([("gid", supervisor.grader_uid()), ("uid", supervisor.grader_uid())], calls)
+
+    @unittest.skipUnless(os.name == "posix", "modes POSIX ; couvert en CI (Linux)")
+    def test_private_file_is_0600_from_creation(self):
+        directory = tempfile.mkdtemp()
+        try:
+            path = os.path.join(directory, "noteur.c")
+            old = os.umask(0)
+            try:
+                supervisor.write_private(path, "secret")
+            finally:
+                os.umask(old)
+            self.assertEqual(0o600, stat.S_IMODE(os.stat(path).st_mode))
+        finally:
+            supervisor.remove_tree(directory)
+
+    def test_sources_are_locked_root_0700(self):
+        directory = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(directory, "sous"))
+            open(os.path.join(directory, "sous", "harnais_rpc.c"), "w").close()
+            with unittest.mock.patch.object(supervisor.os, "chown", create=True), \
+                    unittest.mock.patch.object(supervisor.os, "chmod") as chmod:
+                supervisor.lock_sources(directory)
+            modes = {call.args[1] for call in chmod.call_args_list}
+            self.assertEqual({0o700}, modes)
+            self.assertEqual(3, len(chmod.call_args_list))   # racine, dossier, fichier
+        finally:
+            supervisor.remove_tree(directory)
+
+    def test_grader_dirs_are_never_built_in_the_student_work_dir(self):
+        # Sous work/ (à l'étudiant), le dossier du noteur redevenait renommable par le code noté.
+        import inspect
+        for function in (supervisor.run_java_rpc, supervisor.finish_rpc_pair):
+            source = inspect.getsource(function)
+            self.assertIn("grader_dir(case_dir", source, function.__name__)
+            self.assertNotIn("grader_dir(work", source, function.__name__)
+
+    def test_every_case_source_is_locked_before_the_first_case_runs(self):
+        import inspect
+        source = inspect.getsource(supervisor.main)
+        lock = source.index('lock_src_dir(os.path.join(BOX, "cases", str(case["index"])))')
+        self.assertLess(lock, source.index("execute_case("))
+
+
 class InheritanceTest(unittest.TestCase):
     """Revue #246 : une méthode héritée et non redéfinie manquait au bouchon (Java, C#, C++) —
     `new Carre(3).aire()` ne compilait pas, 0 pour l'étudiant qui hérite au lieu de redéfinir."""
@@ -974,7 +1100,8 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         stub_src = supervisor.c_grader_source([("double", "moyenne", ["double", "double"])],
                                              "return 1;", "N")
         self.assertIn("%.17g", stub_src)
-        self.assertNotIn('"%s|call|moyenne|%g', stub_src)
+        # Aucun `%g` nu (`%.17g` ne contient pas cette sous-chaîne).
+        self.assertNotIn("%g", stub_src)
 
     def test_rust_string_sent_as_hex(self):
         # Le fil est à champs séparés par « | », une ligne par message : un « | » dans la valeur
@@ -2208,9 +2335,10 @@ class Review246Test(unittest.TestCase):
 
     def test_java_server_resolves_by_parameter_types(self):
         server = supervisor.java_server_source(["Solution"])
-        # Les trois resolutions (statique, constructeur, instance) passent par `signe`, plus
-        # aucune par la seule arite.
-        self.assertEqual(server.count("signe(m.getParameterTypes(), appel, args.length)"), 2)
+        # Les resolutions (statique, constructeur, instance, methode `default` d'interface)
+        # passent par `signe`, plus aucune par la seule arite.
+        self.assertEqual(server.count("signe(m.getParameterTypes(), appel, args.length)"), 3)
+        self.assertIn("m.isDefault()", server)
         self.assertIn("signe(c.getParameterTypes(), appel, args.length)", server)
         self.assertNotIn("getParameterCount()", server)
 
@@ -2510,10 +2638,7 @@ class Review246cTest(unittest.TestCase):
             chown.assert_called_once_with(path, supervisor.grader_uid(), supervisor.grader_uid())
         finally:
             shutil.rmtree(directory, ignore_errors=True)
-        # Plus aucun dossier du noteur sous work/ dans les deux chemins concernés.
-        with open(supervisor.__file__, encoding="utf-8") as f:
-            text = f.read()
-        self.assertNotIn('os.path.join(work, "not_', text)
+        # Sites d'appel : cf. IsolationInvariantsTest.test_grader_dirs_are_never_built_in_the_student_work_dir.
 
     def test_cpp_digit_separator_keeps_following_functions(self):
         src = self.NL.join([

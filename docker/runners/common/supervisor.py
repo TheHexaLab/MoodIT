@@ -1772,6 +1772,36 @@ def java_class_api(javap_output):
 JAVAP_EXTENDS = re.compile(r"^[\w ]*?\bclass\s+([\w.$]+)\s+extends\s+([\w.$]+)", re.M)
 
 
+JAVAP_INTERFACE = re.compile(r"^[\w ]*?\binterface\s+([\w.$]+)", re.M)
+JAVAP_DEFAULT = re.compile(
+    r"^[ \t]+(?:public\s+)?default\s+([\w.$\[\]]+)\s+(\w+)\(([^()]*)\)(?:\s+throws\s+[^;]+)?;", re.M)
+
+
+def java_interfaces(javap_output):
+    """Interfaces qu'une classe implémente (forme source, génériques retirés). PURE (testée)."""
+    found = re.search(r"\bimplements\s+([^{]+)\{", javap_output or "")
+    if not found:
+        return []
+    names = re.sub(r"<[^<>]*>", "", re.sub(r"<[^<>]*>", "", found.group(1)))
+    return [n.strip().replace("$", ".") for n in names.split(",") if n.strip()]
+
+
+def java_interface_defaults(javap_output):
+    """(interface, [méthodes `default` transportables]) d'un bloc javap d'interface, ou
+    (None, []). FONCTION PURE (testée). Une méthode `default` non redéfinie s'appelle sur tout
+    objet qui implémente l'interface : sans elle, le bouchon ne la portait pas, et l'étudiant
+    qui s'en sert recevait 0 quand la solution du prof, qui la redéfinissait, passait."""
+    header = JAVAP_INTERFACE.search(javap_output or "")
+    if not header or JAVAP_CLASS.search(javap_output or ""):
+        return None, []
+    methods = []
+    for ret, ident, args in JAVAP_DEFAULT.findall(javap_output):
+        types = [a.strip() for a in args.split(",") if a.strip()]
+        if ret in JSON_TYPES and all(t in JSON_TYPES for t in types):
+            methods.append((ret, ident, types))
+    return header.group(1).replace("$", "."), methods
+
+
 def java_superclass(javap_output):
     """Classe mère déclarée dans un bloc javap (forme source `Outer.Inner`), ou None. PURE."""
     found = JAVAP_EXTENDS.search(javap_output or "")
@@ -1782,8 +1812,9 @@ def inherit_instance_methods(apis, parents, hiding=None):
     """Ajoute à chaque classe les méthodes d'instance HÉRITÉES d'une classe du code soumis.
     FONCTION PURE (testée).
 
-    `apis` : nom → (constructeurs, méthodes d'instance) ; `parents` : nom → classe mère (ou
-    None). Rend un nouveau dict nom → méthodes d'instance, celles de la classe d'abord, puis
+    `apis` : nom → (constructeurs, méthodes d'instance) ; `parents` : nom → classe mère, liste
+    de parents (classe mère puis interfaces, en Java), ou None. Les ancêtres sont parcourus en
+    largeur, la classe mère d'abord. Rend un nouveau dict nom → méthodes d'instance, celles de la classe d'abord, puis
     celles de ses ancêtres qu'elle ne redéfinit pas (même nom, mêmes types). Sans cela, le
     bouchon ne portait que les méthodes DÉCLARÉES : `new Carre(3).aire()` avec un `aire()`
     hérité de `Forme` ne compilait pas, et l'étudiant qui hérite — l'esprit d'un exercice
@@ -1795,14 +1826,23 @@ def inherit_instance_methods(apis, parents, hiding=None):
     `Forme` : hériter `aire()` quand même faisait générer au serveur un appel qui ne compile pas
     (« Échec de compilation » sur une réponse juste). Java et C# résolvent les surcharges en
     remontant la hiérarchie : pas de masquage par nom (None)."""
+    def parents_of(name):
+        found = parents.get(name)
+        if found is None:
+            return []
+        return [found] if isinstance(found, str) else list(found)
+
     merged = {}
     for name, (_ctors, own) in apis.items():
         methods = list(own)
         seen = {(m[1], tuple(m[2])) for m in methods}
         hidden = set(hiding.get(name, ())) if hiding is not None else set()
         visited = {name}
-        ancestor = parents.get(name)
-        while ancestor in apis and ancestor not in visited:
+        queue = parents_of(name)
+        while queue:
+            ancestor = queue.pop(0)
+            if ancestor not in apis or ancestor in visited:
+                continue
             visited.add(ancestor)
             for method in apis[ancestor][1]:
                 key = (method[1], tuple(method[2]))
@@ -1811,7 +1851,7 @@ def inherit_instance_methods(apis, parents, hiding=None):
                     methods.append(method)
             if hiding is not None:
                 hidden |= set(hiding.get(ancestor, ()))
-            ancestor = parents.get(ancestor)
+            queue.extend(parents_of(ancestor))
         merged[name] = methods
     return merged
 
@@ -2320,6 +2360,21 @@ public final class MooditServer {
                         + encode(m.invoke(instance, convertis)) + "}";
             }
         }
+        // Methode `default` d'une interface, non redefinie : ni la classe ni ses meres ne la
+        // declarent, getMethods() la rend (publique par construction).
+        for (Method m : instance.getClass().getMethods()) {
+            if (!m.isDefault() || !m.getName().equals(nom)
+                    || !signe(m.getParameterTypes(), appel, args.length)) {
+                continue;
+            }
+            Class<?>[] types = m.getParameterTypes();
+            Object[] convertis = new Object[args.length];
+            for (int i = 0; i < args.length; i++) {
+                convertis[i] = convertit(types[i], (String) args[i]);
+            }
+            return "{\\"ok\\":true,\\"id\\":\\"" + id + "\\",\\"value\\":"
+                    + encode(m.invoke(instance, convertis)) + "}";
+        }
         throw new NoSuchMethodException(nom);
     }
 
@@ -2440,7 +2495,16 @@ def java_server_source(class_names):
 # lues dans la source de l'étudiant. Le code noté part dans un BINAIRE séparé (le harnais n'est
 # ni compilé avec lui, ni présent dans son système de fichiers).
 
-GO_FUNC = re.compile(r"^func\s+(\w+)\s*\(([^()]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+# Resultat unique : nu (`int`), entre parentheses (`(int)`) ou NOMME (`(r int)`) — les deux
+# dernieres formes etaient ignorees, « Aucune fonction exploitable », 0 sur une reponse juste.
+GO_RESULT = r"(?:\(\s*(?:\w+\s+)?([\w\[\]\*\.]+)\s*\)|([\w\[\]\*\.]+))?"
+GO_FUNC = re.compile(r"^func\s+(\w+)\s*\(([^()]*)\)\s*" + GO_RESULT + r"\s*\{", re.M)
+
+
+def go_funcs(source):
+    """(nom, parametres, retour) des fonctions de premier niveau, retour sans ses parentheses."""
+    return [(ident, params, paren or bare) for ident, params, paren, bare
+            in GO_FUNC.findall(source or "")]
 GO_TYPES = {"int": "int", "int64": "int64", "float64": "float64", "bool": "bool",
             "string": "string"}
 
@@ -2589,7 +2653,7 @@ def go_signatures(source):
     marshalable : le harnais qui l'appellerait ne compilerait pas — message au prof, jamais un
     faux verdict."""
     hits = []
-    for ident, params, ret in GO_FUNC.findall(source or ""):
+    for ident, params, ret in go_funcs(source):
         if ident == "main" or (ret or "") not in GO_TYPES:
             continue
         types = []
@@ -2617,7 +2681,13 @@ def go_signatures(source):
 
 GO_STRUCT = re.compile(r"^type\s+(\w+)\s+struct\b", re.M)
 GO_METHOD = re.compile(
-    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^()]*)\)\s*([\w\[\]\*\.]+)?\s*\{", re.M)
+    r"^func\s+\(\s*\w+\s+(\*?)(\w+)\s*\)\s*(\w+)\s*\(([^()]*)\)\s*" + GO_RESULT + r"\s*\{", re.M)
+
+
+def go_methods(source):
+    """(etoile, recepteur, nom, parametres, retour) des methodes, retour sans parentheses."""
+    return [(star, receiver, ident, params, paren or bare) for star, receiver, ident, params, paren, bare
+            in GO_METHOD.findall(source or "")]
 
 
 def go_object_api(source):
@@ -2633,7 +2703,7 @@ def go_object_api(source):
     if not structs:
         return []
     by_type = {s: ([], []) for s in structs}
-    for ident, params, ret in GO_FUNC.findall(source or ""):
+    for ident, params, ret in go_funcs(source):
         # `func NewRectangle(…) *Rectangle` est la forme la plus répandue : sans retirer l'étoile,
         # ce constructeur n'était pas reconnu et la question n'était pas proxifiée.
         if (ret or "").lstrip("*") not in structs or ident == "main":
@@ -2642,7 +2712,7 @@ def go_object_api(source):
         if types is not None:
             target_file = (ret or "").lstrip("*")
             by_type[target_file][0].append((ident, types, (ret or "").startswith("*")))
-    for _, receiver, ident, params, ret in GO_METHOD.findall(source or ""):
+    for _, receiver, ident, params, ret in go_methods(source):
         if receiver not in structs:
             continue
         if (ret or "") not in GO_TYPES:
@@ -2743,7 +2813,7 @@ def go_pointer_methods(source):
     champs après l'appel et les recopie dans l'objet du harnais (cf. go_object_stub), sans quoi
     la modification serait perdue EN SILENCE."""
     return {(receiver, ident)
-            for star, receiver, ident, _, _ in GO_METHOD.findall(source or "") if star}
+            for star, receiver, ident, _, _ in go_methods(source) if star}
 
 
 def go_capture_fields(source):
@@ -3215,6 +3285,9 @@ C_FUNC = re.compile(r"^[ \t]*(?:(?:static|inline|extern|const)\s+){0,8}"
 # 1234567.89 revenait en notation exponentielle, donc une réponse JUSTE était notée fausse.
 # 17 chiffres suffisent à garantir l'aller-retour exact d'un double IEEE 754.
 C_TYPES = {"int": "%d", "long": "%ld", "double": "%.17g"}
+# Mots qui composent un type C/C++ : en deuxieme position, ils ne sont pas un NOM de parametre.
+C_TYPE_WORDS = {"int", "long", "double", "short", "unsigned", "signed", "char", "float", "bool",
+                "void", "auto", "wchar_t"}
 # Lecture d'un champ texte, UNE seule fois pour les cinq sites qui en avaient une copie.
 C_READ = {"int": "atoi", "long": "atol", "double": "atof"}
 
@@ -3442,7 +3515,17 @@ def c_signatures(source, cpp=False):
         if types is None:
             continue
         hits.append((ret, ident, types))
-    return hits
+    # Une fonction definie dans deux branches du preprocesseur (`#if … #else …`) etait vue deux
+    # fois : deux bouchons identiques, « redefinition of moodit_f_… », 0 sur une reponse juste.
+    # Une seule fois par NOM en C (pas de surcharge), par nom ET types en C++.
+    if cpp:
+        return dedupe_signatures(hits)
+    seen, unique = set(), []
+    for hit in hits:
+        if hit[1] not in seen:
+            seen.add(hit[1])
+            unique.append(hit)
+    return unique
 
 
 CPP_QUALIF = re.compile(r"^(?:(?:explicit|virtual|inline|constexpr)\s+)+")
@@ -3648,9 +3731,14 @@ def _c_param_types(params):
         if any(c in param_group for c in "*[&"):
             return None
         pieces = [m for m in param_group.split("=")[0].split() if m != "const"]
-        # EXACTEMENT un type et un nom : `long double x` passait pour un `long` (premier mot
-        # seul lu), le bouchon tronquait 2.5 a 2 et une reponse juste etait notee fausse.
-        if len(pieces) != 2 or pieces[0] not in C_TYPES:
+        # Un type SEUL (parametre sans nom : `Rect(int, int);`, declaration dans la classe et
+        # definition dehors — l'ecriture C++ la plus courante), ou un type et un NOM. Deux mots
+        # de type (`long double`, `unsigned int`, `long long`) ne sont pas un type transportable :
+        # `long double` passait pour un `long`, le bouchon tronquait 2.5 a 2, faux verdict muet.
+        if len(pieces) == 1 and pieces[0] in C_TYPES:
+            types.append(pieces[0])
+            continue
+        if len(pieces) != 2 or pieces[0] not in C_TYPES or pieces[1] in C_TYPE_WORDS:
             return None
         types.append(pieces[0])
     return types
@@ -4136,7 +4224,11 @@ def rust_signatures(source):
 
 
 RUST_STRUCT = re.compile(r"^[ \t]*(?:pub\s+)?struct\s+(\w+)", re.M)
-RUST_IMPL = re.compile(r"^[ \t]*impl\s+(\w+)\s*\{", re.M)
+# `impl Type {` et `impl Trait for Type {` (génériques tolérés) : les méthodes d'un trait
+# implémenté s'appellent sur l'objet comme les autres. Groupe 1 : le trait, groupe 2 : le type.
+RUST_IMPL = re.compile(
+    r"^[ \t]*impl(?:\s*<[^<>{};]*>)?\s+(?:(\w+)(?:\s*<[^<>{};]*>)?\s+for\s+)?(\w+)\s*\{", re.M)
+RUST_TRAIT = re.compile(r"^[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?trait\s+(\w+)[^{};]*\{", re.M)
 
 
 def rust_impl_blocks(source):
@@ -4158,19 +4250,41 @@ def rust_impl_blocks(source):
         starts, hits = by_depth.setdefault(depths[hit.start(1)], ([], []))
         starts.append(hit.start(1))
         hits.append(hit)
-    blocks = []
-    for impl in RUST_IMPL.finditer(src_text):
-        begin = impl.end() - 1             # l'accolade ouvrante, derniere du motif
+    def direct_functions(begin):
         finish = block_end(src_text, begin)
         # A la profondeur du corps, entre l'accolade et sa fermeture : exactement les fonctions
         # directes de CE bloc (en sortir puis y revenir demanderait de le fermer).
         starts, hits = by_depth.get(depths[begin] + 1, ((), ()))
         low = bisect.bisect_right(starts, begin)
         high = bisect.bisect_left(starts, finish)
-        blocks.append((impl.group(1),
-                       [(h.group(1), h.group(2), h.group(3)) for h in hits[low:high]
-                        if h.end() <= finish]))
+        return [h for h in hits[low:high] if h.end() <= finish]
+
+    # Méthodes PAR DÉFAUT d'un trait (celles qui ont un corps) : un `impl Trait for Type` qui ne
+    # les redéfinit pas les offre quand même sur l'objet.
+    defaults = {}
+    for trait in RUST_TRAIT.finditer(src_text):
+        with_body = [h for h in direct_functions(trait.end() - 1)
+                     if src_text[h.end():].lstrip().startswith("{")]
+        defaults[trait.group(1)] = [(h.group(1), h.group(2), h.group(3)) for h in with_body]
+    blocks = []
+    for impl in RUST_IMPL.finditer(src_text):
+        functions = [(h.group(1), h.group(2), h.group(3)) for h in direct_functions(impl.end() - 1)]
+        declared = {f[0] for f in functions}
+        functions += [f for f in defaults.get(impl.group(1), []) if f[0] not in declared]
+        blocks.append((impl.group(2), functions))
     return blocks
+
+
+def rust_implemented_traits(source):
+    """Traits de PREMIER NIVEAU du code soumis implémentés par un de ses types. PURE (testée).
+
+    Le serveur vit dans un module à part : une méthode de trait ne s'y appelle que si le trait est
+    en portée. Ils y sont importés en `use crate::Trait as _;` (aucun nom ajouté)."""
+    src_text = source or ""
+    depths, _ = _closings(src_text)
+    top_level = {t.group(1) for t in RUST_TRAIT.finditer(src_text) if depths[t.start(1)] == 0}
+    return sorted({impl.group(1) for impl in RUST_IMPL.finditer(src_text)
+                   if impl.group(1) in top_level})
 
 
 
@@ -4605,6 +4719,7 @@ mod moodit_srv {
 // l'etudiant (banal pour un flush) levait E0252, nom defini deux fois. Les methodes de trait
 // marchent des que le trait est en portee, quel que soit son nom.
 use std::io::{BufRead as MooditBufRead, Write as MooditWrite};
+%s
 
 fn moodit_hexe(s: &str) -> String {
     // Chaine → HEXADECIMAL : le fil est a champs separes par « | », une ligne par message.
@@ -4664,7 +4779,10 @@ pub fn moodit_serve() {
 fn main() {
     moodit_srv::moodit_serve();
 }
-''' % (rust_without_main(student_source), stacks, "\n".join(branches), object_branches)
+''' % (rust_without_main(student_source),
+       "".join("#[allow(unused_imports)]\nuse crate::%s as _;\n" % t
+               for t in rust_implemented_traits(student_source)),
+       stacks, "\n".join(branches), object_branches)
 
 
 # `main` nu ou précédé de modificateurs : `pub fn main()` n'était pas renommé, le `fn main()`
@@ -5718,12 +5836,18 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     blocks = {}
     apis, parents = {}, {}
     for block in re.split(r"(?=^Compiled from )", javap, flags=re.M):
+        interface, defaults = java_interface_defaults(block)
+        if interface:
+            # Interface du code soumis : ses méthodes `default` comptent comme héritées.
+            apis[interface] = ((), defaults)
+            continue
         source_name, ctors, instance = java_class_api(block)
         if not source_name:
             continue
         blocks[source_name] = block
         apis[source_name] = (ctors, instance)
-        parents[source_name] = java_superclass(block)
+        superclass = java_superclass(block)
+        parents[source_name] = ([superclass] if superclass else []) + java_interfaces(block)
     # Méthodes héritées d'une autre classe du code soumis : le serveur les trouve en remontant
     # les classes mères (methode()), le bouchon doit donc les déclarer aussi.
     inherited = inherit_instance_methods(apis, parents)

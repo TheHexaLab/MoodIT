@@ -253,18 +253,21 @@ class ExecutionServiceTest {
 
     @Test
     void absurd_budget_does_not_degrade_grading() {
-        // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement)
-        // saturait la conversion en nanosecondes, l'addition débordait en une échéance NÉGATIVE
-        // — donc DÉJÀ dépassée — et un seul harnais sur cent était évalué. Une configuration
-        // absurde doit être ramenée, jamais corrompre une note.
+        // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement) fait
+        // saturer la conversion en nanosecondes, et l'échéance déborde en valeur NÉGATIVE. Seule
+        // une comparaison par différence la lit encore juste ; `nanoTime() >= deadline` verrait
+        // une échéance déjà dépassée et n'évaluerait qu'un harnais sur trois. Chemin INTERNE : le
+        // public plafonne le budget à PUBLIC_WALL_MS avant tout calcul, et ne l'exercerait pas.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
         pistonRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
-        service.interpretedBudgetMs = Long.MAX_VALUE;
+        svc.interpretedBudgetMs = Long.MAX_VALUE;
 
-        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
-                "def solution(): return 5",
+        List<TestResult> results = limiter.asInternal(() -> svc.evaluate(new EvaluateRequest(
+                "Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 1),
                         new TestCaseInput("b", "return True", 1),
-                        new TestCaseInput("c", "return True", 1))));
+                        new TestCaseInput("c", "return True", 1)))));
 
         assertThat(results).extracting(TestResult::passed).containsExactly(true, true, true);
         verify(runner, times(3)).execute(anyString(), any(), any(), any());
@@ -664,7 +667,7 @@ class ExecutionServiceTest {
 
         // Le marqueur réservé est le SEUL refus en amont : un harnais booléen n'en est plus un,
         // c'est le format sûr, et il doit atteindre le runner (cf.
-        // harnais_booleen_atteint_le_runner_dans_les_six_langages).
+        // boolean_harness_reaches_runner_in_all_six_languages).
         verifyNoInteractions(docker);
 
         // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.

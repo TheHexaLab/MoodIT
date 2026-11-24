@@ -93,7 +93,7 @@ Depuis la **racine** du repo :
 # (les 10 images, ~8,5 Go au total ; à relancer quand docker/runners/ change).
 ./docker/runners/build.sh
 
-docker compose -f docker-compose-hetzner.yml up -d --build
+docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build
 ```
 
 Le premier build prend quelques minutes (6 services Java + frontend + les 10 images runner).
@@ -102,7 +102,7 @@ Le premier build prend quelques minutes (6 services Java + frontend + les 10 ima
 Suivre les logs :
 
 ```bash
-docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
+docker compose --env-file .env.docker -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 ```
 
 ## 6. Vérifier
@@ -118,11 +118,11 @@ docker compose -f docker-compose-hetzner.yml logs -f gateway core-service caddy
 
 | Action | Commande (depuis la racine du repo) |
 |---|---|
-| Voir l'état | `docker compose -f docker-compose-hetzner.yml ps` |
-| Logs d'un service | `docker compose -f docker-compose-hetzner.yml logs -f <service>` |
+| Voir l'état | `docker compose --env-file .env.docker -f docker-compose-hetzner.yml ps` |
+| Logs d'un service | `docker compose --env-file .env.docker -f docker-compose-hetzner.yml logs -f <service>` |
 | Mettre à jour le code | `./deploy/update.sh` (voir « Mettre à jour la prod ») |
-| Redémarrer | `docker compose -f docker-compose-hetzner.yml restart <service>` |
-| Tout arrêter | `docker compose -f docker-compose-hetzner.yml down` |
+| Redémarrer | `docker compose --env-file .env.docker -f docker-compose-hetzner.yml restart <service>` |
+| Tout arrêter | `docker compose --env-file .env.docker -f docker-compose-hetzner.yml down` |
 
 **Redémarrer `execution-service` pendant des corrections.** Une correction en cours au moment de
 l'arrêt est perdue : sa tentative est supprimée et l'étudiant resoumet. Les corrections en file
@@ -162,6 +162,11 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > `moodit_piston`. Sans images, toute exécution rend 502 et les tentatives sont supprimées. Et
 > le clone du serveur est encore sur l'ancien commit, où `docker/runners/` n'existe pas : les
 > images se construisent depuis un worktree de la NOUVELLE version. Sur le serveur, dans le clone :
+>
+> Aucun `update.sh` ne doit partir seul pendant cette procédure : si une ligne de cron le lance
+> sur ce serveur (`crontab -l`), la suspendre AVANT la fusion `main → deploiement` — l'ancien
+> script basculerait le code avant que les images runner existent — et la réactiver après le
+> second `update.sh`.
 >
 > ```bash
 > git fetch origin deploiement
@@ -203,8 +208,19 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
 > fermé). Il sort en 1 tant qu'il reste un BLOQUANT ou un
-> À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Le jeton interne est lu
-> dans le conteneur et jamais affiché.
+> À VÉRIFIER : le déploiement n'est pas terminé avant une sortie en 0. Une question À VÉRIFIER
+> se règle en la rejouant à la main avec une solution (« Tester » sur une pile de CETTE version),
+> puis en l'acquittant : `--ack <id>,<id>` (ids de question affichés par le script). Un BLOQUANT
+> ne s'acquitte pas : il se corrige. Le jeton interne est lu dans le conteneur et jamais affiché.
+>
+> **Harnais qui testent une exception.** Le noteur étant un autre programme, une exception du
+> code soumis ne lui parvient pas avec son type : Java la relance en `RuntimeException`
+> générique, C, C++, C#, Rust et Go s'arrêtent à l'appel refusé. Un harnais « doit lever X »
+> (`catch (IllegalArgumentException e)`, `assertThrows`, `catch_unwind`, `recover()`…) écrit
+> pour Piston note donc 0 à toute bonne réponse. Le rejeu du code de départ, qui ne lève rien,
+> ne le montre pas : le script détecte ces harnais à leur texte et les sort À VÉRIFIER. Les
+> réécrire sans exception (la fonction rend une valeur sentinelle, par exemple), puis les
+> rejouer avec une solution.
 >
 > **Questions interprétées : noms réservés.** Le même script rejoue aussi les questions Python,
 > JavaScript, TypeScript et Bash, pour un seul contrôle. Depuis #116, une fonction ou une classe
@@ -289,14 +305,15 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > - **durable** : un `git revert` de la fusion sur `main`, puis la PR `main → deploiement`
 >   habituelle ; `update.sh` déploie alors l'ancienne version ;
-> - **urgence**, en attendant : suspendre la ligne `update.sh` du cron (`crontab -e`), puis
+> - **urgence**, en attendant : si un cron lance `update.sh` (`crontab -l`), suspendre cette
+>   ligne (`crontab -e`), puis
 >
 >   ```bash
 >   git reset --hard <commit d'avant la fusion>
 >   docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build --remove-orphans
 >   ```
 >
->   et réactiver le cron une fois le revert arrivé sur `deploiement`.
+>   et réactiver le cron, s'il y en a un, une fois le revert arrivé sur `deploiement`.
 >
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
 > image et son volume (qui porte ses paquets) sont encore là, et le compose recrée ses conteneurs.
@@ -420,8 +437,9 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
 - Le code étudiant ne s'exécute QUE dans les conteneurs runner jetables (voir ci-dessous) :
   réseau coupé, limites mémoire/PID/CPU, UID dédié. Aucun service n'exécute de code non fiable
   dans son propre processus.
-- Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter », 10 s par cas de
-  notation, configurable par question jusqu'à 60 s), mémoire par conteneur
+- Limites par exécution : temps limite par cas (défaut 3 s pour « Exécuter » et pour la notation
+  des interprétés, du SQL et des vues, 10 s par cas de notation compilée — plancher de 10 s pour
+  Java et C# ; configurable par question de 1 à 60 s), mémoire par conteneur
   (`SANDBOX_MEMORY_MB` — 1 Go en prod), sorties tronquées. Côté execution-service :
   `EXEC_MAX_CONCURRENT` exécutions simultanées au plus (3 en prod). Corrections et
   « Exécuter »/« Tester » ont **chacun au plus deux places** (`EXEC_MAX_CONCURRENT − 1`) : chaque

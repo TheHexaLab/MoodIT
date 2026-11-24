@@ -622,10 +622,11 @@
 .badgePoints { background: var(--bg-vote-pill); color: var(--text-muted); }
 .badgePublished { background: var(--brand-teal-surface); color: var(--brand-teal); }
 .badgeDraft { background: var(--bg-vote-pill); color: var(--text-muted); }
-/* Tentatives « à revoir » (#116) : pastille CLIQUABLE, ton d'alerte. */
+/* Tentatives « à revoir » (#116) : pastille CLIQUABLE, ton d'alerte. Jetons de pastille
+   « danger » (contraste AA dans les deux thèmes), pas ceux d'ombre ou de texte d'erreur. */
 .badgeReview {
-    background: var(--shadow-danger);
-    color: var(--danger);
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
     border: none;
     cursor: pointer;
     font-family: inherit;

@@ -20,9 +20,9 @@ import java.util.Map;
  * et traduit le JSON du superviseur en verdicts. FAIL-CLOSED : un cas absent de la réponse, un
  * JSON illisible ou des canaris incohérents ne deviennent JAMAIS un « réussi ».
  *
- * Les ÉVÉNEMENTS de détection du superviseur (lecture du harnais tentée, rapport forgé,
- * canaris incohérents) sont journalisés côté serveur et annexés au détail du cas concerné —
- * visibles du prof dans l'éditeur ; leur acheminement vers le journal d'audit est un suivi (#116).
+ * Les ÉVÉNEMENTS du superviseur (compilation rejouée, erreur interne, cas sauté…) sont
+ * journalisés côté serveur seulement : aucun ne porte d'index de cas, ils ne sont jamais annexés
+ * aux verdicts. Des canaris incohérents, eux, invalident les verdicts (« Incohérence détectée »).
  */
 @Component
 public class DockerEvaluator {

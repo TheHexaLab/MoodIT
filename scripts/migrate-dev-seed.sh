@@ -18,7 +18,10 @@
 # Usage :
 #   ./scripts/migrate-dev-seed.sh
 #   PG_CONTAINER=moodit_postgres POSTGRES_DB=moodit_db POSTGRES_USER=postgres ./scripts/migrate-dev-seed.sh
-#   FORCE=1 ./scripts/migrate-dev-seed.sh        # re-seed même si déjà peuplé (peut dupliquer les quiz)
+#   FORCE=1 ./scripts/migrate-dev-seed.sh        # sème même si des établissements existent
+#     (utile seulement quand ils existent SANS la démo ; V2_1 suppose alors que l'établissement
+#     d'id 1 est le bon). Sur une base déjà semée, la démo échoue sur ses contraintes d'unicité
+#     et la transaction unique (-1) annule tout : rien n'est dupliqué.
 # ============================================================================
 set -euo pipefail
 

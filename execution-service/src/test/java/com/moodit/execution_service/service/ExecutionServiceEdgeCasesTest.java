@@ -557,6 +557,15 @@ class ExecutionServiceEdgeCasesTest {
         assertThat(t.detail()).isEqualTo("État de la base trop volumineux");
         verify(runner, times(1)).execute(anyString(), any(), any(), any());
         assertThat(ExecutionService.SUPERVISOR_TRUNCATION_MARKER).isEqualTo("(sortie tronquée au milieu");
+
+        // Sortie de débogage géante AVANT le dump : c'est elle que la coupe a touchée, le dump
+        // est complet. La réponse est notée normalement (phase 2 lancée).
+        pistonRun(f -> isPhase1(f)
+                ? stage("ligne\n… (sortie tronquée au milieu : 1200048 octets)\nligne\n"
+                        + dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"), "", 0, null, null)
+                : stage(sqlFenced(f, "1"), "", 0, null, null));
+        assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).passed()).isTrue();
+        verify(runner, times(2)).execute(anyString(), any(), any(), any());
     }
 
     @Test
@@ -618,9 +627,9 @@ class ExecutionServiceEdgeCasesTest {
                 .isEqualTo("Le harnais n'a pas pu évaluer ton résultat");
 
         // Phase 2 INTERROMPUE par signal : meme prefixe « Interrompu » que les autres
-        // interruptions. Ce n'est pas qu'un libelle : la boucle d'evaluation s'en sert pour savoir
-        // que l'etudiant a lui-meme consomme le budget, et ne pas transformer son epuisement en
-        // tentative a reprendre (cf. budget_epuise_par_un_harnais_interrompu_reste_une_note).
+        // interruptions, pour le prof. (La boucle d'evaluation, elle, lit le SIGNAL de l'etape
+        // pour savoir que l'etudiant a consomme le budget — cf.
+        // ExecutionServiceTest.budget_exhausted_by_interrupted_harness_stays_a_grade.)
         pistonRun(f -> isPhase1(f)
                 ? stage(dump(f, ""), "", 0, null, null)
                 : stage("", "", null, "SIGKILL", null));

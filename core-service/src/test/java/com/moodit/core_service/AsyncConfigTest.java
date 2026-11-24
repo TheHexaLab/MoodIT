@@ -77,5 +77,13 @@ class AsyncConfigTest {
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new AsyncConfig().quizCodeExecutor(2, -1))
         .isInstanceOf(IllegalArgumentException.class);
+    // Bornes exactes acceptées : un fil, file vide (passage direct).
+    ThreadPoolTaskExecutor minimal = (ThreadPoolTaskExecutor) new AsyncConfig().quizCodeExecutor(1, 0);
+    try {
+      assertThat(minimal.getCorePoolSize()).isEqualTo(1);
+      assertThat(minimal.getQueueCapacity()).isZero();
+    } finally {
+      minimal.shutdown();
+    }
   }
 }

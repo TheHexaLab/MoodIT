@@ -452,6 +452,19 @@ class CodeAssemblerTest {
                     .files().get(0).content())
                     .as(tool).contains("[\"" + tool + "\"] if hasattr(__moodit_builtins, __n)");
         }
+        // Un nom que le noteur n'écrit que comme CLÉ, PROPRIÉTÉ ou dans un message (`payload['id']`,
+        // `.toString('hex')`, `int` dans « intégrée ») n'est pas employé : imposé, il est noté.
+        for (String tool : List.of("id", "int", "exit")) {
+            assertThat(assembler.assemble("Python", "def " + tool + "(n):\n    return n * 2",
+                    "return " + tool + "(3) == 6", "N", "def " + tool + "(n):\n    pass")
+                    .files().get(0).content())
+                    .as(tool).contains("[] if hasattr(__moodit_builtins, __n)");
+        }
+        assertThat(assembler.assemble("JavaScript", "function toString(p) { return 'x' + p; }",
+                "return toString(1) === 'x1';", "N", "function toString(p) {}")
+                .files().get(0).content()).startsWith("const __moodit_shadow=[]");
+        assertThat(CodeAssembler.freeIdentifiers("a.b(c, 'd e', \"f\\\"g\") + h['i'] + $j"))
+                .containsExactlyInAnyOrder("a", "c", "h", "$j");
         assertThat(assembler.assemble("JavaScript", "class Proxy { v() { return 1; } }",
                 "return new Proxy().v() === 1;", "N", "class Proxy {}").files().get(0).content())
                 .startsWith("const __moodit_shadow=[\"Proxy\"]");

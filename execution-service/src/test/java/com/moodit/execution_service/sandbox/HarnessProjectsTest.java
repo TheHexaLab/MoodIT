@@ -242,6 +242,16 @@ class HarnessProjectsTest {
                 .isEqualTo("Calcul.java");
         assertThat(HarnessProjects.javaFileName("final public class Fin { }", "Solution"))
                 .isEqualTo("Fin.java");
+        // Déclaration APRÈS un `;` ou une `}` sur la même ligne (revue #246) : le fichier prenait
+        // le nom par défaut ou celui de la classe d'aide, et javac refusait la classe publique.
+        assertThat(HarnessProjects.javaFileName("import java.util.*; public class Rectangle { }",
+                "Solution")).isEqualTo("Rectangle.java");
+        assertThat(HarnessProjects.javaFileName("class Aide { } public class Rectangle { }",
+                "Solution")).isEqualTo("Rectangle.java");
+        // Une classe LOCALE après un `;` dans une méthode reste ignorée (profondeur).
+        assertThat(HarnessProjects.javaFileName(
+                "public class Solution { void f() { int x = 1; class Locale { } } }", "S"))
+                .isEqualTo("Solution.java");
         // Annotation sur la meme ligne.
         assertThat(HarnessProjects.javaFileName("@SuppressWarnings public class Annotee { }", "S"))
                 .isEqualTo("Annotee.java");

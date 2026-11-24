@@ -184,9 +184,13 @@ public final class HarnessProjects {
      * le moteur repartait de chaque ligne jusqu'au bout de la source (temps quadratique).
      * Modificateurs bornes a dix : le moteur Java repete un groupe par RECURSION, et une
      * ligne de milliers de {@code static} faisait deborder la pile (StackOverflowError).
+     * Une déclaration compte aussi APRÈS un {@code ;} ou une {@code }} sur la même ligne
+     * ({@code import java.util.*; public class Rectangle}, {@code class Aide { } public class
+     * Solution}) : ancrée au seul début de ligne, elle n'était pas vue, le fichier prenait le nom
+     * d'un autre type, et javac refusait la classe publique — 0 sur une réponse juste.
      */
     private static final Pattern JAVA_TYPE_DECL = Pattern.compile(
-            "(?m)^[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\([^()\\n]*\\))?|public|protected|private|static"
+            "(?m)(?:^|(?<=[;}]))[ \\t]*((?:(?:@[\\p{javaJavaIdentifierPart}.]+(?:\\([^()\\n]*\\))?|public|protected|private|static"
             + "|final|abstract|sealed|non-sealed|strictfp)\\s+){0,10})"
             + "(?:class|interface|record|enum|@interface)\\s+"
             + "(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)");

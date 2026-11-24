@@ -801,6 +801,84 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
+    void legitimate_forms_that_were_not_recognized_are_graded() {
+        // Revue #246 : chacune de ces écritures donnait « aucune fonction exploitable » ou « le
+        // harnais ne compile pas » — 0 sur une réponse juste.
+        // C++ : déclaration dans la classe sans noms de paramètres, définitions dehors.
+        gradedThenWrong("C++", "Rect r(3, 4); return r.aire() == 12;", """
+                class Rect {
+                    int l, h;
+                public:
+                    Rect(int, int);
+                    int aire();
+                };
+                Rect::Rect(int a, int b) : l(a), h(b) {}
+                int Rect::aire() { return l * h; }
+                """, "l * h", "l + h");
+        // C : même fonction définie dans les deux branches du préprocesseur.
+        gradedThenWrong("C", "return fact(5) == 120;", """
+                #if 0
+                int fact(int n) { return 0; }
+                #else
+                int fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }
+                #endif
+                """, "n * fact", "n + fact");
+        // Go : résultat nommé.
+        gradedThenWrong("Go", "return Double(5) == 10", """
+                package main
+
+                func Double(n int) (r int) {
+                \tr = n * 2
+                \treturn
+                }
+
+                func main() {}
+                """, "n * 2", "n + 2");
+        // Rust : méthode d'un trait implémenté, et méthode par défaut du trait.
+        gradedThenWrong("Rust", "Carre::new(3).aire() == 9 && Carre::new(2).double_aire() == 8", """
+                pub trait Forme {
+                    fn aire(&self) -> i32;
+                    fn double_aire(&self) -> i32 { 2 * self.aire() }
+                }
+                pub struct Carre { c: i32 }
+                impl Carre {
+                    pub fn new(c: i32) -> Self { Carre { c } }
+                }
+                impl Forme for Carre {
+                    fn aire(&self) -> i32 { self.c * self.c }
+                }
+                fn main() {}
+                """, "self.c * self.c", "self.c + self.c");
+        // Java : méthode `default` d'une interface, non redéfinie.
+        gradedThenWrong("Java", "return new Carre(3).doubleAire() == 18;", """
+                interface Forme {
+                    int aire();
+                    default int doubleAire() { return 2 * aire(); }
+                }
+                class Carre implements Forme {
+                    private final int c;
+                    Carre(int c) { this.c = c; }
+                    public int aire() { return c * c; }
+                }
+                public class Solution {
+                    public static void main(String[] args) { }
+                }
+                """, "c * c", "c + c");
+    }
+
+    @Test
+    void java_public_class_declared_after_an_import_on_the_same_line_is_graded() {
+        // Revue #246 : la classe publique n'était reconnue qu'en début de ligne. Le fichier
+        // déposé prenait un autre nom, et javac refusait « class Rectangle is public, should be
+        // declared in a file named Rectangle.java » — 0 sur une réponse juste.
+        gradedThenWrong("Java", "return new Rectangle(3, 4).aire() == 12;",
+                "import java.util.*; public class Rectangle { private final int l, h;"
+                        + " public Rectangle(int l, int h) { this.l = l; this.h = h; }"
+                        + " public int aire() { return l * h; } }\n",
+                "l * h", "l + h");
+    }
+
+    @Test
     void inherited_method_is_graded_in_java_csharp_and_cpp() {
         // Revue #246 : le bouchon ne portait que les méthodes DÉCLARÉES par la classe. L'étudiant
         // qui hérite `aire()` de `Forme` au lieu de la redéfinir dans `Carre` recevait « le
@@ -2231,18 +2309,19 @@ class RpcGradingIntegrationTest {
 
     @Test
     void c_harness_unreachable() {
-        // La sonde cherche le texte du harnais parmi les fichiers APPARTENANT A ROOT (le harnais,
-        // le noteur, job.json) : c'est ce qu'une lecture de harnais vise reellement. Restreindre
-        // a `-user root` evite que la sonde ne se matche ELLE-MEME — la chaine recherchee figure
-        // dans son propre fichier source et son binaire, qui appartiennent a l'etudiant. Sous
-        // -std=gnu17 (desormais aligne sur « Executer »), popen compile : si le harnais etait
-        // lisible, ceci le trouverait. Il ne l'est pas.
+        // La sonde cherche le texte du harnais dans tout fichier qui N'APPARTIENT PAS à son UID :
+        // le harnais et le source du noteur (`noteur.c`, à l'UID du noteur, harnais et nonce
+        // compris), job.json et les sources à root. Exclure son propre UID évite que la sonde ne
+        // se matche ELLE-MEME — la chaîne recherchée figure dans son propre source et son binaire.
+        // `-user root` seul ne regardait jamais `noteur.c` : un `noteur.c` laissé lisible n'aurait
+        // pas fait échouer le test. Sous -std=gnu17, popen compile : si le harnais était lisible,
+        // ceci le trouverait. Il ne l'est pas.
         TestResult r = note("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 #include <string.h>
 
                 int doubler(int n) {
-                    FILE *p = popen("find /box -user root -type f -exec grep -l 'doubler(5)' {} + "
+                    FILE *p = popen("find /box -type f ! -uid $(id -u) -exec grep -l 'doubler(5)' {} + "
                                     "2>/dev/null | head -1", "r");
                     char ligne[512];
                     int vu = 0;
@@ -2256,7 +2335,7 @@ class RpcGradingIntegrationTest {
         assertThat(r.passed()).isFalse();
         assertThat(r.detail()).contains(HARNESS_FALSE);
 
-        // TÉMOIN : la même commande SANS `-user root` trouve le texte dans les fichiers de
+        // TÉMOIN : la même commande SANS le filtre d'UID trouve le texte dans les fichiers de
         // l'étudiant (son source le contient). Elle prouve que popen, find et grep tournent dans
         // le conteneur — sans quoi la sonde ci-dessus rendrait 0 pour une tout autre raison.
         TestResult alive = note("C", "return doubler(5) == 10;", """

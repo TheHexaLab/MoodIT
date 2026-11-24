@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
@@ -139,6 +139,8 @@ export function QuestionFormBody({
   // Tampon TEXTE du temps limite, comme pour les points : un <input type="number"> renvoie
   // '' pour toute saisie intermédiaire invalide ('2.', '-', '1e'). Sans tampon, l'état repassait
   // à undefined et le champ se vidait sous les doigts.
+  // Champ « Temps limite » : libellé et aide reliés par id (l'aide ne fait pas partie du nom).
+  const timeoutId = useId();
   const [timeoutText, setTimeoutText] = useState<string>(
     initialDraft.execTimeoutMs != null ? String(Math.round(initialDraft.execTimeoutMs / 1000)) : ''
   );
@@ -614,10 +616,14 @@ export function QuestionFormBody({
           />
         </div>
 
-        <label className={styles.field}>
-          <span className={styles.fieldLabel}>{t.execTimeoutLabel}</span>
+        <div className={styles.field}>
+          <label className={styles.fieldLabel} htmlFor={`${timeoutId}-input`}>
+            {t.execTimeoutLabel}
+          </label>
           {/* Saisie en SECONDES, stockée en ms (draft.execTimeoutMs) ; vide → défaut du sandbox. */}
           <input
+            id={`${timeoutId}-input`}
+            aria-describedby={`${timeoutId}-hint`}
             className={styles.input}
             type="number"
             min={1}
@@ -650,8 +656,10 @@ export function QuestionFormBody({
               setTimeoutText(clamped == null ? '' : String(clamped));
             }}
           />
-          <span className={styles.fieldHint}>{t.execTimeoutHint}</span>
-        </label>
+          <span id={`${timeoutId}-hint`} className={styles.fieldHint}>
+            {t.execTimeoutHint}
+          </span>
+        </div>
       </>
     );
   }

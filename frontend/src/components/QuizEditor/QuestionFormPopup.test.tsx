@@ -333,7 +333,12 @@ describe('QuestionFormBody', () => {
       testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
     };
     const { onSave } = renderForm(draft, { isNew: true });
-    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel, { exact: false }), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel), { target: { value: '5' } });
+    // Nom accessible = le libellé seul ; l'aide est une description (aria-describedby).
+    const field = screen.getByLabelText(t.execTimeoutLabel);
+    expect(document.getElementById(field.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      t.execTimeoutHint
+    );
     fireEvent.click(saveButton(t.add));
     expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(5000);
   });
@@ -346,7 +351,7 @@ describe('QuestionFormBody', () => {
       testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
     };
     const { onSave } = renderForm(draft, { isNew: true });
-    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
     expect(input.value).toBe('8');
     fireEvent.change(input, { target: { value: '' } });
     // Quitter le champ vide ne le remplit pas d'une borne : il reste vide (défaut du sandbox).
@@ -365,7 +370,7 @@ describe('QuestionFormBody', () => {
       testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
     };
     const { onSave } = renderForm(draft, { isNew: true });
-    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: '61' } });
     fireEvent.blur(input);
@@ -392,7 +397,7 @@ describe('QuestionFormBody', () => {
       testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
     };
     renderForm(draft, { isNew: true });
-    const input = screen.getByLabelText(t.execTimeoutLabel, { exact: false }) as HTMLInputElement;
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
     fireEvent.change(input, { target: { value: '7' } });
     expect(input.value).toBe('7');
     fireEvent.change(input, { target: { value: '75' } });

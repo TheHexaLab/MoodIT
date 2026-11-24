@@ -278,6 +278,36 @@ class ClassifyTest(unittest.TestCase):
         self.assertFalse(chk.harness_uses_start_code("JavaScript", "function f() {}", "$f(1)"))
         self.assertTrue(chk.harness_uses_start_code("JavaScript", "function f() {}", "f(1) === 2"))
 
+    def test_harnais_qui_teste_une_exception_a_verifier(self):
+        # Revue #246 : le rejeu du code de départ (qui ne lève rien) rend « faux » comme pour un
+        # harnais normal, donc OK ; après la bascule, toute bonne réponse échoue.
+        harness = ("try { Solution.racine(-1); return false; }\n"
+                   "catch (IllegalArgumentException e) { return true; }")
+        question = {"language": "Java", "start_code": "public class Solution { static double racine(double x) { return 0; } }",
+                    "cases": [{"id": 3, "name": "négatif", "harnessCode": harness, "weight": 1}]}
+        ran = [{"passed": False, "detail": "Le harnais a renvoyé faux"}]
+        with mock.patch.object(chk, "evaluate", return_value=ran):
+            status, lines = chk.check_question("http://x", "t", question)
+        self.assertEqual(chk.TO_CHECK, status)
+        self.assertIn("teste une exception", lines[0])
+        for language, text in (("C#", "try { F(); } catch { return true; }"),
+                               ("C#", "Assert.Throws<Exception>(() => F());"),
+                               ("C++", "try { f(); } catch (...) { return true; }"),
+                               ("Rust", "std::panic::catch_unwind(|| f()).is_err()"),
+                               ("Go", "defer func() { recover() }()"),
+                               ("C", "if (setjmp(b)) return 1;"),
+                               ("Java", "assertThrows(X.class, () -> f())")):
+            self.assertTrue(chk.tests_an_exception(language, text), (language, text))
+        # Un mot en commentaire ou un nom qui contient « catch » ne compte pas.
+        self.assertFalse(chk.tests_an_exception("Java", "// catch (e)\nreturn f() == 1;"))
+        self.assertFalse(chk.tests_an_exception("Java", "return catcher(1) == 2;"))
+        self.assertFalse(chk.tests_an_exception("Python", "try:\n    f()\nexcept E:\n    pass"))
+
+    def test_ack(self):
+        self.assertEqual({12, 15}, chk.parse_ack("12, 15"))
+        self.assertEqual(set(), chk.parse_ack(""))
+        self.assertEqual(set(), chk.parse_ack(None))
+
     def test_worst(self):
         self.assertEqual(chk.OK, chk.worst([chk.OK, chk.OK]))
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.OK, chk.TO_CHECK]))

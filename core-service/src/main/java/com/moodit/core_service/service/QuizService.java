@@ -1314,7 +1314,11 @@ public class QuizService {
     /** Bornes d'execution-service ({@code EvaluateRequest}, {@code TestCaseInput}), en miroir. */
     static final int MAX_TEST_CASES = 100;
     static final int MAX_HARNESS_CHARS = 50_000;
-    static final int MAX_TEST_CASE_NAME_CHARS = 500;
+    /**
+     * Nom d'un harnais : la colonne {@code Test_Case.name} (VARCHAR(128)) est plus courte que la
+     * borne d'execution-service (500). Au-delà, la base refusait avec un 409 générique.
+     */
+    static final int MAX_TEST_CASE_NAME_CHARS = 128;
 
     /**
      * Refus À L'ÉCRITURE de ce qu'execution-service refuserait à chaque correction : code de

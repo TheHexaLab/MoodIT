@@ -199,8 +199,10 @@ déploiement et avertit si elle n'est pas au moins 1 ; vérifier à la main :
 
 - Unitaires (structure des programmes assemblés) : `./gradlew test` (sans Docker).
 - **Intégration (comportement réel contre les images runner)** : `ExecutionIntegrationTest`, exécuté
-  par le job CI `integration` (construit les 10 images). Couvre Python/JS/TS/PHP/Bash/C/SQL **et** JSX/TSX (rendu
-  statique + interactif). Les cas JSX/TSX exigent le bundle `react-runtime.js` via `APP_VENDOR_DIR`
+  par le job CI `integration` (construit les 10 images). Couvre Python/JS/TS/PHP/Bash/SQL **et** JSX/TSX (rendu
+  statique + interactif), plus des « Exécuter » Java et Go. La notation des langages COMPILÉS a son
+  propre filet : `RpcGradingIntegrationTest` (six langages, forge refusée), et l'isolation du
+  conteneur `RunnerSandboxIntegrationTest`. Les cas JSX/TSX exigent le bundle `react-runtime.js` via `APP_VENDOR_DIR`
   (la CI l'extrait de l'étape `jsvendor`) ; sans lui, ils s'ignorent. En local : cf. `scripts/`.
   Couvre aussi les limites : un état SQL de plus de 100 Ko reçu complet, et une allocation bornée
   au-dessus de la limite mémoire, tuée par elle (avec un témoin sous la limite, qui réussit).
