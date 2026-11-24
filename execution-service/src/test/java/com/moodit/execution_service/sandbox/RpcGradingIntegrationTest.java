@@ -1104,6 +1104,15 @@ class RpcGradingIntegrationTest {
                 int main() { return 0; }
                 int somme(int n, int acc) { return n == 0 ? acc : somme(n - 1, acc + n); }
                 """, "acc + n", "acc * n");
+        // C++ : un fichier qui s'inclut lui-même au préprocesseur seul (faux à la vraie
+        // compilation, où il s'appelle autrement) n'est lu qu'une fois — chaque niveau le
+        // recopiait, et l'extraction tenait le conteneur jusqu'au mur (revue #246).
+        gradedThenWrong("C++", "return doubler(4) == 8;", """
+                #if __INCLUDE_LEVEL__ < 150 && __has_include("pp.cpp")
+                #include "pp.cpp"
+                #endif
+                int doubler(int x) { return 2 * x; }
+                """, "2 * x", "3 * x");
         // C : ancienne version d'arité différente sous `#if 0`, avant la vraie.
         gradedThenWrong("C", "return somme(4) == 10;", """
                 #if 0

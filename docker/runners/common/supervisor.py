@@ -6402,7 +6402,9 @@ def finish_rpc_pair(case_dir, env, timeout_s, case_index, grader_src, grader_bin
 
 
 C_CONDITIONAL = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else)\b", re.M)
-C_LINE_MARKER = re.compile(r'#\s*\d+\s+"((?:[^"\\]|\\.)*)"')
+# `# 12 "fichier" 1 3` : groupe 1 le fichier, groupe 2 les drapeaux (1 entrée dans une
+# inclusion, 2 retour au fichier qui incluait).
+C_LINE_MARKER = re.compile(r'#\s*\d+\s+"((?:[^"\\]|\\.)*)"((?:[ \t]+\d+)*)')
 # Le préprocesseur seul est rapide ; une bombe d'inclusions ou de macros, elle, tiendrait la
 # compilation réelle jusqu'à son délai : on ne lui en laisse pas autant ici, sans conclure.
 C_PREPROCESS_TIMEOUT_S = 10
@@ -6412,13 +6414,30 @@ C_PREPROCESSED = {}
 
 
 def c_student_segment(preprocessed, file_name):
-    """Lignes que les marqueurs de `gcc -E` attribuent à `file_name`. FONCTION PURE (testée)."""
-    keep, current = [], None
+    """Lignes du fichier soumis LUI-MÊME (`file_name` au niveau 0 des inclusions) dans la sortie
+    de `gcc -E`. FONCTION PURE (testée).
+
+    La pile des inclusions suit les drapeaux des marqueurs (1 empile, 2 dépile). Sans elle, un
+    fichier qui s'inclut lui-même (`#if __INCLUDE_LEVEL__ < 150 && __has_include("pp.cpp")`,
+    faux à la vraie compilation) était compté à chaque niveau : 97 Ko devenaient 14 Mo, que
+    l'extraction en Python lisait jusqu'au mur du conteneur — mort sans verdict (revue #246)."""
+    keep, stack = [], []
     for line in (preprocessed or "").splitlines():
         marker = C_LINE_MARKER.match(line)
         if marker:
-            current = marker.group(1)
-        elif current == file_name:
+            name, flags = marker.group(1), marker.group(2).split()
+            if "1" in flags:
+                stack.append(name)
+            elif "2" in flags:
+                if stack:
+                    stack.pop()
+                if stack:
+                    stack[-1] = name
+                else:
+                    stack = [name]
+            else:
+                stack = [name]
+        elif len(stack) == 1 and stack[0] == file_name:
             keep.append(line)
     return chr(10).join(keep)
 
@@ -6456,6 +6475,11 @@ def c_directives_only_source(student_source, compiler, std, case_dir, ext):
                     data = f.read(C_PREPROCESS_CAP + 1)
                     if len(data) <= C_PREPROCESS_CAP:
                         segment = c_student_segment(data.decode("utf-8", "replace"), name)
+                        # Borne de défense : aux directives traitées, le fichier ne peut que
+                        # raccourcir (branches écartées). Plus long, il n'est pas le fichier
+                        # soumis : retour au texte brut, jamais une extraction démultipliée.
+                        if len(segment) > len(student_source) + 1024:
+                            segment = None
     except OSError:
         segment = None
     finally:

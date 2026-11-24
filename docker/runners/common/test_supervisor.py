@@ -743,6 +743,12 @@ class SignatureFormsTest(unittest.TestCase):
                "int printf(const char *, ...);\n# 3 \"pp.c\" 2\nint doubler(int x) { return 2 * x; }\n")
         self.assertEqual("int doubler(int x) { return 2 * x; }",
                          supervisor.c_student_segment(pre, "pp.c"))
+        # Revue #246 : le fichier qui s'inclut LUI-MÊME n'est compté qu'au niveau 0 — chaque
+        # niveau d'inclusion le recopiait, 97 Ko devenaient 14 Mo d'extraction.
+        nested = ('# 1 "pp.cpp"\nint a;\n# 1 "pp.cpp" 1\nint a;\n# 1 "pp.cpp" 1\nint a;\n'
+                  '# 2 "pp.cpp" 2\n# 2 "pp.cpp" 2\nint b;\n# 1 "/usr/include/x.h" 1 3\nint h;\n'
+                  '# 3 "pp.cpp" 2\nint c;\n')
+        self.assertEqual("int a;\nint b;\nint c;", supervisor.c_student_segment(nested, "pp.cpp"))
         # Sans directive conditionnelle : pas de préprocesseur (None), le texte brut est lu.
         self.assertIsNone(supervisor.c_directives_only_source("int f(int x) { return x; }", "gcc",
                                                               "-std=gnu17", ".", "c"))
