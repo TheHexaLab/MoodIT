@@ -722,23 +722,49 @@ class ExecutionServiceTest {
 
     @Test
     void rejections_before_slot_and_wall_capped_by_caller() {
+        // 1. Les quatre refus amont (octet nul, marqueur réservé, harnais au format framework,
+        // nom de classe réservé en Java) passent AVANT la prise de place : l'UNIQUE place du
+        // limiteur est occupée, et chacun rend pourtant son verdict explicite, sans 429. Déplacé
+        // dans withSandboxSlot, un refus lèverait ici ExecutionBusyException — sous saturation,
+        // l'étudiant recevrait « réessaie plus tard » au lieu de la cause de son 0.
+        DockerEvaluator busyDocker = mock(DockerEvaluator.class);
+        ExecutionLimiter full = new ExecutionLimiter(1, 0, 1);
+        ExecutionService saturated = new ExecutionService(assembler, runner, full, busyDocker);
+        record Rejection(String what, EvaluateRequest request, String detail) { }
+        List<Rejection> rejections = List.of(
+                new Rejection("octet nul", oneTest("Go",
+                        "package main\nfunc doubler(n int) int { return n * 2 }" + (char) 0,
+                        booleanHarness("Go")), "caractère nul"),
+                new Rejection("marqueur réservé", oneTest("Go", "jeton=__MOODIT_T__",
+                        booleanHarness("Go")), "Marqueur réservé"),
+                new Rejection("format framework", oneTest("Go", "code", frameworkHarness("Go")),
+                        "classe de test du framework"),
+                new Rejection("nom réservé Java", oneTest("Java",
+                        "public class harnais_rpc { static int f() { return 1; } }",
+                        "return harnais_rpc.f() == 1;"), "est réservé par la notation"));
+        full.withSandboxSlot(() -> {
+            for (Rejection r : rejections) {
+                assertThat(saturated.evaluate(r.request())).as(r.what()).singleElement()
+                        .satisfies(t -> {
+                            assertThat(t.passed()).isFalse();
+                            assertThat(t.detail()).contains(r.detail());
+                        });
+            }
+            // Témoin : sans refus amont, la même place occupée refuse bien la notation — sans
+            // lui, un limiteur qui ne bloquerait plus rien laisserait passer les quatre refus
+            // ci-dessus quel que soit leur emplacement.
+            assertThatThrownBy(() -> saturated.evaluate(oneTest("Go", "code", booleanHarness("Go"))))
+                    .isInstanceOf(ExecutionBusyException.class);
+            return null;
+        });
+        // Un harnais BOOLÉEN, lui, n'en déclenche aucun : c'est le format sûr, et il doit
+        // atteindre le runner (cf. boolean_harness_reaches_runner_in_all_six_languages).
+        verifyNoInteractions(busyDocker);
+
+        // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
         DockerEvaluator docker = mock(DockerEvaluator.class);
         ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
         ExecutionService routed = new ExecutionService(assembler, runner, limiter, docker);
-
-        // 1. Marqueur réservé dans le code : verdict explicite, aucun conteneur.
-        List<TestResult> marker = routed.evaluate(
-                oneTest("Go", "jeton=__MOODIT_T__", booleanHarness("Go")));
-        assertThat(marker.get(0).passed()).isFalse();
-        assertThat(marker.get(0).detail()).contains("Marqueur réservé");
-
-        // Les refus en amont (octet nul, marqueur réservé, harnais au format framework, nom de
-        // classe réservé en Java) passent tous AVANT la prise de place. Un harnais BOOLÉEN, lui,
-        // n'en déclenche aucun : c'est le format sûr, et il doit atteindre le runner (cf.
-        // boolean_harness_reaches_runner_in_all_six_languages).
-        verifyNoInteractions(docker);
-
-        // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
         when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong()))
                 .thenReturn(List.of());
         routed.evaluate(oneTest("Go", "code", booleanHarness("Go")));

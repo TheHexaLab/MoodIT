@@ -49,6 +49,9 @@ class ClassifyTest(unittest.TestCase):
         detail = ("Le harnais n'a pas fini de compiler (temps limite de compilation dépassé ou "
                   "compilateur arrêté) : rejouer la correction.")
         self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f(int x) { return x; }"))
+        # Inventaire javap ou sonde des noms réservés expirés : même chose.
+        tool = "Un outil de la notation n'a pas abouti : l'inventaire des méthodes a expiré."
+        self.assertEqual(chk.TO_CHECK, chk.classify(tool, False, "int f(int x) { return x; }"))
 
     def test_diagnostic_vide_a_verifier(self):
         for detail in ("Le harnais ne compile pas contre le code soumis :\n",

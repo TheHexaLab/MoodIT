@@ -47,6 +47,19 @@ public class DockerEvaluator {
      * mur — tous les verdicts du job perdus.
      */
     private static final long LIST_BUDGET_MS = 5_000;
+    /**
+     * Outils C/C++ PAR CAS autour des deux compilations — miroir de {@code C_PROBE_BUDGET_S}
+     * (20 s : délai TOTAL des sondes des noms réservés, {@code gcc -fsyntax-only}) et de
+     * {@code NM_TIMEOUT_S} (10 s : {@code nm --defined-only} sur le binaire soumis) du
+     * superviseur. Les sondes avaient chacune le délai d'une compilation (90 s) et {@code nm}
+     * aussi, sans que le mur les compte.
+     */
+    private static final long C_TOOLS_BUDGET_MS = 30_000;
+    /**
+     * Préprocesseur seul ({@code gcc -E -fdirectives-only}), UNE fois par job en C/C++ — miroir
+     * de {@code C_PREPROCESS_TIMEOUT_S} du superviseur (10 s).
+     */
+    private static final long C_PREPROCESS_BUDGET_MS = 10_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
     private static final long MAX_WALL_MS = 15 * 60_000;
     /**
@@ -246,6 +259,26 @@ public class DockerEvaluator {
     }
 
     /**
+     * Délais des OUTILS que le superviseur lance pour UN cas, hors compilations : l'inventaire
+     * {@code javap} ({@link #LIST_BUDGET_MS}, compté pour tous les langages — surestimer est sans
+     * danger), plus en C/C++ les sondes des noms réservés et {@code nm} ({@link #C_TOOLS_BUDGET_MS}).
+     * Chaque terme est multiplié par le nombre de cas : en oublier un rendait le mur plus court
+     * que le pire cas réel (#216).
+     */
+    static long toolsPerCaseMs(String runnerLanguage) {
+        return LIST_BUDGET_MS + (cFamily(runnerLanguage) ? C_TOOLS_BUDGET_MS : 0);
+    }
+
+    /** Délais des outils lancés UNE fois par job : le préprocesseur seul en C/C++. */
+    static long toolsPerJobMs(String runnerLanguage) {
+        return cFamily(runnerLanguage) ? C_PREPROCESS_BUDGET_MS : 0;
+    }
+
+    private static boolean cFamily(String runnerLanguage) {
+        return "c".equals(runnerLanguage) || "cpp".equals(runnerLanguage);
+    }
+
+    /**
      * Ce harnais est-il un VRAI test du framework ? Faux = harnais booléen, qui prend le chemin
      * NON FALSIFIABLE (noteur dans un processus et un UID séparés, cf. HarnessProjects).
      */
@@ -343,8 +376,12 @@ public class DockerEvaluator {
      */
     static Walls walls(String runnerLanguage, int caseCount, long perRunMs, long maxWallMs) {
         long perCase = perRunMs + PER_CASE_OVERHEAD_MS
-                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS + LIST_BUDGET_MS;
-        long wallCandidate = BASE_OVERHEAD_MS + (caseCount + 2L) * perCase;
+                + compilesPerCase(runnerLanguage) * COMPILE_BUDGET_MS
+                + toolsPerCaseMs(runnerLanguage);
+        // Le préprocesseur du job tourne au PREMIER cas, pas à l'échéance : il entre dans le mur
+        // (travail total), pas dans le pire cas d'un cas lancé juste avant l'échéance.
+        long wallCandidate = BASE_OVERHEAD_MS + toolsPerJobMs(runnerLanguage)
+                + (caseCount + 2L) * perCase;
         long cap = Math.min(maxWallMs, MAX_WALL_MS);
         long wall = Math.min(cap, wallCandidate);
         long strict = wall - perCase - CLOSING_MARGIN_MS;
@@ -381,7 +418,11 @@ public class DockerEvaluator {
         if (root.has("error")) {
             throw new SandboxException("Superviseur de notation : " + root.get("error").asString());
         }
-        // Notation INCOMPLETE : une erreur interne du superviseur en traitant le code soumis. Sur
+        // Notation INCOMPLETE : une erreur interne du superviseur en traitant le code soumis, ou un
+        // cas INTERROMPU par la plateforme (cause « interrompu » côté superviseur : compilation
+        // du noteur expirée ou tuée, inventaire javap ou sonde des noms réservés expirés). Ces
+        // derniers arrivaient ici comme des verdicts ordinaires (passed=false) : un 0 définitif
+        // que personne ne pouvait rejouer (regradeAttempt n'accepte que « à revoir »). Sur
         // le chemin interne, ce n'est pas une note (502, tentative a reprendre), mais c'est
         // COMPTE « sans verdict » (#116, S4) : l'extraction des signatures et les bouchons lisent
         // le code soumis, qui peut donc la provoquer. Un bogue deterministe du superviseur sur

@@ -3959,18 +3959,10 @@ class OomAndLockIsolationTest(unittest.TestCase):
     def test_code_depths_is_linear(self):
         # Chaque `r` tentait une chaîne brute sur une COPIE du reste du texte : quadratique, 6 s
         # pour 100 000 caractères de code soumis, refaites à chaque cas. Mesuré par un RAPPORT
-        # (indépendant de la vitesse de la machine) : quatre fois plus de texte coûte environ
-        # quatre fois plus en linéaire, seize en quadratique.
-        def cost(size):
-            text = "r" * size + "{" + "R" * size
-            best = float("inf")
-            for _ in range(3):
-                started = time.perf_counter()
-                supervisor.code_depths(text)
-                best = min(best, time.perf_counter() - started)
-            return best
-        ratio = cost(200_000) / cost(50_000)
-        self.assertLess(ratio, 8, "code_depths n'est plus linéaire (rapport %.1f)" % ratio)
+        # (growth_ratio, indépendant de la vitesse et de la charge de la machine).
+        ratio = growth_ratio(supervisor.code_depths,
+                             lambda size: ("r" * size + "{" + "R" * size,), 22_000, 198_000)
+        self.assertLess(ratio, 4, "code_depths n'est plus linéaire (rapport %.1f)" % ratio)
         depths = supervisor.code_depths("r" * 50_000 + "{" + "R" * 50_000)
         self.assertEqual((depths[49_999], depths[50_000], depths[-1]), (0, 0, 1))
         # L'accolade DANS la chaîne brute ne compte pas ; celle d'après, si.
@@ -4260,14 +4252,25 @@ class SubmittedCodeStageTest(unittest.TestCase):
                                       "exec_env(")
 
 
-def best_cost(function, *args):
-    """Meilleur de trois temps d'exécution (moins sensible à la charge de la machine)."""
-    best = float("inf")
-    for _ in range(3):
+def growth_ratio(function, prepare, small, large, rounds=3):
+    """Coût de `function` sur une entrée de taille `large`, rapporté à celui de `large // small`
+    appels sur des entrées de taille `small` (entrées préparées hors chronomètre). Les deux
+    mesures durent à peu près autant et alternent : la charge de la machine les gonfle pareil
+    (revue #246 — comparer 2 ms à 60 ms faisait monter le rapport sous charge, seul le grand
+    échantillon étant préempté). Environ 1 en linéaire, `large // small` en quadratique."""
+    repeats = large // small
+    best_small = best_large = float("inf")
+    for _ in range(rounds):
+        inputs = [prepare(small) for _ in range(repeats)]
+        started = time.perf_counter()
+        for args in inputs:
+            function(*args)
+        best_small = min(best_small, time.perf_counter() - started)
+        args = prepare(large)
         started = time.perf_counter()
         function(*args)
-        best = min(best, time.perf_counter() - started)
-    return best
+        best_large = min(best_large, time.perf_counter() - started)
+    return best_large / best_small
 
 
 class ExtractionBoundsTest(unittest.TestCase):
@@ -4275,20 +4278,22 @@ class ExtractionBoundsTest(unittest.TestCase):
     avant toute compilation et hors de tout délai — conteneur à 1 Go, superviseur à
     oom_score_adj -1000. Une forme du code soumis (≤ 100 000 caractères) qui y explose en temps
     ou en mémoire donnait un 502 « sans verdict » provoqué par l'étudiant. Les coûts sont mesurés
-    par RAPPORT (quatre fois plus de texte : environ quatre fois plus de temps en linéaire, seize
-    en quadratique), indépendamment de la vitesse de la machine ; les expansions sont bornées et
-    refusées avec un message (SubmissionRefused), jamais un faux verdict."""
+    par RAPPORT (growth_ratio : une entrée k fois plus grande contre k petites, k = 9 à 32 ;
+    environ 1 en linéaire, jusqu'à k en quadratique), indépendamment de la vitesse et de la
+    charge de la machine : seuil 4, et des tailles choisies pour que, sous 16 boucles CPU,
+    l'ancien code quadratique le dépasse d'au moins deux fois (8,5 à 16,3 mesurés) quand le code
+    actuel reste entre 0,6 et 2,4 (mesures en commentaire des tests concernés). Les
+    expansions sont bornées et refusées avec un message (SubmissionRefused), jamais un faux
+    verdict."""
 
     def test_cpp_declared_name_search_is_linear(self):
         # Non ancrée, la recherche du nom déclaré repartait de chaque caractère d'un long mot
         # sans `(` : 115 s par cas pour 99 000 caractères.
-        def cost(size):
+        def prepare(size):
             src = "struct S {\n int " + "a" * size + ";\n int m() { return 0; } };\n"
-            return best_cost(supervisor.cpp_object_api, supervisor.blank_code(src))
-        # Neuf fois plus de texte : environ 9 en linéaire, 81 en quadratique. Un écart de 4 avec un
-        # seuil de 8 laissait trop peu de marge au bruit de mesure (CI chargée).
-        ratio = cost(45_000) / cost(5_000)
-        self.assertLess(ratio, 30, "recherche du nom déclaré quadratique (rapport %.1f)" % ratio)
+            return (supervisor.blank_code(src),)
+        ratio = growth_ratio(supervisor.cpp_object_api, prepare, 5_000, 45_000)
+        self.assertLess(ratio, 4, "recherche du nom déclaré quadratique (rapport %.1f)" % ratio)
         # Même résultat que la recherche non ancrée : le mot de tête, `~` compris.
         found = supervisor.CPP_DECLARED_NAME.search
         self.assertEqual("aire", found("int aire(int a)").group(1))
@@ -4303,12 +4308,13 @@ class ExtractionBoundsTest(unittest.TestCase):
     def test_member_pieces_is_linear(self):
         # Une ligne qui n'est qu'une tête de déclaration ne coupe pas : le morceau en cours était
         # relu à chaque fin de ligne (une seconde par cas pour 49 000 lignes `a`).
-        def cost(lines):
+        def prepare(lines):
             body = "a\n" * lines
-            depths = supervisor.code_depths(body)
-            return best_cost(supervisor._member_pieces, body, 0, depths, 0)
-        ratio = cost(90_000) / cost(10_000)   # ~9 en linéaire, ~81 en quadratique
-        self.assertLess(ratio, 30, "_member_pieces quadratique (rapport %.1f)" % ratio)
+            return body, 0, supervisor.code_depths(body), 0
+        # 16 × 20 000 lignes. Sous 16 boucles CPU (conteneur runner, 8 cœurs) : ancien code 16,3
+        # (il ne donnait que 3,9 à 9 × 10 000 lignes, sous le seuil) ; code actuel 0,95 à 2,35.
+        ratio = growth_ratio(supervisor._member_pieces, prepare, 20_000, 320_000)
+        self.assertLess(ratio, 4, "_member_pieces quadratique (rapport %.1f)" % ratio)
         body = "a\n" * 1_000
         self.assertEqual([body], supervisor._member_pieces(body, 0, supervisor.code_depths(body), 0))
         body = "int\n aire() { return 1; }\n#define X\nint b;\n"
@@ -4318,9 +4324,12 @@ class ExtractionBoundsTest(unittest.TestCase):
     def test_cs_strip_comments_is_linear(self):
         # Chaque `#` relisait sa ligne depuis le début pour savoir s'il ouvre une directive :
         # 3 s par cas pour `a` suivi de 99 999 `#`.
-        ratio = (best_cost(supervisor.cs_strip_comments, "a" + "#" * 99_000)
-                 / best_cost(supervisor.cs_strip_comments, "a" + "#" * 11_000))   # ~9 / ~81
-        self.assertLess(ratio, 30, "cs_strip_comments quadratique (rapport %.1f)" % ratio)
+        # 32 × 20 000 : la part quadratique de l'ancien code (des copies en C) est petite devant
+        # le parcours en Python. Sous 16 boucles CPU : ancien code 12,2 (4,7 à 9 × 11 000 et 5,1 à
+        # 16 × 20 000, trop près du seuil) ; code actuel 0,74 à 0,90.
+        ratio = growth_ratio(supervisor.cs_strip_comments, lambda n: ("a" + "#" * n,),
+                             20_000, 640_000)
+        self.assertLess(ratio, 4, "cs_strip_comments quadratique (rapport %.1f)" % ratio)
         # Directive seulement en tête de ligne (blancs admis), lue dans le texte ORIGINAL : un
         # `#` après du code, ou après un commentaire sur la même ligne, n'en ouvre pas.
         self.assertEqual("a #b\n" + " " * 16 + "\nint x;",
@@ -4406,10 +4415,8 @@ class ExtractionBoundsTest(unittest.TestCase):
             apis["A0"] = ([["int"]], [])
             bases = {"A%d" % k: "A%d" % (k - 1) for k in range(1, length)}
             return apis, bases, set(bases)
-        def cost(length):
-            return best_cost(lambda: supervisor.cpp_inherit_constructors(*chain(length)))
-        ratio = cost(9_000) / cost(1_000)   # ~9 en linéaire, ~81 en quadratique
-        self.assertLess(ratio, 30, "constructeurs repris quadratiques (rapport %.1f)" % ratio)
+        ratio = growth_ratio(supervisor.cpp_inherit_constructors, chain, 1_000, 9_000)
+        self.assertLess(ratio, 4, "constructeurs repris quadratiques (rapport %.1f)" % ratio)
         apis, bases, inheriting = chain(50)
         supervisor.cpp_inherit_constructors(apis, bases, inheriting)
         self.assertEqual([["int"]], apis["A49"][0])
@@ -4479,6 +4486,214 @@ class ExtractionBoundsTest(unittest.TestCase):
         self.assertIsNone(supervisor.c_student_segment(pre, "pp.c", budget=10_000, char_budget=100))
         self.assertEqual(("int a;\n" * 100).rstrip("\n"), supervisor.c_student_segment(
             pre, "pp.c", budget=10_000, char_budget=700))
+
+    # --- Paramètres RELAYÉS : les bornes d'héritage comptent des méthodes, pas leurs paramètres.
+    # Une méthode de 4 000 paramètres héritée par 2 500 classes faisait un serveur C++ de 768 M
+    # caractères (3,6 Go). La borne porte sur l'API FINALE de chaque runner, avant génération.
+
+    def assert_runner_checks_before(self, runner, *generators):
+        source = inspect.getsource(runner)
+        self.assertIn("check_relayed_params(", source)
+        for generator in generators:
+            self.assertLess(source.index("check_relayed_params("), source.index(generator),
+                            "%s : borne après %s" % (runner.__name__, generator))
+
+    def test_relayed_params_counts_every_shape(self):
+        self.assertEqual(0, supervisor.relayed_params())
+        self.assertEqual(9, supervisor.relayed_params(
+            [("int", "f", ["int", "int"])],
+            [("R", [["int"], []], [("int", "m", ["int", "int"])]),          # C++, Java
+             ("G", [("NewG", ["int"], False)], [("int", "m", ["int"])]),     # Go
+             ("U", [("new", ["i32", "i32"])], [])]))                        # Rust
+        supervisor.check_relayed_params([("int", "f", ["int"] * supervisor.MAX_RELAYED_PARAMS)])
+        with self.assertRaises(supervisor.SubmissionRefused) as raised:
+            supervisor.check_relayed_params([("int", "f", ["int"])] * 2,
+                                            extra=supervisor.MAX_RELAYED_PARAMS - 1)
+        self.assertIn(str(supervisor.MAX_RELAYED_PARAMS), str(raised.exception))
+
+    def test_relayed_params_bounded_cpp_inherited_method(self):
+        params = ", ".join("int a%d" % i for i in range(4_000))
+        src = "struct B { int f(%s) { return 0; } };\n" % params + "".join(
+            "struct D%d : B {};\n" % k for k in range(30))
+        ex = supervisor.blank_code(src)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.check_relayed_params(supervisor.c_signatures(ex, cpp=True),
+                                            supervisor.cpp_object_api(ex))
+        self.assert_runner_checks_before(supervisor.run_c_rpc, "c_server_source(", "c_grader_source(")
+
+    def test_relayed_params_bounded_cpp_inherited_constructors(self):
+        params = ", ".join("int a%d" % i for i in range(4_000))
+        src = "struct B { B(%s) {} int m() { return 0; } };\n" % params + "".join(
+            "struct D%d : B { using B::B; };\n" % k for k in range(30))
+        ex = supervisor.blank_code(src)
+        api = supervisor.cpp_object_api(ex)
+        self.assertGreater(supervisor.relayed_params((), api), supervisor.MAX_RELAYED_PARAMS)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.check_relayed_params(supervisor.c_signatures(ex, cpp=True), api)
+
+    def test_relayed_params_bounded_rust_trait_default(self):
+        params = ", ".join("a%d: i32" % i for i in range(4_000))
+        def source(impls):
+            return ("trait T {\n fn d(&self, %s) -> i32 { 0 }\n}\n" % params + "".join(
+                "struct U%d;\nimpl T for U%d {}\n" % (k, k) for k in range(impls)))
+        ex = supervisor.blank_code(source(600), rust=True)
+        api = supervisor.rust_object_api(ex)
+        self.assertEqual(600, len(api))
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.check_relayed_params(supervisor.rust_signatures(ex), api)
+        self.assert_runner_checks_before(supervisor.run_rust_rpc, "rust_server_source(",
+                                         "rust_grader_source(")
+        # La liste de paramètres d'une méthode par défaut est lue UNE fois, pas à chaque `impl`
+        # qui la reçoit (n paramètres reportés sur m types coûtaient n × m découpages).
+        with unittest.mock.patch.object(supervisor, "_rust_param_types",
+                                        wraps=supervisor._rust_param_types) as parse:
+            self.assertEqual(600, len(supervisor.rust_object_api(ex)))
+        self.assertEqual(1, parse.call_count)
+
+    def test_relayed_params_bounded_go_promoted_method(self):
+        params = ", ".join("a%d" % i for i in range(7_000)) + " int"
+        src = ("package main\ntype B struct{}\nfunc (b B) M(%s) int { return 0 }\n" % params
+               + "".join("type D%d struct{ B }\nfunc NewD%d() D%d { return D%d{} }\n" % (k, k, k, k)
+                         for k in range(20)))
+        ex = supervisor.blank_code(src, backticks=True)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.check_relayed_params(supervisor.go_signatures(ex),
+                                            supervisor.go_object_api(ex))
+        self.assert_runner_checks_before(supervisor.run_go_rpc, "go_server_source(",
+                                         "go_grader_source(")
+
+    def test_relayed_params_bounded_csharp_and_java(self):
+        params = ", ".join("int a%d" % i for i in range(4_000))
+        src = ("class B { public int M(%s) { return 0; } }\n" % params
+               + "".join("class D%d : B {}\n" % k for k in range(30)))
+        ex = supervisor.cs_canonical_types(supervisor.cs_strip_comments(src))
+        self.assertGreater(supervisor.cs_relayed_params(ex), supervisor.MAX_RELAYED_PARAMS)
+        # Constructeurs de TOUTES les classes, arités réduites comprises : 3 + 2 + 1.
+        self.assertEqual(6, supervisor.cs_relayed_params(
+            "class R { public R(int a, int b = 1, int c = 2) {} }"))
+        # Avant le choix de la classe que vise le harnais : canaris et cas réels ensemble.
+        self.assert_runner_checks_before(supervisor.run_csharp_rpc, "cs_student_class(",
+                                         "cs_grader_source(")
+        self.assert_runner_checks_before(supervisor.run_java_rpc, "java_stub_source(",
+                                         "java_grader_objects(")
+
+    def test_go_embedded_types_are_deduplicated(self):
+        # 19 000 lignes `B` dans une structure embarquée par 3 000 types : 57 millions de
+        # parents parcourus, 3,5 s par cas.
+        self.assertEqual({"H": ["B", "C"]}, supervisor.go_embedded_types(
+            "type H struct {\n\tB\n\t*C\n\tB\n}\n"))
+        merged = supervisor.inherit_instance_methods(
+            {"B": ((), [("int", "m", [])]), "H": ((), [])}, {"H": ["B", "B", "B"]})
+        self.assertEqual([("int", "m", [])], merged["H"])
+        def prepare(lines):
+            src = ("package main\ntype B struct{}\nfunc (b B) M() int { return 0 }\n"
+                   "type H struct {\n" + "\tB\n" * lines + "}\n"
+                   + "".join("type T%d struct{ H }\n" % k for k in range(lines // 6)))
+            return (supervisor.blank_code(src, backticks=True),)
+        # 16 × 2 000 lignes. Sous 16 boucles CPU : ancien code 11,1 ; code actuel 0,58 à 2,10.
+        ratio = growth_ratio(supervisor.go_object_api, prepare, 2_000, 32_000)
+        self.assertLess(ratio, 4, "types embarqués en double reparcourus (rapport %.1f)" % ratio)
+        # Et inherit_instance_methods ne relit plus des parents répétés à chaque visite, quel
+        # que soit le langage qui les lui donne.
+        def repeated(count):
+            apis = {"B": ((), [("int", "m", [])]), "H": ((), [])}
+            apis.update({"T%d" % k: ((), []) for k in range(count // 6)})
+            parents = {"H": ["B"] * count}
+            parents.update({"T%d" % k: "H" for k in range(count // 6)})
+            return apis, parents
+        # Sous 16 boucles CPU : ancien code 9,9 ; code actuel 0,73 à 1,56.
+        ratio = growth_ratio(supervisor.inherit_instance_methods, repeated, 5_000, 45_000)
+        self.assertLess(ratio, 4, "parents répétés reparcourus (rapport %.1f)" % ratio)
+
+
+class PlatformInterruptionTest(unittest.TestCase):
+    """Revue #246 : une compilation du NOTEUR expirée ou tuée, un inventaire javap ou une sonde
+    des noms réservés expirés arrivaient à execution-service comme des verdicts ordinaires
+    (passed=false) : un 0 définitif que personne ne pouvait rejouer. Ces cas sont désormais
+    INTERROMPUS (cause « interrompu ») : le job est « incomplet », execution-service en fait un
+    « sans verdict » sur le chemin interne, et le « Tester » garde le message."""
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+        self.box, self.base_env = supervisor.BOX, supervisor.base_env
+        self.runners = dict(supervisor.RUNNERS)
+        supervisor.BOX = self.directory
+        supervisor.base_env = lambda case_dir: {"HOME": self.directory, "TMPDIR": self.directory}
+
+    def tearDown(self):
+        supervisor.BOX, supervisor.base_env = self.box, self.base_env
+        supervisor.RUNNERS.clear()
+        supervisor.RUNNERS.update(self.runners)
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+    def run_case(self, runner):
+        supervisor.RUNNERS["Java"] = runner
+        return supervisor.execute_case("Java", {"index": 0}, 10)[0]
+
+    def test_platform_aborted_recognises_our_prefixes_only(self):
+        aborted = supervisor.harness_build_failure(True, None, "contre le code soumis", "")
+        self.assertTrue(supervisor.platform_aborted(aborted))
+        self.assertTrue(supervisor.platform_aborted(supervisor.TOOL_ABORTED + " : javap"))
+        self.assertFalse(supervisor.platform_aborted(
+            supervisor.harness_build_failure(False, 1, "contre le code soumis", "CS0117")))
+        self.assertFalse(supervisor.platform_aborted(
+            "Échec de compilation :\n" + supervisor.HARNESS_BUILD_ABORTED))
+        self.assertFalse(supervisor.platform_aborted(None))
+
+    def test_aborted_harness_build_makes_the_job_incomplete(self):
+        issue = self.run_case(lambda *a: (None, supervisor.harness_build_failure(
+            False, -9, "contre le code soumis", "")))
+        self.assertEqual("interrompu", issue.cause)
+        self.assertTrue(supervisor.inconclusive(issue))
+        self.assertTrue(supervisor.grading_incomplete([issue]))
+        self.assertTrue(supervisor.job_incomplete("ok", [issue]))
+        # Une falsification l'emporte toujours.
+        self.assertFalse(supervisor.job_incomplete("incoherents", [issue]))
+        # Un vrai diagnostic du compilateur du noteur reste une note (message au prof).
+        issue = self.run_case(lambda *a: (None, supervisor.harness_build_failure(
+            False, 1, "contre le code soumis", "CS0117")))
+        self.assertIsNone(issue.cause)
+        self.assertFalse(supervisor.grading_incomplete([issue]))
+
+    def test_tool_aborted_exception_interrupts_the_case(self):
+        def runner(*a):
+            raise supervisor.ToolAborted(supervisor.TOOL_ABORTED + " : sonde")
+        issue = self.run_case(runner)
+        self.assertFalse(issue.passed)
+        self.assertEqual("interrompu", issue.cause)
+        self.assertTrue(supervisor.grading_incomplete([issue]))
+        # L'inventaire javap expiré porte le même préfixe.
+        self.assertIn("TOOL_ABORTED +", inspect.getsource(supervisor.run_java_rpc))
+
+    def test_expired_reserved_name_probe_interrupts_instead_of_refusing(self):
+        # Une sonde EXPIRÉE ne dit rien du nom : elle était comptée comme un refus (« nom
+        # réservé » sur un nom innocent), et chacune avait le délai d'une compilation (90 s).
+        timeouts = []
+        def expired(cmd, cwd, env, timeout_s, *rest, **kwargs):
+            timeouts.append(timeout_s)
+            return None, True
+        with unittest.mock.patch.object(supervisor, "run_proc", expired):
+            with self.assertRaises(supervisor.ToolAborted) as raised:
+                supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17", self.directory, {})
+        self.assertTrue(raised.exception.args[0].startswith(supervisor.TOOL_ABORTED))
+        self.assertLessEqual(max(timeouts), supervisor.C_PROBE_BUDGET_S)
+        # Une sonde terminée garde son sens : compile → pas réservé ; échoue → réservé.
+        with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (0, False)):
+            self.assertEqual([], supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17",
+                                                             self.directory, {}))
+        with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (1, False)):
+            self.assertEqual(["valeur"], supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17",
+                                                                     self.directory, {}))
+
+    def test_c_tools_have_short_dedicated_timeouts(self):
+        # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes
+        # et 10 s de `nm` par cas, 10 s de préprocesseur par job — et non 90 s chacun.
+        self.assertEqual((20, 10, 10), (supervisor.C_PROBE_BUDGET_S, supervisor.NM_TIMEOUT_S,
+                                        supervisor.C_PREPROCESS_TIMEOUT_S))
+        source = inspect.getsource(supervisor.run_c_rpc)
+        nm_call = source[source.index('["nm", "--defined-only"'):]
+        self.assertIn("NM_TIMEOUT_S", nm_call[:200])
+        self.assertNotIn("COMPILE_TIMEOUT_S", nm_call[:200])
 
 
 if __name__ == "__main__":

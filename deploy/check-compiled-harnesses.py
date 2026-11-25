@@ -133,6 +133,7 @@ def harness_uses_start_code(language, start_code, harness):
 # du compilateur ne vient qu'APRÈS eux, le code soumis ne peut pas les produire.
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
 HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
+TOOL_ABORTED = "Un outil de la notation n'a pas abouti"
 NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
 
 # Nom introuvable, d'après le diagnostic du compilateur de chaque langage compilé :
@@ -234,8 +235,10 @@ def classify(detail, passed, start_code=""):
     if passed:
         return OK
     text = detail or ""
-    if text.startswith(HARNESS_BUILD_ABORTED):
-        # Compilation du noteur expirée ou tuée (machine chargée) : pas un diagnostic.
+    if text.startswith((HARNESS_BUILD_ABORTED, TOOL_ABORTED)):
+        # Compilation du noteur, inventaire javap ou sonde des noms réservés expirés ou tués
+        # (machine chargée) : pas un diagnostic. Sur le chemin interne, ces cas arrivent déjà en
+        # 502 « sans verdict » (exception ci-dessous) ; le préfixe n'est qu'un filet.
         return TO_CHECK
     if text.startswith(HARNESS_BUILD_ERROR):
         # BLOQUANT seulement sur un vrai diagnostic du compilateur, et pas quand le harnais

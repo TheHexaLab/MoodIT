@@ -738,8 +738,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Plafond déjà atteint (relance de l'enseignant) : même une panne garde la tentative")
-        void capReached_anyFailureKeeps() {
+        @DisplayName("Quiz SANS reprise, plafond déjà atteint, tentative non relancée : même une panne garde la tentative")
+        void capReached_noRetry_outageKeeps() {
+            // Préconditions de l'intitulé : ni reprise ni relance (cf. failedRegrade_backToReview).
+            assertThat(quiz.getAllowRetry()).isFalse();
+            assertThat(attempt.isRegrade()).isFalse();
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));

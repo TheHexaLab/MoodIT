@@ -183,8 +183,9 @@ test('question de code et tentative unique', async ({ browser, baseURL }) => {
     // Solution volontairement fausse sur les négatifs : 1 harnais sur 2.
     const editor = main.getByRole('textbox', { name: 'Éditeur de code (Python)' });
     await expect(editor).toHaveValue(startCode);
-    // NB : pas de print d'une valeur seule (ex. print(5)) : cf. le bogue décrit dans
-    // quiz-editor.spec.ts (« un print au premier niveau… »).
+    // Print étiqueté : on y lit la sortie dans la console. Un print de premier niveau d'une valeur
+    // seule (ex. print(5)) ne fausse plus la correction : garde testée dans quiz-editor.spec.ts
+    // (« un print au premier niveau ne fausse pas la correction »).
     await editor.fill(
       'def solution(a, b):\n    return abs(a) + abs(b)\n\nprint("solution(2, 3) =", solution(2, 3))\n'
     );

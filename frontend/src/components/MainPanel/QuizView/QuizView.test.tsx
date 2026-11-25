@@ -471,6 +471,102 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
     expect(onFetchAttemptResult).toHaveBeenCalledTimes(2);
     expect(liveRegion()?.textContent).toBe('');
   });
+
+  it('pied absent sous le message d’attente d’un quiz SANS reprise (aucun bouton à y mettre)', async () => {
+    // Revue #246 : le <footer> était rendu vide, barre de 4rem avec sa bordure.
+    const { container } = renderView({
+      quiz: makeQuiz({ allowRetry: false }),
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(container.querySelector('footer')).toBeNull();
+  });
+
+  it('message d’attente d’un quiz AVEC reprise : le pied ne porte que « Refaire le quiz »', async () => {
+    const { container } = renderView({
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    const footer = container.querySelector('footer');
+    expect(footer?.textContent).toBe('Refaire le quiz');
+  });
+
+  it('focus demandé pour une puce absente (une seule tentative) : pas rendu plus tard à une autre tentative', async () => {
+    // Revue #246 : relance aboutie de l'unique tentative #9 → focus demandé pour sa puce, sans
+    // barre (une tentative). La demande restait en attente : après « Refaire » et la soumission de
+    // #10, la barre à deux puces focalisait #9, qui n'est pas la tentative affichée.
+    const graded10 = { ...graded9, attemptId: 10 } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }])
+      .mockResolvedValueOnce([{ id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' }])
+      .mockResolvedValue([
+        { id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 10, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+      ]);
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts,
+      onFetchAttemptResult: vi.fn(async (_q: number, id: number) => (id === 10 ? graded10 : graded9)),
+      onSubmitQuiz: vi.fn(async () => ({ attemptId: 10 })),
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(liveRegion()?.textContent).toBe(GRADED_NOTICE));
+    expect(screen.queryByText('#1 · 2/3')).toBeNull(); // une seule tentative : pas de barre
+
+    fireEvent.click(screen.getByText('Refaire le quiz'));
+    fireEvent.click(screen.getByText('A'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Soumettre'));
+    // Verdict poussé de #10 (sinon le sondage de l'historique, toutes les 1,5 s, le trouve).
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 10, ok: true }} />);
+    await waitFor(
+      () => expect(screen.getByText('#2 · 2/3').getAttribute('aria-pressed')).toBe('true'),
+      { timeout: 4000 }
+    );
+    expect(document.activeElement?.textContent).not.toBe('#1 · 2/3');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('puce dont la lecture échoue puis « Réessayer » : le focus ne va pas à la puce demandée avant l’échec', async () => {
+    // Revue #246 : l'écran d'erreur n'a pas de barre, la demande restait en attente ; le
+    // rechargement rouvre la DERNIÈRE tentative (#2), et le focus partait sur la puce #1.
+    const done = [
+      { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+      { id: 9, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+    ] as AttemptSummary[];
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz())}
+        onFetchAttempts={vi.fn(async () => done)}
+        onFetchAttemptResult={vi.fn(async (_q: number, id: number) => {
+          if (id === 8) throw new Error('503');
+          return graded9;
+        })}
+      />
+    );
+    await waitFor(() => expect(screen.getByText('#2 · 2/3')).toBeTruthy());
+    fireEvent.click(screen.getByText('#1 · 2/3'));
+    fireEvent.click(await screen.findByText('Réessayer'));
+    await waitFor(() =>
+      expect(screen.getByText('#2 · 2/3').getAttribute('aria-pressed')).toBe('true')
+    );
+    expect(document.activeElement?.textContent).not.toBe('#1 · 2/3');
+    expect(document.activeElement).toBe(document.body);
+  });
 });
 
 describe('QuizView — phase résumé & révision', () => {

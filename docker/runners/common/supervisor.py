@@ -75,6 +75,12 @@ STUDENT_UID_RANGE = (1 << 24, (1 << 31) - 2)
 READY_WAIT_S = 30
 COMPILE_TIMEOUT_S = 90
 LIST_TIMEOUT_S = 5              # inventaire `--list` : s'ajoute au pire cas, donc borné court
+# Outils C/C++ autour des deux compilations, bornés court eux aussi et budgétés par
+# DockerEvaluator (miroir dans core, ExecutionClient) : la sonde des noms réservés (`gcc
+# -fsyntax-only`, plusieurs sondes au plus dans ce délai TOTAL par cas), `nm` sur le binaire
+# soumis (par cas) et le préprocesseur seul (une fois par job, C_PREPROCESS_TIMEOUT_S).
+C_PROBE_BUDGET_S = 20
+NM_TIMEOUT_S = 10
 JAVAP_CAP = 2 * 1024 * 1024     # sortie de javap relue en entier jusqu'à 2 Mio (cf. run_java_rpc)
 DEFAULT_RUN_TIMEOUT_S = 10
 MAX_RUN_TIMEOUT_S = 60
@@ -1451,6 +1457,7 @@ class CaseOutcome:
         self.harness_build = harness_build
         # Cause d'un saut : "erreur" (superviseur), "budget" (budget global), "espace" (disque
         # sature par le code soumis). Seules les deux premieres peuvent ne pas etre imputables.
+        # Ou d'un cas INTERROMPU par la plateforme : "interrompu" (cf. platform_aborted).
         self.cause = cause
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
@@ -1528,10 +1535,12 @@ def note_grader_output_lost(code, passed):
 def grading_incomplete(real_cases):
     """La notation des cas REELS est-elle incomplete pour une cause NON IMPUTABLE ? PURE (testee).
 
-    Vrai SEULEMENT si un cas a subi une erreur interne du superviseur : notre code a leve en
-    traitant le code soumis. Execution-service en fait un 502 sur le chemin INTERNE, de cause
-    « sans verdict » : la tentative est supprimee et l'etudiant resoumet, jusqu'au plafond de
-    core, au-dela duquel elle est gardee « a revoir » (#116, S4).
+    Vrai SEULEMENT si un cas a subi une erreur interne du superviseur (notre code a leve en
+    traitant le code soumis, cause « erreur »), ou si la plateforme l'a INTERROMPU sans verdict
+    (cause « interrompu », cf. platform_aborted : compilation du noteur ou outil expirés).
+    Execution-service en fait un 502 sur le chemin INTERNE, de cause « sans verdict » : la
+    tentative est supprimee et l'etudiant resoumet, jusqu'au plafond de core, au-dela duquel elle
+    est gardee « a revoir » (#116, S4).
 
     Un budget global epuise reste IMPUTABLE (note partielle), sans exception : dans le conteneur,
     l'attente d'une place a deja eu lieu avant le demarrage, et le budget ne mesure que les
@@ -1539,7 +1548,7 @@ def grading_incomplete(real_cases):
     beaucoup de cas, l'epuise donc de facon REPRODUCTIBLE — en faire un 502 rendait la question
     impossible a noter et bloquait une place a chaque renvoi. Un disque sature (cause « espace »)
     reste imputable aussi : c'est le code soumis qui ecrit."""
-    return any(o.cause == "erreur" for o in real_cases)
+    return any(o.cause in ("erreur", "interrompu") for o in real_cases)
 
 
 # Début de TOUT message d'échec de compilation du noteur (voir CaseOutcome.harness_build).
@@ -1561,6 +1570,27 @@ def harness_build_failure(expired, code, against, diagnostic):
     return HARNESS_BUILD_ERROR + " " + against + " :\n" + diagnostic
 
 
+# Début du message d'un OUTIL de la notation qui n'a pas abouti dans son délai (inventaire javap,
+# sonde des noms réservés) : comme HARNESS_BUILD_ABORTED, rien n'y est imputable au code soumis.
+TOOL_ABORTED = "Un outil de la notation n'a pas abouti"
+
+
+class ToolAborted(Exception):
+    """Un outil de la notation (pas le code soumis) n'a pas abouti dans son délai. Le message
+    commence par TOOL_ABORTED ; execute_case en fait un cas interrompu (cf. platform_aborted)."""
+
+
+def platform_aborted(detail):
+    """Le cas a-t-il été INTERROMPU par la plateforme, sans verdict ? FONCTION PURE (testée).
+
+    Compilation du NOTEUR expirée ou tuée (HARNESS_BUILD_ABORTED), outil de la notation expiré
+    (TOOL_ABORTED) : le message vient de NOUS, en tête (un diagnostic du compilateur ne vient
+    qu'après « Échec de compilation : »). Ce n'est pas une note : sur le chemin interne, le job
+    est « incomplet » (cf. grading_incomplete) et la tentative est à reprendre — un 0 définitif
+    ne pouvait être rejoué par personne. Le « Tester » du prof garde le message."""
+    return (detail or "").startswith((HARNESS_BUILD_ABORTED, TOOL_ABORTED))
+
+
 def is_harness_build_failure(detail):
     """Le détail vient-il d'un échec de compilation du NOTEUR ? FONCTION PURE (testée)."""
     return (detail or "").startswith((HARNESS_BUILD_ERROR, HARNESS_BUILD_ABORTED))
@@ -1573,7 +1603,8 @@ def inconclusive(outcome):
     Le verdict des canaris s'en sert pour ne pas accuser : un processus tué ou expiré ne dit
     rien de la chaîne de notation, et canary_verdict en concluait à tort qu'elle ne tranchait
     plus."""
-    return outcome.timed_out or outcome.killed or outcome.harness_build
+    return (outcome.timed_out or outcome.killed or outcome.harness_build
+            or outcome.cause == "interrompu")
 
 
 # NONCE du verdict, un par cas (cas réels et canaris) : le noteur l'imprime sur SON stderr quand le harnais du prof
@@ -1864,11 +1895,16 @@ def inherit_instance_methods(apis, parents, hiding=None):
     superviseur avant toute compilation (502 sans verdict). Le parcours s'arrête dès qu'une
     borne est franchie, avant d'avoir construit le reste. Elles ne dépendent que des classes
     soumises : canaris et cas réels sont refusés ensemble."""
+    # Parents normalisés UNE fois, sans doublon : relus à chaque visite, des parents répétés
+    # (un type embarqué 19 000 fois) étaient reparcourus pour chaque classe qui en hérite.
+    unique_parents = {}
+    for child, found in parents.items():
+        if found is not None:
+            unique_parents[child] = list(dict.fromkeys([found] if isinstance(found, str)
+                                                       else found))
+
     def parents_of(name):
-        found = parents.get(name)
-        if found is None:
-            return []
-        return [found] if isinstance(found, str) else list(found)
+        return unique_parents.get(name, [])
 
     merged = {}
     inherited = 0
@@ -1973,9 +2009,48 @@ def trailing_defaults(params):
 
 
 # Paramètres à valeur par défaut admis par fonction (cf. with_default_arities) : un code réel en
-# porte rarement plus de trois ou quatre. Avec cette borne, les arités réduites coûtent au plus
-# huit fois les paramètres écrits, quelle que soit la forme du code soumis.
+# porte rarement plus de trois ou quatre. Une fonction donne alors au plus neuf signatures
+# (l'arité complète et huit réduites) ; le TOTAL des paramètres relayés, lui, est borné par
+# MAX_RELAYED_PARAMS, sur l'API finale.
 MAX_DEFAULT_PARAMS = 8
+
+# Paramètres RELAYÉS en tout par l'API finale d'une soumission (cf. check_relayed_params) : le
+# code généré (bouchons du noteur, aiguillage du serveur) écrit au moins une ligne par paramètre.
+# Sans héritage ni arité réduite, un code soumis de 100 000 caractères en déclare au plus
+# ~50 000 (`func f(a, b, c int)` en Go) : la borne n'est atteinte que par une démultiplication.
+MAX_RELAYED_PARAMS = 100_000
+
+
+def relayed_params(method_list=(), obj_list=()):
+    """Nombre de paramètres que le code généré relaiera pour cette API. FONCTION PURE (testée).
+
+    `method_list` : [(retour, nom, types)] ; `obj_list` : [(type, constructeurs, méthodes)], un
+    constructeur étant une liste de types (C++, Java) ou un tuple qui la porte en second (Go,
+    Rust : `(nom, types, …)`)."""
+    total = sum(len(types) for _r, _n, types in method_list)
+    for _typ, ctors, methods in obj_list:
+        total += sum(len(c if isinstance(c, list) else c[1]) for c in ctors)
+        total += sum(len(m[2]) for m in methods)
+    return total
+
+
+def check_relayed_params(method_list=(), obj_list=(), extra=0):
+    """Refuse (SubmissionRefused) une API dont le code généré relaierait plus de
+    MAX_RELAYED_PARAMS paramètres. FONCTION PURE (testée). Appelée par chaque runner sur son API
+    FINALE (fonctions, constructeurs et méthodes, après héritage et arités réduites), avant
+    toute génération, sans regarder le harnais : canaris et cas réels sont refusés ensemble.
+
+    Les bornes d'héritage comptent des méthodes, pas leurs paramètres : une base dont la méthode
+    a 4 000 paramètres, héritée par 2 500 dérivées (90 Ko), faisait un serveur C++ de 768 M
+    caractères (3,6 Go) ; une méthode par défaut de trait Rust, ou une méthode Go promue par
+    composition, autant. `extra` : paramètres comptés à part par l'appelant (C#)."""
+    total = relayed_params(method_list, obj_list) + extra
+    if total > MAX_RELAYED_PARAMS:
+        raise SubmissionRefused(
+            "API trop grande pour la notation : le code soumis demande de relayer %d paramètres "
+            "(au plus %d), fonctions, méthodes et constructeurs comptés après héritage et "
+            "valeurs par défaut. Réduisez le nombre de paramètres, de méthodes héritées ou de "
+            "classes dérivées." % (total, MAX_RELAYED_PARAMS))
 
 
 def check_default_count(name, defaults):
@@ -2907,8 +2982,11 @@ def go_embedded_types(source):
             bare_line = src_line.split("//")[0].strip()
             field = re.fullmatch(r"\*?([A-Za-z_]\w*)(?:\s+`[^`]*`)?", bare_line)
             if field:
-                found.setdefault(typ, []).append(field.group(1))
-    return found
+                found.setdefault(typ, {})[field.group(1)] = None
+    # Une fois chacun, dans l'ordre : 19 000 lignes `B` dans une structure, embarquée par 3 000
+    # types, faisaient parcourir 57 millions de parents (3,5 s par cas). Go refuse de toute façon
+    # le même type embarqué deux fois.
+    return {typ: list(names) for typ, names in found.items()}
 
 
 def _go_param_types(params):
@@ -4325,14 +4403,27 @@ def c_reserved_names(names, compiler, std, case_dir, env):
     impl = c_implementation_reserved(names)
     names = [n for n in names if n not in impl]
     probe = os.path.join(case_dir, "sonde.c" if compiler == "gcc" else "sonde.cpp")
+    # Délai TOTAL des sondes du cas (une, ou jusqu'à C_PROBE_MAX + 2) : chacune avait le délai
+    # d'une compilation (90 s), que le mur du conteneur ne budgétait pas. Une sonde EXPIRÉE ne
+    # dit rien du nom : la compter comme un refus accusait un nom innocent ; le cas est
+    # interrompu (ToolAborted), à rejouer.
+    deadline = time.monotonic() + C_PROBE_BUDGET_S
 
     def compiles(subset):
-        write_private(probe, c_probe_source(subset))
-        code, expired = run_proc([compiler, std, "-fno-builtin", "-fsyntax-only", probe],
-                                 case_dir, env, COMPILE_TIMEOUT_S,
-                                 os.path.join(case_dir, "sonde.out"),
-                                 os.path.join(case_dir, "sonde.err"), preexec_compile)
-        return code == 0 and not expired
+        remaining = deadline - time.monotonic()
+        code, expired = None, True
+        if remaining > 0:
+            write_private(probe, c_probe_source(subset))
+            code, expired = run_proc([compiler, std, "-fno-builtin", "-fsyntax-only", probe],
+                                     case_dir, env, remaining,
+                                     os.path.join(case_dir, "sonde.out"),
+                                     os.path.join(case_dir, "sonde.err"), preexec_compile)
+        if expired:
+            raise ToolAborted(
+                TOOL_ABORTED + " : la vérification des noms réservés (compilateur) a dépassé "
+                "%d s (machine de correction chargée). Le code soumis n'est pas en cause : la "
+                "correction est à rejouer." % C_PROBE_BUDGET_S)
+        return code == 0
 
     if not names or compiles(names):
         return impl
@@ -4733,6 +4824,26 @@ RUST_CONV = {"i32": "%s.parse::<i32>().unwrap_or_default()",
              "String": "moodit_dehexe(%s)"}
 
 
+def _rust_param_types(params):
+    """(prend `self`, types des autres paramètres) d'une fonction Rust ; types None si elle
+    n'est pas proxifiable. FONCTION PURE (testée via rust_object_api).
+
+    Seul un EMPRUNT (`&self`, `&mut self`, `&'a self`) se proxifie : le serveur appelle la
+    méthode sur l'objet resté dans sa table (`moodit_t[h].f()`), qu'il ne peut pas déplacer.
+    Une méthode qui CONSOMME `self` (`fn en_texte(self)`) faisait refuser tout le serveur par
+    rustc (E0507), même si le harnais ne l'appelait pas."""
+    pieces = [p.strip() for p in params.split(",") if p.strip()]
+    takes_self = bool(pieces) and pieces[0].endswith("self")
+    if takes_self and not pieces[0].replace(" ", "").startswith("&"):
+        return takes_self, None
+    types = []
+    for param_group in (pieces[1:] if takes_self else pieces):
+        if ":" not in param_group or param_group.split(":", 1)[1].strip() not in RUST_TYPES:
+            return takes_self, None
+        types.append(param_group.split(":", 1)[1].strip())
+    return takes_self, types
+
+
 def rust_object_api(source):
     """API OBJET Rust → [(type, [(ctor, [types])], [(retour, méthode, [types])])]. PURE (testée).
 
@@ -4742,6 +4853,7 @@ def rust_object_api(source):
     structs = set(RUST_STRUCT.findall(src_text))
     by_type = {}                           # type -> (ctors, methodes), ordre d'apparition
     captured = rust_capture_fields(src_text)   # UNE fois : relu dans la boucle, c'etait quadratique
+    parsed = {}                            # liste de paramètres -> _rust_param_types
     for typ, functions in rust_impl_blocks(src_text):
         if typ not in structs:
             continue
@@ -4749,23 +4861,13 @@ def rust_object_api(source):
         # bloc etait perdu quand les methodes venaient d'un second.
         ctors, method_list = by_type.setdefault(typ, ([], []))
         for ident, params, ret in functions:
-            pieces = [p.strip() for p in params.split(",") if p.strip()]
-            takes_self = bool(pieces) and pieces[0].endswith("self")
-            # Seul un EMPRUNT (`&self`, `&mut self`, `&'a self`) se proxifie : le serveur
-            # appelle la méthode sur l'objet resté dans sa table (`moodit_t[h].f()`), qu'il ne
-            # peut pas déplacer. Une méthode qui CONSOMME `self` (`fn en_texte(self)`) faisait
-            # refuser tout le serveur par rustc (E0507), même si le harnais ne l'appelait pas.
-            if takes_self and not pieces[0].replace(" ", "").startswith("&"):
-                continue
-            useful = pieces[1:] if takes_self else pieces
-            types = []
-            valid = True
-            for param_group in useful:
-                if ":" not in param_group or param_group.split(":", 1)[1].strip() not in RUST_TYPES:
-                    valid = False
-                    break
-                types.append(param_group.split(":", 1)[1].strip())
-            if not valid:
+            # Lu UNE fois par liste de paramètres : une méthode par défaut d'un trait est la même
+            # chaîne dans chaque `impl` qui la reçoit, et la relire à chaque fois coûtait 70 s
+            # (une méthode de 4 000 paramètres reportée sur 1 500 types).
+            if params not in parsed:
+                parsed[params] = _rust_param_types(params)
+            takes_self, types = parsed[params]
+            if types is None:
                 continue
             # `-> Self` est la forme du Rust Book : c'est le meme constructeur que `-> Type`.
             if not takes_self and ret in (typ, "Self"):
@@ -4830,7 +4932,11 @@ def rust_mut_receivers(source):
     mutants = set()
     for typ, functions in rust_impl_blocks(source):
         for _, params, _ in functions:
-            first_item = (params.split(",")[0] if params else "").strip()
+            # La tête SEULE, sans copier la suite (ni `split` ni `partition`) : une méthode par
+            # défaut de milliers de paramètres reportée sur des milliers d'`impl` était recopiée
+            # à chaque fois.
+            comma = params.find(",") if params else -1
+            first_item = (params[:comma] if comma >= 0 else params or "").strip()
             if first_item.replace(" ", "").startswith("&mutself"):
                 mutants.add(typ)
     return mutants
@@ -5754,6 +5860,24 @@ def cs_object_api(source, klass):
     return ctors, dedupe_signatures(method_list)
 
 
+def cs_relayed_params(source):
+    """Paramètres des constructeurs (arités réduites comprises) et des méthodes d'instance
+    (héritées comprises) de TOUTES les classes du code soumis. FONCTION PURE (testée).
+
+    Le noteur ne relaie que la classe que vise le harnais, mais compter celle-là seule ferait
+    dépendre le refus du harnais : les canaris (harnais muet) seraient jugés sur une autre classe
+    que les cas réels. Compter toutes les classes majore l'API relayée, pour tous les cas."""
+    src_text = source or ""
+    total = sum(len(m[2]) for methods in _cs_members_with_inherited(src_text).values()
+                for m in methods)
+    for ident, params in CS_CTOR_ANY.findall(src_text):
+        types = _cs_param_types(params)
+        if types is not None:
+            total += sum(len(t) for _r, _n, t in with_default_arities(
+                [(None, ident, types, trailing_defaults(params))]))
+    return total
+
+
 # `class Carre : Forme, IComparable` : la PREMIERE base est la classe mère quand c'en est une.
 CS_BASE = re.compile(r"\bclass\s+(\w+)\s*(?:<[^<>{};]*>)?\s*:\s*([\w.]+)")
 
@@ -6290,9 +6414,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # Inventaire NON abouti : ce n'est pas le code soumis qui est en cause (JVM froide sur un
     # hôte chargé). Le dire, plutôt que « aucune méthode exploitable », qui accuse la réponse.
     if expired:
-        return None, ("L'inventaire des méthodes de la classe " + klass + " n'a pas abouti en "
-                      + str(LIST_TIMEOUT_S) + " s (machine de correction chargée) : le code "
-                      "soumis n'est pas en cause.")
+        return None, (TOOL_ABORTED + " : l'inventaire des méthodes de la classe " + klass
+                      + " (javap) a dépassé " + str(LIST_TIMEOUT_S) + " s (machine de "
+                      "correction chargée). Le code soumis n'est pas en cause : la correction "
+                      "est à rejouer.")
     # Plafond LARGE : une signature par ligne, et la troncature « tête + queue » de read_capped
     # retirait celles du milieu dès 64 Kio — méthodes absentes du bouchon, harnais qui ne
     # compile plus. La taille reste bornée par les classes que javac vient d'accepter.
@@ -6333,6 +6458,10 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
         else:
             obj_list.append((source_name, ctors, instance))
             class_statics[source_name] = java_signatures(block)
+    # API FINALE, toutes classes, avant toute génération et sans regarder le harnais.
+    check_relayed_params(method_list, obj_list + [(klass, own_ctors, own_instance)],
+                         extra=sum(len(m[2]) for statics in class_statics.values()
+                                   for m in statics))
     if code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
         return None, ("Aucune méthode statique ni objet exploitable dans la classe "
                       + klass + " (types acceptés : int, long, double, boolean, String).")
@@ -6445,6 +6574,8 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     # typeof du serveur et les bouchons. Le fichier depose, lui, reste l original.
     extraction = cs_canonical_types(cs_strip_comments(student_source))
     method_list = cs_signatures(extraction)
+    # Sur TOUTES les classes, avant de choisir celle que vise le harnais (cf. cs_relayed_params).
+    check_relayed_params(method_list, extra=cs_relayed_params(extraction))
     harness = harness_rpc_body(case_dir) or ""
     klass = cs_student_class(extraction, harness)
     ctors, instance = cs_object_api(extraction, klass)
@@ -6515,6 +6646,7 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
     extraction = blank_code(student_source, rust=True)
     method_list = rust_signatures(extraction)
     obj_list = rust_object_api(extraction)
+    check_relayed_params(method_list, obj_list)
     # Source NETTOYEE, comme les signatures : lue brute, une virgule ou une fin de ligne
     # dans un commentaire de champ faisait perdre des champs, et le litteral du harnais
     # ne compilait plus.
@@ -6751,6 +6883,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     extraction = blank_code(directives_done if directives_done is not None else student_source)
     obj_list = cpp_object_api(extraction) if ext == "cpp" else []
     method_list = c_signatures(extraction, cpp=(ext == "cpp"))
+    check_relayed_params(method_list, obj_list)
     if not (method_list or obj_list):
         return None, ("Aucune fonction exploitable dans le code soumis "
                       "(types acceptés : int, long, double).")
@@ -6823,7 +6956,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
             # c_binary_linked_symbols). nm tourne sous l'UID étudiant, comme la compilation.
             nm_out = os.path.join(case_dir, "nm.out")
             code, expired = run_proc(["nm", "--defined-only", out_value], cwd_c, env_c,
-                                     COMPILE_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
+                                     NM_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
                                      preexec_c)
             linked = c_binary_linked_symbols(code, expired, nm_out)
             if linked:
@@ -6852,6 +6985,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     extraction = blank_code(student_source, backticks=True)
     method_list = go_signatures(extraction)
     obj_list = go_object_api(extraction)
+    check_relayed_params(method_list, obj_list)
     # Source NETTOYEE : commentaires et etiquettes `json:"x"` effaces, comme pour les
     # signatures — lue brute, une etiquette faisait perdre toute la structure.
     field_list = go_capture_fields(extraction)
@@ -6970,16 +7104,18 @@ def execute_case(language, case, timeout_s):
     start = time.monotonic()
     try:
         outcome, compile_error = runner(case_dir, env, timeout_s, case["index"])
-    except SubmissionRefused as refusal:
+    except (SubmissionRefused, ToolAborted) as refusal:
         # Borne de l'extraction dépassée par le code soumis : un refus noté, comme ceux que
-        # rendent les runners, et non l'erreur interne (502) que deviendrait l'exception.
+        # rendent les runners, et non l'erreur interne (502) que deviendrait l'exception. Un
+        # outil expiré (ToolAborted) devient, lui, un cas interrompu (voir plus bas).
         outcome, compile_error = None, str(refusal)
     elapsed_ms = int((time.monotonic() - start) * 1000)
     if compile_error is not None:
         # Le préfixe est NOTRE texte (le message du compilateur ne vient qu'après) : le code
         # soumis ne peut pas le produire.
         outcome = CaseOutcome(False, compile_error, ran=False,
-                              harness_build=is_harness_build_failure(compile_error))
+                              harness_build=is_harness_build_failure(compile_error),
+                              cause="interrompu" if platform_aborted(compile_error) else None)
     if EXIT_STATE.killed_by_signal and not outcome.passed:
         outcome.killed = True
     if EXIT_STATE.expired and not outcome.passed:

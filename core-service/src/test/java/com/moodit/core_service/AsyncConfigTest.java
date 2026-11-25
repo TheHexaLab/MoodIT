@@ -17,8 +17,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /**
  * Executors de correction des quiz, vérifiés par leur COMPORTEMENT : le pool du code fait tourner
- * exactement le nombre de corrections réglé (sans attendre que la file soit pleine), et refuse
- * explicitement au-delà de sa file au lieu de bloquer l'appelant.
+ * autant de corrections simultanées que de fils réglés sans en mettre aucune en file (cœur =
+ * maximum), met les suivantes en file, et refuse explicitement au-delà de sa file au lieu de
+ * bloquer l'appelant.
  */
 class AsyncConfigTest {
 
@@ -43,24 +44,33 @@ class AsyncConfigTest {
     CountDownLatch release = new CountDownLatch(1);
     CountDownLatch done = new CountDownLatch(5);
     List<String> workers = new CopyOnWriteArrayList<>();
+    Runnable blocking =
+        () -> {
+          workers.add(Thread.currentThread().getName());
+          started.countDown();
+          try {
+            release.await(10, TimeUnit.SECONDS);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+          done.countDown();
+        };
     try {
-      for (int i = 0; i < 5; i++) {
-        executor.execute(
-            () -> {
-              workers.add(Thread.currentThread().getName());
-              started.countDown();
-              try {
-                release.await(10, TimeUnit.SECONDS);
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-              done.countDown();
-            });
+      // Autant de tâches que de fils, et pas une de plus : les 3 démarrent alors que la file est
+      // VIDE. Un pool au cœur plus petit que son maximum mettrait les 2e et 3e en file (un
+      // ThreadPoolExecutor ne crée de fil au-delà du cœur qu'une fois la file pleine) : seul le
+      // réglage cœur = maximum fait tourner les 3 corrections sans attendre.
+      for (int i = 0; i < 3; i++) {
+        executor.execute(blocking);
       }
-      // Les 3 places tournent déjà alors que la file n'est pas pleine (cœur = maximum).
       assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
-      assertThat(executor.getThreadPoolExecutor().getQueue()).hasSize(2);
+      assertThat(executor.getThreadPoolExecutor().getQueue()).isEmpty();
 
+      // Les fils occupés, les suivantes attendent dans la file, puis le refus au-delà.
+      for (int i = 0; i < 2; i++) {
+        executor.execute(blocking);
+      }
+      assertThat(executor.getThreadPoolExecutor().getQueue()).hasSize(2);
       assertThatThrownBy(() -> executor.execute(() -> {}))
           .isInstanceOf(TaskRejectedException.class);
 

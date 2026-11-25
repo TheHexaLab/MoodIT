@@ -88,8 +88,9 @@ public class GlobalExceptionHandler {
                 .body(ex.getMessage());
     }
 
-    //Vérification du code impossible (service d'exécution indisponible) : la tentative n'a pas
-    //été enregistrée, l'étudiant peut renvoyer. 503 pour signaler un échec transitoire côté serveur.
+    // Vérification du code impossible (service d'exécution indisponible). Filet seulement : la
+    // correction tourne hors de toute requête HTTP (cf. CodeVerificationUnavailableException), et
+    // ce 503 signalerait un échec transitoire côté serveur si l'exception remontait jusqu'ici.
     @ExceptionHandler(CodeVerificationUnavailableException.class)
     public ResponseEntity<String> handleCodeVerificationUnavailable(CodeVerificationUnavailableException ex) {
         return ResponseEntity

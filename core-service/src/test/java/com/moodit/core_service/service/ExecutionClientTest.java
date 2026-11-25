@@ -193,6 +193,14 @@ class ExecutionClientTest {
         assertThat(client.readTimeoutMs("Go", 4, 60_000))
                 .isEqualTo(10_000 + 15_000 + 30_000
                         + 3 * (60_000 + 10_000 + 2 * 90_000 + 5_000) + 5_000 + 35_000);
+        // C et C++ : + 30 s d'OUTILS par cas (sondes des noms réservés, `nm`) et + 10 s de
+        // préprocesseur par job, miroir de toolsPerCaseMs/toolsPerJobMs de DockerEvaluator —
+        // 30 + 10 + 3 × (10 + 10 + 180 + 5 + 30) = 745 s, sous le plafond.
+        long cWall = 30_000 + 10_000 + 3 * (10_000 + 10_000 + 2 * 90_000 + 5_000 + 30_000);
+        assertThat(client.readTimeoutMs("C++", 4, 10_000))
+                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + 35_000);
+        assertThat(client.readTimeoutMs(" c ", 4, 10_000))
+                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + 35_000);
         // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
         assertThat(client.readTimeoutMs("Java", 202, 60_000))
                 .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);

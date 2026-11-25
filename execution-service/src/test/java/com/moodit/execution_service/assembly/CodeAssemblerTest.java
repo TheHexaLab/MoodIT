@@ -14,12 +14,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Tests unitaires de l'assemblage par langage (aucun conteneur requis) : on vérifie la STRUCTURE du
  * programme assemblé — runtime du runner (mode exec), fichiers, présence du code étudiant, du harnais, et surtout
- * du NONCE anti-triche, ainsi que les astuces par langage (renommage de main, macros, alias).
+ * du NONCE anti-triche, ainsi que les astuces par langage (mandataires RPC, alias). Les langages
+ * compilés n'y passent plus (#116) : l'assembleur les refuse, ils sont notés par DockerEvaluator.
  */
 class CodeAssemblerTest {
 
-    // Dossier vendor bidon : les langages testés ici (python/js/json/sql/c/java…) ne le lisent pas
-    // (seuls HTML/JSX chargent un bundle, non couverts par ces tests unitaires).
+    // Dossier vendor bidon : les langages assemblés ici (python/js/ts/php/bash/json/sql) ne le
+    // lisent pas (seuls HTML/JSX chargent un bundle, non couverts par ces tests unitaires).
     private final CodeAssembler assembler = new CodeAssembler("/nonexistent-vendor");
 
     private String onlyFileContent(CodeAssembler.Assembled a) {

@@ -31,7 +31,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  *
  * <p>Une tâche refusée (file pleine) n'est jamais perdue en silence : le listener abandonne alors la
  * correction et prévient l'étudiant — tentative pending supprimée (il peut resoumettre), ou gardée
- * « à revoir » au plafond d'échecs sans verdict ou après une relance (QuizService#abandonGrading).
+ * « à revoir » selon les règles de QuizService#failGrading (relance, ou plafond atteint sur un échec sans verdict ou sur un quiz sans reprise).
  * Les files vivent en mémoire : une correction perdue par un arrêt de core est reprise au
  * démarrage suivant (cf. QuizGradingListener#resumePendingGradings).
  */

@@ -163,6 +163,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         Question code = question(20, CODE, 5.0, 1);
         code.setLanguage(language(2, "python"));
         code.setStartCode("def f():");
+        code.setExecTimeoutMs(5_000);
         testCase(code, 30, "cas", 2);
         Question match = question(21, MATCHING, 2.0, 0);
         drag(match, 40, "Java", 1, "Objet");
@@ -217,6 +218,8 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         assertThat(match.getDragItems()).extracting(DragItemDTO::getCorrectOrder).containsExactly(1, 2);
         assertThat(match.getAnswers().get(0).getIsCorrect()).isTrue();
         QuestionDTO code = detail.getQuestions().get(1);
+        // L'éditeur relit le temps limite enregistré sur la question Code.
+        assertThat(code.getExecTimeoutMs()).isEqualTo(5_000);
         assertThat(code.getTestCases()).singleElement().satisfies(tc -> {
             assertThat(tc.getId()).isEqualTo(30);
             assertThat(tc.getName()).isEqualTo("cas");
@@ -859,6 +862,27 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             verify(realtimePublisher).quizUpdated(11L, 1L, 5L);
             verify(realtimePublisher).quizUpdated(12L, 1L, 5L);
             verify(realtimePublisher, never()).quizCreated(anyLong(), anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("execTimeoutMs d'une question réutilisée : remplacé et arrondi à la seconde supérieure (1 500 ms → 2 s)")
+        void execTimeout_normalizedOnUpdate() {
+            kept.setExecTimeoutMs(10_000);
+            when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
+            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.updateQuiz(5, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(1).qType("single_choice")
+                            .execTimeoutMs(1_500)
+                            .answers(List.of(AnswerDTO.builder().id(10).content("A").isCorrect(true).build()))
+                            .build()))
+                    .build());
+
+            // Même entité (ids stables), valeur normalisée comme à la création : le runner
+            // tronquerait 1,5 s à 1 s, la base garde ce qui s'applique vraiment.
+            assertThat(quiz.getQuestions()).singleElement().isSameAs(kept);
+            assertThat(kept.getExecTimeoutMs()).isEqualTo(2_000);
         }
 
         @Test

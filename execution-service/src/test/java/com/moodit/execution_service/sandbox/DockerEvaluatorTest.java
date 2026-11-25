@@ -126,6 +126,28 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void interrupted_case_is_no_verdict_internally_and_readable_in_tester() {
+        // Cas INTERROMPU par la plateforme (compilation du noteur expirée, inventaire javap ou
+        // sonde des noms réservés expirés) : le superviseur le compte « incomplet » (cause
+        // « interrompu »). Il arrivait avant comme un verdict ordinaire : un 0 définitif que
+        // personne ne pouvait rejouer, regradeAttempt n'acceptant que « à revoir ».
+        String aborted = "Le harnais n'a pas fini de compiler (temps limite de compilation "
+                + "dépassé ou compilateur arrêté) : rejouer la correction.";
+        supervisorReturns("""
+                {"v":1,"results":[
+                  {"index":0,"passed":true,"detail":null,"ms":1},
+                  {"index":1,"passed":false,"detail":"%s","ms":0}
+                ],"events":[],"canaries":"ok","incomplet":true}
+                """.formatted(aborted));
+        assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
+                .isInstanceOf(NoVerdictException.class);
+        List<TestResult> r = evaluator.evaluate("Go", "code", TWO_CASES, null,
+                DockerEvaluator.PUBLIC_WALL_MS);
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).isEqualTo(aborted);
+    }
+
+    @Test
     void framework_marker_does_not_overflow_the_stack() {
         // Le moteur Java repete un groupe par recursion : une qualification sans fin
         // (`@a.a.a.…`) faisait deborder la pile au lieu de repondre « pas un framework ».
@@ -357,8 +379,9 @@ class DockerEvaluatorTest {
         evaluator.evaluate("C++", "code",
                 List.of(new TestCaseInput("t", "return doubler(5) == 10;", 1)), 5000);
         // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + DEUX compilations de 90 s
-        // — le noteur et le code soumis sont deux programmes — + 5 s d'inventaire) = 630 s.
-        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(630_000L));
+        // — le noteur et le code soumis sont deux programmes — + 5 s d'inventaire + 30 s d'outils
+        // C/C++ : sondes des noms réservés et nm) + 10 s de préprocesseur par job = 730 s.
+        verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(730_000L));
         // Ce que le SUPERVISEUR reçoit : le temps limite par cas tel quel, et le budget du job
         // dérivé du même mur (sans lui, le superviseur ne s'arrête pas avant le mur et le démon
         // tue le conteneur : tout le travail est perdu).
@@ -410,8 +433,9 @@ class DockerEvaluatorTest {
     @Test
     void absurd_time_limit_bounded_never_negative_wall() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
-        // Négatif (valeur stockée aberrante) : borné à 1 ms, puis PLANCHER VM (10 s — miroir
-        // du superviseur, JVM froide) — le mur reste positif et couvre le temps réel accordé.
+        // Négatif (valeur stockée aberrante) en Java : le PLANCHER VM (10 s — miroir du
+        // superviseur, JVM froide) l'emporte — le mur reste positif et couvre le temps réel
+        // accordé. Le plancher de 1 ms, lui, est mesuré en Go ci-dessous.
         evaluator.evaluate("Java", "code",
                 List.of(new TestCaseInput("t", "return Solution.doubler(5) == 10;", 1)), -100_000);
         // TROIS compilations en Java : le code soumis seul (pour lire ses signatures), le noteur,
@@ -423,6 +447,23 @@ class DockerEvaluatorTest {
         assertThat(javaJob.path("timeout_ms").asLong()).isEqualTo(10_000);
         assertThat(javaJob.path("budget_ms").asLong())
                 .isEqualTo(DockerEvaluator.walls("java", 1, 10_000, Long.MAX_VALUE).budgetMs());
+
+        // Le plancher VM de Java masque celui de 1 ms : un langage SANS plancher VM (Go) le
+        // mesure seul. Négatif ou nul : ramené à 1 ms dans le job, et le mur en découle —
+        // 30 s + 3 × (1 ms + 10 s + 2 × 90 s + 5 s) = 615,003 s. Sans le plancher, le job
+        // portait la valeur aberrante telle quelle et le mur raccourcissait d'autant.
+        for (int absurd : new int[] {-100_000, 0}) {
+            org.mockito.Mockito.clearInvocations(sandbox);
+            evaluator.evaluate("Go", "code",
+                    List.of(new TestCaseInput("t", "return doubler(5) == 10", 1)), absurd);
+            verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(615_003L));
+            JsonNode flooredJob = lastJob();
+            assertThat(flooredJob.path("timeout_ms").asLong()).as("temps limite %d", absurd)
+                    .isEqualTo(1);
+            assertThat(flooredJob.path("budget_ms").asLong()).as("budget %d", absurd)
+                    .isEqualTo(DockerEvaluator.walls("go", 1, 1, Long.MAX_VALUE).budgetMs());
+        }
+        org.mockito.Mockito.clearInvocations(sandbox);
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code",
@@ -447,8 +488,31 @@ class DockerEvaluatorTest {
     }
 
     @Test
+    void wall_covers_c_and_cpp_tools_around_the_compilations() {
+        // run_c_rpc lance aussi, par cas, les sondes des noms réservés (C_PROBE_BUDGET_S, 20 s
+        // en tout) et `nm` sur le binaire soumis (NM_TIMEOUT_S, 10 s), et une fois par job le
+        // préprocesseur seul (C_PREPROCESS_TIMEOUT_S, 10 s). Le mur ne les comptait pas : un
+        // cas lancé juste avant l'échéance pouvait le dépasser (#216).
+        assertThat(DockerEvaluator.toolsPerCaseMs("c")).isEqualTo(5_000 + 30_000);
+        assertThat(DockerEvaluator.toolsPerCaseMs("cpp")).isEqualTo(5_000 + 30_000);
+        assertThat(DockerEvaluator.toolsPerCaseMs("go")).isEqualTo(5_000);
+        assertThat(DockerEvaluator.toolsPerCaseMs("java")).isEqualTo(5_000);
+        assertThat(DockerEvaluator.toolsPerJobMs("cpp")).isEqualTo(10_000);
+        assertThat(DockerEvaluator.toolsPerJobMs("rust")).isZero();
+        // Un cas, mur non plafonné : 30 s + 10 s (préprocesseur) + 3 × pireCas, et l'invariant
+        // « budget + pireCas + marge de clôture ≤ mur » exact.
+        long worstCaseCpp = 10_000 + 10_000 + 2 * 90_000 + 5_000 + 30_000;
+        DockerEvaluator.Walls cpp = DockerEvaluator.walls("cpp", 1, 10_000, Long.MAX_VALUE);
+        assertThat(cpp.wallMs()).isEqualTo(30_000 + 10_000 + 3 * worstCaseCpp);
+        assertThat(cpp.budgetMs()).isEqualTo(cpp.wallMs() - worstCaseCpp - 20_000);
+    }
+
+    @Test
     void reserved_marker_in_submitted_code_rejected_without_container() {
-        // __MOODIT_ dans la copie recevrait les substitutions runtime (jeton, canaris) : rejet
+        // __MOODIT_ est le préfixe réservé des gabarits runtime (canaris __MOODIT_A__/__MOODIT_B__,
+        // marqueur __MOODIT_HARNAIS__). Le superviseur ne substitue que dans le fichier du
+        // harnais, jamais dans le fichier soumis : ce rejet est une défense en profondeur (et, en
+        // Java, évite qu'un fichier soumis porteur du marqueur soit pris pour le harnais). Rejet
         // explicite AVANT tout conteneur — chaque cas échoue avec le même détail.
         // Poids absent sur un cas (champ optionnel de l'API) : le rejet passe par
         // effectiveWeight() — pas de NPE à l'unboxing.
@@ -465,15 +529,16 @@ class DockerEvaluatorTest {
         org.mockito.Mockito.verifyNoInteractions(sandbox);
     }
 
-    // ── Reconnaissance de la FORME du harnais (#116) ─────────────────────────────
+    // ── Détection du format framework retiré, pour le refuser (#116) ─────────────
 
     @Test
-    void harness_form_picks_the_path_in_all_six_languages() {
+    void framework_marker_detected_only_on_real_framework_tests() {
         // Il n'y a plus qu'une forme notée : le corps booléen. `frameworkMarkerFound` est le
         // DÉTECTEUR du format retiré — ExecutionService s'en sert pour REFUSER un harnais au
         // format framework avec un diagnostic, avant toute prise de place sandbox. Un booléen
-        // ne doit jamais le déclencher (refus à tort), un vrai test toujours (notation par un
-        // chemin qui n'existe plus).
+        // ne doit jamais le déclencher (refus à tort), un vrai test toujours (sinon il partirait
+        // au conteneur comme corps booléen, ne compilerait pas, et le prof n'aurait pas le
+        // diagnostic).
         record CaseSpec(String lang, String booleanForm, String framework) { }
         List<CaseSpec> specs = List.of(
                 new CaseSpec("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
@@ -484,10 +549,10 @@ class DockerEvaluatorTest {
                 new CaseSpec("cpp", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"));
         for (CaseSpec c : specs) {
             assertThat(DockerEvaluator.frameworkMarkerFound(c.lang(), c.booleanForm()))
-                    .as("harnais booléen en " + c.lang() + " → chemin non falsifiable")
+                    .as("harnais booléen en " + c.lang() + " → aucun marqueur, pas de refus")
                     .isFalse();
             assertThat(DockerEvaluator.frameworkMarkerFound(c.lang(), c.framework()))
-                    .as("harnais framework en " + c.lang() + " → ancien chemin")
+                    .as("harnais framework en " + c.lang() + " → marqueur détecté, refus")
                     .isTrue();
         }
     }

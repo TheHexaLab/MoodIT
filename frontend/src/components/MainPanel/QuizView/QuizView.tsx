@@ -152,6 +152,9 @@ const QuizView: React.FC<QuizViewProps> = ({
     setChipFocus(attemptId);
     attempt.selectAttempt(attemptId);
   };
+  // Lecture de la tentative en échec : l'écran d'erreur n'a pas de barre pour solder la demande, et
+  // « Réessayer » rouvre la DERNIÈRE tentative — la puce demandée y aurait pris le focus.
+  if (attempt.loadError && chipFocus != null) setChipFocus(null);
   const awaitingReviewShown = attempt.phase === 'summary' && attempt.awaitingReview;
 
   // Relance de l'enseignant aboutie sur la tentative AFFICHÉE (même id, message d'attente →
@@ -332,6 +335,9 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (attempt.loading || attempt.loadError || total === 0) return null;
 
     if (phase === 'summary') {
+      // Tentative à revoir d'un quiz sans reprise : aucun bouton, donc pas de pied (il était rendu
+      // vide, barre de 4rem avec sa bordure).
+      if (attempt.awaitingReview && !attempt.allowRetry) return null;
       return (
         <footer className={`${styles.footer} ${styles.summaryFooter}`}>
           {!attempt.awaitingReview && (

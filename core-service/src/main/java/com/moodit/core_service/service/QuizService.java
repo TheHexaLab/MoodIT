@@ -495,8 +495,8 @@ public class QuizService {
     /**
      * Abandonne une correction qui n'a pas pu être planifiée (executor saturé, cf.
      * QuizGradingListener) : même traitement qu'une défaillance de correction (failGrading) — la
-     * tentative pending est supprimée et l'auteur prévenu, ou gardée « à revoir » (plafond d'échecs
-     * sans verdict atteint, tentative relancée par l'enseignant).
+     * tentative pending est supprimée et l'auteur prévenu, ou gardée « à revoir » selon les règles de
+     * failGrading (relance par l'enseignant, ou plafond atteint sur un échec sans verdict ou sur un quiz sans reprise).
      */
     public void abandonGrading(Integer attemptId, RuntimeException cause) {
         failGrading(attemptId, cause);
@@ -586,8 +586,7 @@ public class QuizService {
     private void failGrading(Integer attemptId, RuntimeException cause) {
         boolean noVerdict = cause instanceof CodeVerificationNoVerdictException;
         if (!(cause instanceof CodeVerificationUnavailableException)) {
-            log.error("Correction de la tentative {} en échec inattendu : suppression du pending",
-                    attemptId, cause);
+            log.error("Correction de la tentative {} en échec inattendu", attemptId, cause);
         }
         long[] who = null;
         try {
@@ -623,7 +622,8 @@ public class QuizService {
                     if (capped) {
                         a.setStatus(REVIEW);
                         attemptRepository.save(a);
-                        return REVIEW;
+                        // Raison du journal : une relance revient à revoir quel que soit le compte.
+                        return a.isRegrade() ? REVIEW + ":relance" : REVIEW;
                     }
                     attemptRepository.delete(a);
                     return "deleted";
@@ -634,10 +634,14 @@ public class QuizService {
                     attemptId);
             return;
         }
-        boolean kept = REVIEW.equals(outcome);
-        if (kept) {
+        boolean kept = outcome.startsWith(REVIEW);
+        if (kept && outcome.equals(REVIEW)) {
             log.warn("Tentative {} gardée à revoir : plafond de {} échecs sans verdict atteint",
                     attemptId, maxNoVerdictFailures);
+        } else if (kept) {
+            log.warn("Tentative {} gardée à revoir : relance de l'enseignant en échec", attemptId);
+        } else {
+            log.info("Tentative {} supprimée après l'échec de sa correction", attemptId);
         }
         if (who != null) {
             realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, kept ? REVIEW : null);

@@ -723,9 +723,23 @@ class ExecutionIntegrationTest {
         // pouvoir lire son programme, qui porte les sentinelles du dump : le harnais réussit
         // seulement si le texte lu les contient.
         String harness = "CREATE TABLE t(v TEXT);\n-- @student\n"
-                + "SELECT (SELECT count(*) FROM t WHERE instr(v, '_DUMP_' || 'START') > 0) = 1;";
-        assertThat(passes("SQL", "INSERT INTO t SELECT CAST(data AS TEXT) FROM fsdir('main.sql');",
-                harness)).isFalse();
+                + "SELECT (SELECT count(*) FROM t WHERE instr(v, %s) > 0) = 1;";
+        String probe = "INSERT INTO t SELECT CAST(data AS TEXT) FROM fsdir('%s');";
+        TestResult refused = service.evaluate(new EvaluateRequest("SQL", null,
+                probe.formatted("main.sql"),
+                List.of(new TestCaseInput("t", harness.formatted("'_DUMP_' || 'START'"), 1)))).get(0);
+        assertThat(refused.passed()).isFalse();
+        // Le harnais a TOURNÉ et rendu faux : main.sql (root 0600, cf. exec_main) ne livre pas son
+        // contenu. Une erreur SQL (fsdir absent, coupé par -safe) ferait aussi échouer la sonde,
+        // mais sans plus rien mesurer de la lecture.
+        assertThat(refused.detail()).as("motif du refus").isEqualTo(HARNESS_FALSE + " (valeur : 0)");
+        // TÉMOIN : la MÊME requête fsdir, sur un fichier lisible par le code soumis, en rapporte
+        // bien le contenu et fait réussir le harnais — fsdir tourne, et ses lignes atteignent la
+        // phase 2. Sans lui, la sonde ci-dessus rendrait faux pour une tout autre raison.
+        TestResult witness = service.evaluate(new EvaluateRequest("SQL", null,
+                probe.formatted("/etc/passwd"),
+                List.of(new TestCaseInput("t", harness.formatted("'root:'"), 1)))).get(0);
+        assertThat(witness.passed()).as("témoin : %s", witness.detail()).isTrue();
     }
 
     @Test

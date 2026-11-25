@@ -38,7 +38,11 @@ interface AttemptBarProps {
    * et le focus retombait sur <body>. La nouvelle barre le rend à la puce du même id.
    */
   focusId?: number | null;
-  /** La puce demandée a été trouvée (focalisée si le focus était orphelin) : la demande est soldée. */
+  /**
+   * La demande est soldée : puce focalisée (si le focus était orphelin), ou absente de cette
+   * barre — rien sous deux tentatives. Une demande laissée en attente aurait focalisé plus tard
+   * la puce d'une AUTRE tentative que celle affichée.
+   */
   onFocused?: () => void;
   labels?: Partial<QuizSummaryLabels>;
 }
@@ -60,12 +64,12 @@ export function AttemptBar({
   // Effet de MISE EN PAGE : le focus est posé dans la même mise à jour que le montage de la
   // barre, jamais après un passage par <body> (un effet passif courait après le rendu, au gré
   // du planificateur — comme AssignmentTeams).
+  // La demande est soldée à la première barre rendue, puce trouvée ou non (cf. `onFocused`).
   useLayoutEffect(() => {
     if (focusId == null) return;
     const chip = chips.current.get(focusId);
-    if (!chip) return;
     const active = document.activeElement;
-    if (!active || active === document.body || !active.isConnected) chip.focus();
+    if (chip && (!active || active === document.body || !active.isConnected)) chip.focus();
     onFocused?.();
   });
   if (attempts.length < 2) return null;

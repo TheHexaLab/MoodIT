@@ -59,11 +59,32 @@ class HarnessProjectsTest {
 
     @Test
     void every_language_has_a_canary_template() {
-        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
-            Map<String, String> files = HarnessProjects.build(language, "code", oneCase(language), null).files();
-            boolean canaryPresent = files.entrySet().stream()
-                    .anyMatch(e -> e.getKey().startsWith("cases/1/") && e.getValue().contains("__MOODIT_A__"));
-            assertThat(canaryPresent).as("canari de " + language).isTrue();
+        // LES DEUX canaris (« pass » en cases/1, « fail » en cases/2, après l'unique cas), et le
+        // gabarit COMPLET : une comparaison des deux valeurs que le superviseur tire au sort. Ne
+        // vérifier que la présence de __MOODIT_A__ dans le premier laissait passer un gabarit
+        // tronqué (`return __MOODIT_A__;`, toujours vrai ou toujours faux) ou un second canari
+        // absent — et avec eux la vérification que la chaîne tranche dans les deux sens.
+        record Expected(String language, String extension, String template) { }
+        for (Expected e : List.of(
+                new Expected("Java", "java", "return __MOODIT_A__ == __MOODIT_B__;\n"),
+                new Expected("C#", "cs", "return __MOODIT_A__ == __MOODIT_B__;\n"),
+                new Expected("Go", "go", "return __MOODIT_A__ == __MOODIT_B__\n"),
+                new Expected("Rust", "rs", "__MOODIT_A__ == __MOODIT_B__\n"),
+                new Expected("C", "c", "return __MOODIT_A__ == __MOODIT_B__;\n"),
+                new Expected("C++", "cpp", "return __MOODIT_A__ == __MOODIT_B__;\n"))) {
+            HarnessProjects.Project project =
+                    HarnessProjects.build(e.language(), "code", oneCase(e.language()), null);
+            Map<String, String> files = project.files();
+            assertThat(files.get("job.json")).as("canaris listés en " + e.language())
+                    .contains("{\"index\":1,\"canary\":\"pass\"},{\"index\":2,\"canary\":\"fail\"}]");
+            for (int index : new int[] {1, 2}) {
+                // Le corps qui suit le marqueur EST le gabarit, rien de plus.
+                assertThat(files.get("cases/" + index + "/src/harnais_rpc." + e.extension()))
+                        .as("canari %d de %s", index, e.language())
+                        .endsWith("\n__MOODIT_HARNAIS__\n" + e.template());
+            }
+            assertThat(files).as("pas de troisième canari en " + e.language())
+                    .doesNotContainKey("cases/3/src/harnais_rpc." + e.extension());
         }
     }
 
@@ -206,7 +227,7 @@ class HarnessProjectsTest {
         return value;
     }
 
-    /** Contenu entre le premier {@code $…$} qui suit {@code debut}. */
+    /** Contenu entre le premier {@code $…$} qui suit {@code begin}. */
     private static String block(String sourceText, String begin, String delimiter) {
         int i = sourceText.indexOf(begin);
         if (i < 0) {

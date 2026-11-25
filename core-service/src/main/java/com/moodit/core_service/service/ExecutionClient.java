@@ -124,7 +124,9 @@ public class ExecutionClient {
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
      *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + compilations
      *       × 90 s + 5 s d'inventaire {@code --list}), 3 compilations par cas en Java et 2
-     *       ailleurs), plus 35 s de cycle de vie du conteneur.</li>
+     *       ailleurs ; en C/C++, + 30 s d'outils par cas — sondes des noms réservés et
+     *       {@code nm} — et + 10 s de préprocesseur par job), plus 35 s de cycle de vie du
+     *       conteneur.</li>
      * </ul>
      * Surestimer est sans danger (la correction tourne en tâche de fond) ; sous-estimer supprime
      * la tentative d'un étudiant pendant une correction encore en cours — le bug de #216.
@@ -160,8 +162,12 @@ public class ExecutionClient {
             // compilations, donc à un miroir plus court que le mur — la régression #216.
             long compiles = "java".equals(language == null ? ""
                     : language.trim().toLowerCase(java.util.Locale.ROOT)) ? 3 : 2;
-            long serverWall = Math.min(EVAL_BASE_MS + cases * (perRun + EVAL_CASE_MARGIN_MS
-                    + compiles * COMPILE_SLACK_MS + LIST_SLACK_MS), EVAL_MAX_WALL_MS);
+            // C/C++ : les OUTILS autour des compilations (sondes des noms réservés et `nm` par
+            // cas, préprocesseur seul une fois par job), miroir de toolsPerCaseMs/toolsPerJobMs.
+            boolean cTools = cFamily(language);
+            long serverWall = Math.min(EVAL_BASE_MS + (cTools ? C_PREPROCESS_SLACK_MS : 0)
+                    + cases * (perRun + EVAL_CASE_MARGIN_MS + compiles * COMPILE_SLACK_MS
+                    + LIST_SLACK_MS + (cTools ? C_TOOLS_SLACK_MS : 0)), EVAL_MAX_WALL_MS);
             return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS
                     + CONTAINER_LIFECYCLE_MS;
         }
@@ -212,6 +218,25 @@ public class ExecutionClient {
      * timeout expirait pendant une notation encore en cours — le bug de #216.
      */
     private static final long LIST_SLACK_MS = 5_000;
+
+    /**
+     * Outils C/C++ PAR CAS — miroir de {@code C_TOOLS_BUDGET_MS} de DockerEvaluator (sondes des
+     * noms réservés, 20 s en tout, et {@code nm}, 10 s : {@code C_PROBE_BUDGET_S} et
+     * {@code NM_TIMEOUT_S} du superviseur). Proportionnel au nombre de cas, comme LIST_SLACK_MS.
+     */
+    private static final long C_TOOLS_SLACK_MS = 30_000;
+
+    /** Préprocesseur seul, UNE fois par job C/C++ — miroir de {@code C_PREPROCESS_BUDGET_MS}. */
+    private static final long C_PREPROCESS_SLACK_MS = 10_000;
+
+    /** C ou C++ : langages dont le superviseur lance des outils autour des compilations. */
+    static boolean cFamily(String language) {
+        String lang = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        return switch (lang) {
+            case "c", "c++", "cpp", "cplusplus" -> true;
+            default -> false;
+        };
+    }
 
     /** Mur maximal d'un conteneur de notation — miroir de {@code DockerEvaluator.MAX_WALL_MS}. */
     private static final long EVAL_MAX_WALL_MS = 15 * 60_000;
