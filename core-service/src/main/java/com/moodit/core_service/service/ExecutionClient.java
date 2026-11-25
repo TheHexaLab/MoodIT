@@ -122,13 +122,15 @@ public class ExecutionClient {
      *       le budget serveur : surcharger l'une ou l'autre d'un côté impose la même valeur de
      *       l'autre), plus {@code max(per-test-timeout-ms, temps limite + marge)}, plus le
      *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris), plus
-     *       35 s de cycle de vie du conteneur (création, copie, arrêt) ;</li>
+     *       le cycle de vie du conteneur HORS mur ({@code CONTAINER_LIFECYCLE_MS}, 485 s au pire :
+     *       appels au démon bornés par {@code DockerSandbox.RESPONSE_TIMEOUT} et
+     *       {@code CONNECTION_TIMEOUT}, lecture des journaux, suppression) ;</li>
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
      *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + compilations
      *       × 90 s + 5 s d'inventaire {@code javap}), 3 compilations par cas en Java et 2
      *       ailleurs ; en C/C++, + 30 s d'outils par cas — sondes des noms réservés et
-     *       {@code nm} — et + 10 s de préprocesseur par job), plus 35 s de cycle de vie du
-     *       conteneur.</li>
+     *       {@code nm} — et + 10 s de préprocesseur par job), plus UNE fois le cycle de vie du
+     *       conteneur hors mur (485 s).</li>
      * </ul>
      * Surestimer est sans danger (la correction tourne en tâche de fond) ; sous-estimer supprime
      * la tentative d'un étudiant pendant une correction encore en cours — le bug de #216.
@@ -253,13 +255,45 @@ public class ExecutionClient {
     static final long DEFAULT_EXEC_BUDGET_MS = 15 * 60_000;
 
     /**
-     * Cycle de vie du conteneur HORS mur, par unité de travail : création, copie du job,
-     * démarrage, suppression, et surtout la collecte des logs — {@code DockerSandbox} l'attend
-     * jusqu'à 30 s APRÈS le mur. Sans ce miroir, l'invariant « budget client ≥ pire cas
-     * serveur » était faux au sens strict, et un flux de logs qui traîne pouvait faire
-     * abandonner une correction encore en cours (le défaut de #216).
+     * Silence maximal du démon Docker par appel — miroir de {@code DockerSandbox.RESPONSE_TIMEOUT}
+     * (execution-service, 60 s).
      */
-    private static final long CONTAINER_LIFECYCLE_MS = 35_000;
+    private static final long DAEMON_RESPONSE_MS = 60_000;
+
+    /**
+     * Établissement d'une connexion au démon — miroir de {@code DockerSandbox.CONNECTION_TIMEOUT}
+     * (execution-service, 5 s).
+     */
+    private static final long DAEMON_CONNECT_MS = 5_000;
+
+    /** Lecture des journaux du conteneur — miroir de {@code DockerSandbox.logReadTimeout} (30 s). */
+    private static final long LOG_READ_MS = 30_000;
+
+    /**
+     * Appels au démon HORS mur dans {@code DockerSandbox.run}, chacun borné par
+     * {@code CONNECTION_TIMEOUT} + {@code RESPONSE_TIMEOUT} : {@code info} (plafond des CPU, relu
+     * tant qu'il est illisible), {@code create}, copie du job, {@code start}, puis après le mur
+     * {@code exitCodeIfStopped} et {@code oomKilled}, et la suppression du {@code finally}, qui
+     * précède la réponse HTTP. L'attente {@code /wait} tombe dans le mur, la connexion des
+     * journaux dans {@code logReadTimeout}.
+     */
+    private static final int DAEMON_CALLS_OUTSIDE_WALL = 7;
+
+    /**
+     * Cycle de vie d'UN conteneur HORS de son mur, pire cas d'un démon lent (chaque appel juste
+     * sous ses bornes) : 7 × (5 + 60) + 30 = 485 s, 8 min 5 s. Payé une fois par conteneur — une
+     * fois par job compilé, une fois par unité interprétée (et donc une fois de plus pour l'unité
+     * en vol quand l'échéance du budget serveur tombe : ce budget ne borne que le LANCEMENT des
+     * harnais). C'est le même décompte que {@code DockerSandbox.ORPHAN_GRACE_MS}, vu depuis la
+     * requête HTTP plutôt que depuis la création du conteneur (d'où {@code info} et la
+     * suppression en plus) : changer RESPONSE_TIMEOUT, CONNECTION_TIMEOUT, logReadTimeout ou la
+     * liste des appels de {@code run} côté execution-service impose de revoir ce miroir. L'ancien
+     * terme de 35 s ne couvrait que des appels rapides : un démon lent mais vivant faisait
+     * expirer core avant la réponse, et la tentative était supprimée pendant que la correction
+     * tournait encore (#216).
+     */
+    private static final long CONTAINER_LIFECYCLE_MS =
+            DAEMON_CALLS_OUTSIDE_WALL * (DAEMON_CONNECT_MS + DAEMON_RESPONSE_MS) + LOG_READ_MS;
 
     /** Plancher VM du superviseur (JVM/mono froids) — miroir du mode evaluate. */
     private static final long VM_FLOOR_MS = 10_000;

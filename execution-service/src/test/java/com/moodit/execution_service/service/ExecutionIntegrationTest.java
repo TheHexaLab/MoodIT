@@ -698,10 +698,14 @@ class ExecutionIntegrationTest {
         String h = "return doc.querySelector('h1')?.textContent.trim() === 'Bonjour';";
         assertThat(passes("HTML", "<!DOCTYPE html><html><body><h1>Bonjour</h1></body></html>", h)).isTrue();
         assertThat(passes("HTML", "<!DOCTYPE html><html><body><h1>Salut</h1></body></html>", h)).isFalse();
-        // Un <script> n'est que du texte pour le parseur : il ne s'exécute pas et ne peut ni
-        // quitter en 0 ni écrire quoi que ce soit — la réponse fausse reste fausse.
-        assertThat(passes("HTML", "<html><body><h1>Salut</h1>"
-                + "<script>process.exit(0)</script></body></html>", h)).isFalse();
+        // Un <script> n'est que du texte pour le parseur, jamais exécuté dans le noteur. Sonde
+        // qui MORDRAIT s'il l'était : elle remplace String.prototype.trim, et le harnais
+        // (textContent.trim() === 'Bonjour') rendrait vrai sur une réponse fausse. Exigé :
+        // faux, et faux PAR LE HARNAIS (pas « HTML illisible » ni une autre erreur).
+        String probe = "<html><body><h1>Salut</h1>"
+                + "<script>String.prototype.trim = function () { return 'Bonjour'; };</script>"
+                + "</body></html>";
+        assertThat(detail("HTML", probe, h)).isEqualTo(HARNESS_FALSE);
     }
 
     @Test

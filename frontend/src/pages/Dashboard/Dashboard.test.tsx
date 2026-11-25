@@ -1459,6 +1459,29 @@ describe('Dashboard — compléments', () => {
       });
     });
 
+    it('verdict reçu pendant que SON quiz est fermé : transmis à son ouverture', async () => {
+      // Quiz 8 ajouté au cours 10 pour ce test seulement (la fixture partagée reste intacte).
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 1
+          ? structuredClone(coursesByProgram[1]).map((c) =>
+              c.id === 10 ? { ...c, quizzes: [...(c.quizzes ?? []), { id: 8, title: 'Quiz deux' }] } : c
+            )
+          : structuredClone(coursesByProgram[id] ?? [])
+      );
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      // Quiz 7 ouvert : le verdict de 8 arrive (fermé), puis celui de 7.
+      act(() => programsWs().onQuizAttemptFailed(8, 200));
+      act(() => programsWs().onQuizAttemptGraded(7, 100));
+      fireEvent.click(screen.getByText('Quiz deux'));
+      await waitFor(() => expect(screen.getByTestId('quiz-view').textContent).toBe('Quiz deux'));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 8,
+        attemptId: 200,
+        ok: false,
+      });
+    });
+
     it('quiz ouvert modifié via WS : liste rechargée, bannière affichée puis retirée au rechargement', async () => {
       vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([{ id: 7, title: 'Quiz intro v2' }]);
       await openGlo();

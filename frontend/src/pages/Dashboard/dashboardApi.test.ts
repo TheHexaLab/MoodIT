@@ -391,18 +391,23 @@ describe('submitQuiz', () => {
     expect((error as SubmissionRejectedError).reason).toBe('regrading');
   });
 
-  it('409 texte (tentative unique déjà consommée) → refus définitif « déjà soumis », sans attente', async () => {
-    mockedApiFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      text: async () => 'Quiz already submitted',
-    } as Response);
+  it.each([
+    ['texte exact de core', 'Quiz already submitted'],
+    ['texte exact entouré d’espaces et de sauts de ligne', '  Quiz already submitted\n'],
+  ])('409 %s (tentative unique déjà consommée) → refus définitif « déjà soumis », sans attente', async (_case, body) => {
+    mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 409, text: async () => body } as Response);
     const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SubmissionRejectedError);
     expect((error as SubmissionRejectedError).reason).toBe('alreadySubmitted');
   });
 
   it.each([
+    // Autre 409 texte de core (GlobalExceptionHandler.handleDataIntegrity) : à réessayer.
+    ['texte d’une contrainte', 'Contrainte non respectée : cette valeur existe déjà ou est invalide.'],
+    ['espaces seuls', '   '],
+    ['JSON tableau', '[]'],
+    ['JSON chaîne', '"x"'],
+    ['JSON nombre', '42'],
     ['JSON d’une autre cause', '{"cause":"autre"}'],
     ['JSON illisible', '{pas du json'],
     ['JSON null', 'null'],

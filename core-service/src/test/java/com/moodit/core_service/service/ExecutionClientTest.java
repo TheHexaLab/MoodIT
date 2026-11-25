@@ -17,14 +17,29 @@ import org.junit.jupiter.api.Test;
  * Client de correction (execution-service, endpoint interne) : appel avec le jeton, verdicts dans
  * l'ordre des harnais ; {@code null} sur une panne ordinaire, exception dédiée sur un 502
  * « sans_verdict » (comptée par étudiant et par quiz) ; nouveaux essais limités dans le temps tant
- * que le service est injoignable, puis interruption à l'arrêt ({@code GradingInterruptedException}) ;
- * délai de lecture par unité d'appel, attente d'une place comprise, plafonné par le budget du serveur
- * (interprétés) ou par le mur du conteneur (compilés) (#31, #216, #116). Mini serveur HTTP (JDK) en
- * guise d'execution-service.
+ * que le service est injoignable ({@code null} une fois la fenêtre écoulée), et, si core s'arrête
+ * pendant une pause, {@code GradingInterruptedException} ; délai de lecture par unité pour les
+ * interprétés (attente de file comprise, plafonné par le budget du serveur) et, pour les compilés,
+ * une seule attente de file plus le miroir du mur, plafonné par celui-ci (#31, #216, #116). Mini
+ * serveur HTTP (JDK) en guise d'execution-service.
  */
 class ExecutionClientTest {
 
     private static final String TOKEN = "jeton-interne-de-test";
+
+    /**
+     * Cycle de vie d'un conteneur HORS mur, écrit terme à terme d'après DockerSandbox.run
+     * (execution-service) : 7 appels au démon (info, create, copie, start, exitCodeIfStopped,
+     * oomKilled, suppression), chacun borné par CONNECTION_TIMEOUT (5 s) + RESPONSE_TIMEOUT
+     * (60 s), plus logReadTimeout (30 s) = 485 s.
+     */
+    private static final long LIFECYCLE = 7 * (5_000 + 60_000) + 30_000;
+
+    /**
+     * Unité interprétée avec les réglages des tests (attente de file 15 s, per-test-timeout-ms
+     * 20 s) : file + max(20 s, 10 s + 5 s) + 75 s de mur du runner + cycle de vie = 595 s.
+     */
+    private static final long PER_UNIT = 15_000 + 20_000 + 75_000 + LIFECYCLE;
     private static final List<ExecutionClient.Harness> TWO_HARNESSES = List.of(
             new ExecutionClient.Harness("cas A", "assert A", 2),
             new ExecutionClient.Harness("cas B", "assert B", 1));
@@ -142,13 +157,14 @@ class ExecutionClientTest {
         // readTimeoutMs pour un budget de 300 ms face à un stub qui répond en 1,5 s.
         ExecutionClient client = client("http://localhost:1", 1, 1, 1);
         // Interprété, une unité : mur du mode exec (temps limite par défaut 10 s + 75 s de
-        // WALL_OVERHEAD_MS) + 35 s de cycle de vie du conteneur, hors mur côté serveur.
+        // WALL_OVERHEAD_MS) + cycle de vie du conteneur hors mur (485 s), quels que soient les
+        // réglages : il ne dépend que des bornes d'appel au démon d'execution-service.
         assertThat(client.readTimeoutMs("Python", 1, null))
-                .isGreaterThanOrEqualTo(10_000 + 75_000 + 35_000);
+                .isGreaterThanOrEqualTo(10_000 + 75_000 + LIFECYCLE);
         // Java, 3 cas à trois compilations chacun : 30 s + 3 × (10 + 10 + 3 × 90 + 5) = 915 s,
-        // donc le mur du serveur PLAFONNÉ à 15 min, + 35 s de cycle de vie du conteneur.
+        // donc le mur du serveur PLAFONNÉ à 15 min, + une fois le cycle de vie du conteneur.
         assertThat(client.readTimeoutMs("Java", 4, null))
-                .isGreaterThanOrEqualTo(15 * 60_000 + 35_000);
+                .isGreaterThanOrEqualTo(15 * 60_000 + LIFECYCLE);
     }
 
     @Test
@@ -158,11 +174,12 @@ class ExecutionClientTest {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // Par unité : attente de file (15 s) + max(20 s, temps limite + 5 s) + 75 s de mur
-        // du runner (miroir de WALL_OVERHEAD_MS) + 35 s de cycle de vie du conteneur
-        // (création, copie, démarrage, collecte des logs — hors mur côté serveur).
-        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + 145_000);
-        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * 145_000);
-        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + 145_000);
+        // du runner (miroir de WALL_OVERHEAD_MS) + cycle de vie du conteneur hors mur (LIFECYCLE).
+        // Deux unités au plus : au-delà, le plafond du budget serveur mord (cf.
+        // readTimeout_cappedByServerBudget).
+        assertThat(client.readTimeoutMs("Python", 1, null)).isEqualTo(10_000 + PER_UNIT);
+        assertThat(client.readTimeoutMs("Python", 2, null)).isEqualTo(10_000 + 2 * PER_UNIT);
+        assertThat(client.readTimeoutMs("Python", 0, null)).isEqualTo(10_000 + PER_UNIT);
     }
 
     @Test
@@ -172,9 +189,9 @@ class ExecutionClientTest {
 
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
         assertThat(client.readTimeoutMs("Python", 1, 60_000))
-                .isEqualTo(10_000 + (65_000 + 75_000 + 35_000 + 15_000));
+                .isEqualTo(10_000 + (65_000 + 75_000 + LIFECYCLE + 15_000));
         // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
-        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 145_000);
+        assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + PER_UNIT);
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
         // (N + 2 canaris) × (run + 10 s de marge + les COMPILATIONS du cas + 5 s d'inventaire
         // `javap`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
@@ -188,35 +205,35 @@ class ExecutionClientTest {
         // question Java à plusieurs cas lents sera notée partiellement (verdicts « Non évalué »,
         // comportement dégradé documenté), jamais tuée au mur.
         assertThat(client.readTimeoutMs("Java", 4, 60_000))
-                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + LIFECYCLE);
         // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
         // 30 s + 3 × (10 + 10 + 270 + 5) = 915 s : plafonné de justesse.
         assertThat(client.readTimeoutMs("Java", 4, 1_000))
-                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + LIFECYCLE);
         // Nom de langage normalisé comme compiled()/vmLanguage() — la casse, par « Java »
         // ci-dessus, et les espaces ici : « java » entouré d'espaces garde ses TROIS
         // compilations (915 s → plafonné). Sans le trim, il retomberait à deux :
         // 30 s + 3 × (10 + 10 + 180 + 5) = 645 s, un miroir plus court que le mur réel (#216).
         assertThat(client.readTimeoutMs(" java ", 4, 1_000))
-                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + LIFECYCLE);
         // Go : DEUX compilations par cas, et non trois — 795 s, sous le plafond.
         assertThat(client.readTimeoutMs("Go", 4, 60_000))
                 .isEqualTo(10_000 + 15_000 + 30_000
-                        + 3 * (60_000 + 10_000 + 2 * 90_000 + 5_000) + 5_000 + 35_000);
+                        + 3 * (60_000 + 10_000 + 2 * 90_000 + 5_000) + 5_000 + LIFECYCLE);
         // C et C++ : + 30 s d'OUTILS par cas (sondes des noms réservés, `nm`) et + 10 s de
         // préprocesseur par job, miroir de toolsPerCaseMs/toolsPerJobMs de DockerEvaluator —
         // 30 + 10 + 3 × (10 + 10 + 180 + 5 + 30) = 745 s, sous le plafond.
         long cWall = 30_000 + 10_000 + 3 * (10_000 + 10_000 + 2 * 90_000 + 5_000 + 30_000);
         assertThat(client.readTimeoutMs("C++", 4, 10_000))
-                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + LIFECYCLE);
         assertThat(client.readTimeoutMs(" c ", 4, 10_000))
-                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + cWall + 5_000 + LIFECYCLE);
         // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
         assertThat(client.readTimeoutMs("Java", 202, 60_000))
-                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + LIFECYCLE);
         // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
         assertThat(client.readTimeoutMs("TypeScript", 2, null))
-                .isEqualTo(10_000 + 2 * 145_000);
+                .isEqualTo(10_000 + 2 * PER_UNIT);
     }
 
     @Test
@@ -230,17 +247,18 @@ class ExecutionClientTest {
         // au-delà, les harnais restants ne sont plus lancés. Le client plafonne au même budget,
         // PLUS une unité — l'échéance est consultée avant chaque harnais, donc celui qui vient de
         // partir va au bout ; sans ce terme, core renoncerait avant le serveur (#216).
-        long perUnit = 145_000;
+        // L'unité de dépassement porte le cycle de vie COMPLET de son conteneur : le budget
+        // serveur ne borne que le lancement des harnais, pas la fin de celui qui est en vol.
+        long perUnit = PER_UNIT;
         assertThat(client.readTimeoutMs("Python", 100, null))
                 .isEqualTo(10_000 + 15 * 60_000 + perUnit);
         // SQL : deux unités par harnais (phases isolées), donc deux unités de dépassement.
         assertThat(client.readTimeoutMs("sql", 200, null))
                 .isEqualTo(10_000 + 15 * 60_000 + 2 * perUnit);
-        // Sous le budget, rien ne change : la formule par unité reste la référence.
-        assertThat(client.readTimeoutMs("Python", 5, null)).isEqualTo(10_000 + 5 * perUnit);
-        // Bascule : le plafond ne mord qu'au-delà de (budget + 1 unité) / unité ≈ 7,2 unités.
-        assertThat(client.readTimeoutMs("Python", 7, null)).isEqualTo(10_000 + 7 * perUnit);
-        assertThat(client.readTimeoutMs("Python", 8, null))
+        // Bascule : le plafond ne mord qu'au-delà de (budget + 1 unité) / unité ≈ 2,5 unités
+        // (595 s par unité avec ces réglages) ; en deçà, la formule par unité reste la référence.
+        assertThat(client.readTimeoutMs("Python", 2, null)).isEqualTo(10_000 + 2 * perUnit);
+        assertThat(client.readTimeoutMs("Python", 3, null))
                 .isEqualTo(10_000 + 15 * 60_000 + perUnit);
     }
 
@@ -253,12 +271,12 @@ class ExecutionClientTest {
         ExecutionClient released = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, 15_000, 30 * 60_000);
         assertThat(released.readTimeoutMs("Python", 100, null))
-                .isEqualTo(10_000 + 30 * 60_000 + 145_000);
+                .isEqualTo(10_000 + 30 * 60_000 + PER_UNIT);
         // Et un budget serveur ABAISSÉ raccourcit le miroir d'autant (5 min).
         ExecutionClient tight = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, 15_000, 5 * 60_000);
         assertThat(tight.readTimeoutMs("Python", 100, null))
-                .isEqualTo(10_000 + 5 * 60_000 + 145_000);
+                .isEqualTo(10_000 + 5 * 60_000 + PER_UNIT);
     }
 
     /** Port local où RIEN n'écoute : connexion refusée, comme execution-service en redémarrage. */

@@ -448,10 +448,14 @@ export class ExecutionBusyError extends Error {
 }
 
 /**
- * Soumission REFUSÉE par le serveur (HTTP 400, ou 413 au gateway) : réponse mal formée, ou code soumis au-delà de
- * la taille acceptée (#116). Rien n'est enregistré et la tentative n'est pas consommée ; le
- * message du serveur dit quoi corriger (« Question 2 : le code soumis dépasse … »). Un message
- * générique « réessayez » faisait renvoyer la même réponse, refusée à chaque fois.
+ * Soumission REFUSÉE par le serveur : renvoyer la même réponse tout de suite serait refusé de
+ * nouveau, d'où aucun « Réessayer ». Rien n'est enregistré par CET envoi.
+ * - 400 : réponse mal formée, ou code au-delà de la taille acceptée (#116) ; le message du
+ *   serveur dit quoi corriger (« Question 2 : le code soumis dépasse … ») ;
+ * - 413 (gateway, raison `tooLarge`) : corps trop volumineux ;
+ * - 409 « relance » (raison `regrading`) : refus temporaire, à renvoyer plus tard ;
+ * - 409 « déjà soumis » (raison `alreadySubmitted`) : la tentative unique est déjà consommée
+ *   (autre onglet…) ; la vue rouvre son résumé.
  */
 export class SubmissionRejectedError extends Error {
   /**

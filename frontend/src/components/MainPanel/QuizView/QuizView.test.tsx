@@ -49,6 +49,7 @@ interface RenderOpts {
   staleNotice?: boolean;
   onReloadStale?: () => void;
   onSubmitQuiz?: ReturnType<typeof vi.fn>;
+  labels?: React.ComponentProps<typeof QuizView>['labels'];
 }
 
 function renderView(opts: RenderOpts = {}) {
@@ -72,6 +73,7 @@ function renderView(opts: RenderOpts = {}) {
       onSubmitQuiz={onSubmitQuiz as SubmitQuizHandler | undefined}
       staleNotice={opts.staleNotice ?? false}
       onReloadStale={onReloadStale}
+      labels={opts.labels}
     />
   );
   return { ...utils, quiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, onReloadStale };
@@ -222,11 +224,28 @@ describe('QuizView — pied de navigation', () => {
     expect(Boolean(screen.queryByRole('button', { name: 'Réessayer' }))).toBe(retryOffered);
   });
 
+  it('413 du gateway : libellé « trop volumineux » de la vue, sans « Réessayer »', async () => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw new SubmissionRejectedError('', 'tooLarge');
+    });
+    // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+    renderView({ onSubmitQuiz, labels: { view: { submitTooLarge: 'TROP_GROS_VUE' } } });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText('TROP_GROS_VUE')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+  });
+
   it('409 « relance » : message de recorrection, sans « Réessayer », réponses gardées en passation', async () => {
     const onSubmitQuiz = vi.fn(async () => {
       throw new SubmissionRejectedError('', 'regrading');
     });
-    renderView({ onSubmitQuiz });
+    // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+    renderView({ onSubmitQuiz, labels: { view: { submitRegrading: 'RELANCE_VUE' } } });
     await waitLoaded();
     fireEvent.click(screen.getByText('A'));
     fireEvent.click(screen.getByText('Suivant'));
@@ -234,13 +253,7 @@ describe('QuizView — pied de navigation', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
     });
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.'
-        )
-      ).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText('RELANCE_VUE')).toBeTruthy());
     expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
     expect(screen.getByText('Question trois')).toBeTruthy();
     expect(screen.queryByText('Correction en cours', { exact: false })).toBeNull();
@@ -270,6 +283,8 @@ describe('QuizView — pied de navigation', () => {
         onSubmitQuiz={vi.fn(async () => {
           throw new SubmissionRejectedError('', 'alreadySubmitted');
         })}
+        // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+        labels={{ view: { submitAlreadySubmitted: 'DEJA_VUE' } }}
       />
     );
     await waitLoaded();
@@ -278,7 +293,7 @@ describe('QuizView — pied de navigation', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
     });
-    await waitFor(() => expect(screen.getByText('Ce quiz a déjà été soumis.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('DEJA_VUE')).toBeTruthy());
     expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
     await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
   });

@@ -284,11 +284,14 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > clone (`.env.docker` chargé) :
 >
 > ```bash
-> ( set -euo pipefail   # un pg_dump en échec ne doit pas laisser un dump tronqué passer pour bon
+> # Un pg_dump en échec ne doit pas laisser un dump tronqué passer pour bon : sortie non nulle,
+> # et le fichier partiel est effacé.
+> ( set -euo pipefail
+> f="precheck-$(date +%Y%m%d-%H%M%S).sql.gz"
 > { docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --schema-only "$POSTGRES_DB" &&
 >   docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" --data-only --disable-triggers \
 >     -t quiz -t question -t language -t test_case -t flyway_schema_history "$POSTGRES_DB"
-> } | gzip > precheck-$(date +%Y%m%d-%H%M%S).sql.gz
+> } | gzip > "$f" || { rm -f "$f"; exit 1; }
 > )
 > ```
 >

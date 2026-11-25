@@ -52,6 +52,13 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Relance d'une tentative qui n'est pas « à revoir » → 409, message en corps")
+    void attemptNotReviewable_409() {
+        assertResponse(handler.handleAttemptNotReviewable(new AttemptNotReviewableException()),
+                HttpStatus.CONFLICT, "Attempt is not awaiting review");
+    }
+
+    @Test
     @DisplayName("Correction déjà en cours → 409 en JSON, cause « en_cours » et message français")
     void gradingInProgress_409Json() {
         ResponseEntity<java.util.Map<String, String>> r =

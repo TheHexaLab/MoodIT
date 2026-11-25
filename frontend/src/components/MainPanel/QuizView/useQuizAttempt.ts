@@ -242,8 +242,9 @@ export interface QuizAttemptApi {
   submitting: boolean;
   submitError: string | null;
   /**
-   * L'erreur de soumission est un REFUS du serveur (400, 413) : renvoyer les mêmes réponses
-   * serait refusé de nouveau, l'écran ne propose donc pas « Réessayer ».
+   * L'erreur de soumission est un REFUS du serveur (400, 413, 409 « relance » ou « déjà soumis »,
+   * cf. SubmissionRejectedError) : renvoyer les mêmes réponses tout de suite serait refusé de
+   * nouveau, l'écran ne propose donc pas « Réessayer ».
    */
   submitRejected: boolean;
   /** Efface l'erreur de soumission (fermeture du popup). */
@@ -842,7 +843,8 @@ export function useQuizAttempt({
       if (usingServer) clearPending(initialQuiz.id);
       if (!mountedRef.current) return;
       // Refus (400, 413, 409 « relance » ou « déjà soumis ») : le message dit quoi faire,
-      // « réessayez » non. Le brouillon de passation reste en place (rien n'est enregistré).
+      // « réessayez » non. Le brouillon de passation reste en place (rien n'est enregistré par cet
+      // envoi) — sauf « déjà soumis », où `reload` le jette pour ouvrir la tentative consommée.
       if (e instanceof SubmissionRejectedError) {
         setSubmitRejected(true);
         setSubmitError(

@@ -653,7 +653,10 @@ class BoxExhaustedTest(unittest.TestCase):
         try:
             paths = []
             for k in range(3_000):
-                path = os.path.join(root, "d%04d" % k)
+                # Noms longs : 3 000 chemins de plus de 60 octets franchissent RM_BATCH_BYTES
+                # (128 Kio) sous Linux comme sous Windows — avec des noms courts, un seul lot
+                # suffisait sous Linux et le découpage n'était vérifié qu'à vide.
+                path = os.path.join(root, "d%04d" % k + "x" * 60)
                 os.mkdir(path)
                 paths.append(path)
             leaf = os.path.join(root, "fichier")
@@ -665,11 +668,12 @@ class BoxExhaustedTest(unittest.TestCase):
             with unittest.mock.patch.object(supervisor, "RM", sys.executable), \
                     unittest.mock.patch.object(supervisor.subprocess, "run", fake_run):
                 supervisor.remove_trees(paths + [leaf])
-            # rm simulé (rien supprimé) : un lancement par LOT (deux ou trois pour 3 000 chemins
-            # longs, et non 3 000), puis le repli itératif finit le travail ; le fichier, lui, est
-            # retiré directement.
+            # rm simulé (rien supprimé) : un lancement par LOT — au moins deux, au plus quelques-uns
+            # pour 3 000 chemins longs, et non 3 000 —, puis le repli itératif finit le travail ;
+            # le fichier, lui, est retiré directement.
             self.assertEqual(len(supervisor.rm_batches(paths)), len(calls))
-            self.assertLessEqual(len(calls), 3)
+            self.assertGreaterEqual(len(calls), 2)
+            self.assertLessEqual(len(calls), 4)
             self.assertEqual([], os.listdir(root))
         finally:
             shutil.rmtree(root, ignore_errors=True)

@@ -51,10 +51,11 @@ import org.springframework.transaction.TransactionDefinition;
  * Soumission ASYNCHRONE d'une tentative ({@link QuizService#submitQuiz}) et correction en tâche de
  * fond ({@link QuizService#gradeAttempt}) : tentative unique (409), numérotation des reprises,
  * persistance des réponses brutes, évènement de correction, exécution des harnais, finalisation
- * « done » + push WS, et suppression du pending (jamais coincé) en cas d'échec — sauf deux cas :
+ * « done » + push WS, et suppression du pending (jamais coincé) en cas d'échec — sauf trois cas :
  * une correction INTERROMPUE par l'arrêt de core laisse la tentative pending (reprise au
- * démarrage), et le plafond d'échecs sans verdict la GARDE « à revoir » (#116, S4 : compte par
- * étudiant et par quiz, relance par l'enseignant, retour à revoir si la relance échoue). Couvre
+ * démarrage) ; le plafond atteint la GARDE « à revoir » (échec sans verdict compté par étudiant et
+ * par quiz, ou toute panne sur un quiz sans reprise) ; une relance de l'enseignant en échec revient
+ * « à revoir » par son marqueur, quel que soit le compte (#116, S4). Couvre
  * aussi les lectures dérivées : historique (getMyAttempts, tentatives à revoir comprises), liste
  * des tentatives à revoir et agrégat MCP (getCourseQuizStats).
  */

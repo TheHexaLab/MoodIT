@@ -606,10 +606,10 @@ describe('réconciliation via polling de secours', () => {
   it.each([
     // Ancien format (écrit par la version précédente), âge inconnu : tenu pour expiré. Les 30 min
     // complètes relançaient, à chaque retour, l'attente d'une tentative peut-être supprimée.
-    ['sans date (ancien format) → « non confirmée » tout de suite', undefined, 0],
+    ['sans date (ancien format) → « non confirmée » tout de suite', undefined, false],
     // Horloge qui a reculé : ramené à maintenant, l'attente dure le plafond et pas davantage.
-    ['daté dans le futur → 30 min depuis maintenant', 24 * 3_600_000, 31 * 60_000],
-  ])('marqueur %s', async (_case, ahead, wait) => {
+    ['daté dans le futur → 30 min depuis maintenant', 24 * 3_600_000, true],
+  ])('marqueur %s', async (_case, ahead, waits) => {
     vi.useFakeTimers();
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
@@ -627,10 +627,13 @@ describe('réconciliation via polling de secours', () => {
       })
     );
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    if (wait > 0) {
-      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    if (waits) {
+      // Toujours en attente à 29 min 30 s (ni expiré, ni conclu)…
+      await act(async () => { await vi.advanceTimersByTimeAsync(29 * 60_000 + 30_000); });
       expect(result.current.reconciling).toBe(true);
-      await act(async () => { await vi.advanceTimersByTimeAsync(wait); });
+      expect(result.current.submitError).toBeNull();
+      // … conclu peu après les 30 min (dernier sondage lent compris).
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     }
     await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
     expect(result.current.reconciling).toBe(false);

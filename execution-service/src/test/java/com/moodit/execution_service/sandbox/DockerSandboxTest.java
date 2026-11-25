@@ -959,7 +959,7 @@ class DockerSandboxTest {
     }
 
     @Test
-    void memory_below_docker_minimum_refused_at_startup() {
+    void memory_outside_docker_bounds_refused_at_startup() {
         // 0 = « illimité » pour Docker, négatif = 502 à chaque notation : refusé au démarrage.
         for (long memoryMb : new long[] {0, -1, DockerSandbox.MIN_MEMORY_MB - 1}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -995,10 +995,11 @@ class DockerSandboxTest {
     }
 
     @Test
-    void cpus_not_strictly_positive_refused_at_startup() {
-        // 0 = « illimité » pour Docker. Sous 10 000 nanoCPU (1e-9), le quota CFS vaut 0 :
-        // aucune borne non plus ; sous 0,01 CPU (0,005), il passe sous 1 ms et le noyau refuse
-        // chaque démarrage (EINVAL, 502 à chaque notation).
+    void cpus_below_the_cfs_floor_refused_at_startup() {
+        // Plancher : 0,01 CPU (10 000 000 nanoCPU, quota CFS de 1 ms). 0 = « illimité » pour
+        // Docker ; sous 10 000 nanoCPU (1e-5 CPU ; ex. 1e-9), le quota CFS vaut 0 : aucune borne
+        // non plus ; entre les deux (ex. 0,005), il passe sous 1 ms et le noyau refuse chaque
+        // démarrage (EINVAL, 502 à chaque notation).
         for (double cpus : new double[] {0, -1, 1e-10, 1e-9, 0.005, 0.0099,
                 Double.NaN, Double.POSITIVE_INFINITY}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -1025,6 +1026,132 @@ class DockerSandboxTest {
         assertThat(host.getValue().getMemory()).isEqualTo(6L * 1024 * 1024);
         assertThat(host.getValue().getPidsLimit()).isEqualTo(1L);
         assertThat(host.getValue().getNanoCPUs()).isEqualTo(DockerSandbox.MIN_NANO_CPUS);
+    }
+
+    /** Fait répondre {@code infoCmd} du démon mocké avec {@code ncpu} CPU. */
+    private static com.github.dockerjava.api.command.InfoCmd hostCpus(
+            com.github.dockerjava.api.DockerClient docker, Integer ncpu) {
+        var infoCmd = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InfoCmd.class);
+        var info = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Info.class);
+        org.mockito.Mockito.when(docker.infoCmd()).thenReturn(infoCmd);
+        org.mockito.Mockito.when(infoCmd.exec()).thenReturn(info);
+        org.mockito.Mockito.when(info.getNCPU()).thenReturn(ncpu);
+        return infoCmd;
+    }
+
+    @Test
+    void cpus_above_host_cpus_capped_once_at_first_use() {
+        // Le démon refuse à la création un NanoCPUs au-delà de ses CPU : SANDBOX_CPUS=2.0 sur
+        // un hôte à 1 vCPU donnait un 502 à chaque exécution. Plafonné à 1 CPU, lu UNE fois.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        var docker = dockerMock(create, remove, 0);
+        var infoCmd = hostCpus(docker, 1);
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 2.0);
+
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(DockerSandbox.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            sandbox.run("img", Map.of("job.json", "{}"), 5000);
+            sandbox.run("img", Map.of("job.json", "{}"), 5000);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        var host = org.mockito.ArgumentCaptor.forClass(com.github.dockerjava.api.model.HostConfig.class);
+        org.mockito.Mockito.verify(create, org.mockito.Mockito.times(2)).withHostConfig(host.capture());
+        assertThat(host.getAllValues()).extracting(com.github.dockerjava.api.model.HostConfig::getNanoCPUs)
+                .containsExactly(1_000_000_000L, 1_000_000_000L);
+        org.mockito.Mockito.verify(infoCmd, org.mockito.Mockito.times(1)).exec();
+        // Un seul avertissement de plafonnement pour deux exécutions (les autres WARN viennent
+        // de l'état OOMKilled, non simulé par le mock).
+        assertThat(appender.list)
+                .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
+                .extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .filteredOn(m -> m.contains("SANDBOX_CPUS"))
+                .singleElement().asString().contains("plafonné à 1");
+    }
+
+    @Test
+    void cpus_within_host_cpus_kept() {
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        hostCpus(docker, 4);
+        assertThat(new DockerSandbox(docker, 512, 64, 2.0).effectiveNanoCpus(docker))
+                .isEqualTo(2_000_000_000L);
+        // Borne exacte : autant de CPU que l'hôte, gardé.
+        var exact = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        hostCpus(exact, 2);
+        assertThat(new DockerSandbox(exact, 512, 64, 2.0).effectiveNanoCpus(exact))
+                .isEqualTo(2_000_000_000L);
+    }
+
+    @Test
+    void unreadable_host_cpus_keeps_configured_value_and_retries_after_a_delay() {
+        // Lecture en échec (démon muet sur /info) : la valeur configurée est gardée, jamais une
+        // absence de borne. L'échec est RETENU CPU_READ_RETRY : sans cela, chaque exécution
+        // repayait un délai de réponse complet, hors du miroir de délai de core.
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var infoCmd = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InfoCmd.class);
+        org.mockito.Mockito.when(docker.infoCmd()).thenReturn(infoCmd);
+        org.mockito.Mockito.when(infoCmd.exec()).thenThrow(new RuntimeException("démon muet"));
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 2.0);
+        long[] now = {1_000L};
+        sandbox.nanoClock = () -> now[0];
+
+        assertThat(sandbox.effectiveNanoCpus(docker)).isEqualTo(2_000_000_000L);
+        now[0] += DockerSandbox.CPU_READ_RETRY.toNanos() - 1;   // juste avant l'échéance
+        assertThat(sandbox.effectiveNanoCpus(docker)).isEqualTo(2_000_000_000L);
+        org.mockito.Mockito.verify(infoCmd, org.mockito.Mockito.times(1)).exec();
+
+        now[0] += 1;   // échéance atteinte : nouvelle tentative, qui réussit cette fois
+        var info = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Info.class);
+        org.mockito.Mockito.when(info.getNCPU()).thenReturn(1);
+        org.mockito.Mockito.doReturn(info).when(infoCmd).exec();
+        assertThat(sandbox.effectiveNanoCpus(docker)).isEqualTo(1_000_000_000L);
+        org.mockito.Mockito.verify(infoCmd, org.mockito.Mockito.times(2)).exec();
+
+        // Réponse sans NCPU : même règle que l'échec (valeur gardée).
+        var noCount = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        hostCpus(noCount, null);
+        assertThat(new DockerSandbox(noCount, 512, 64, 2.0).effectiveNanoCpus(noCount))
+                .isEqualTo(2_000_000_000L);
+    }
+
+    @Test
+    void concurrent_runs_never_wait_on_a_slow_host_cpu_read() throws Exception {
+        // /info lent : UNE seule lecture, hors verrou. Une exécution concurrente prend la valeur
+        // configurée SANS attendre (sous synchronized, elle payait le délai de l'autre, puis le
+        // sien — jusqu'à N × 65 s pour la dernière).
+        var docker = org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
+        var infoCmd = org.mockito.Mockito.mock(com.github.dockerjava.api.command.InfoCmd.class);
+        var info = org.mockito.Mockito.mock(com.github.dockerjava.api.model.Info.class);
+        org.mockito.Mockito.when(docker.infoCmd()).thenReturn(infoCmd);
+        org.mockito.Mockito.when(info.getNCPU()).thenReturn(1);
+        java.util.concurrent.CountDownLatch reading = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.when(infoCmd.exec()).thenAnswer(inv -> {
+            reading.countDown();
+            release.await();
+            return info;
+        });
+        DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 2.0);
+
+        var first = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> sandbox.effectiveNanoCpus(docker));
+        assertThat(reading.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        // Pendant la lecture : réponse IMMÉDIATE (au plus 5 s, la lecture, elle, ne rend pas),
+        // valeur configurée.
+        var second = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> sandbox.effectiveNanoCpus(docker));
+        assertThat(second.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(2_000_000_000L);
+        release.countDown();
+        assertThat(first.get(10, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1_000_000_000L);
+        // Lue une fois, puis servie depuis le cache.
+        assertThat(sandbox.effectiveNanoCpus(docker)).isEqualTo(1_000_000_000L);
+        org.mockito.Mockito.verify(infoCmd, org.mockito.Mockito.times(1)).exec();
     }
 
     @Test

@@ -1,7 +1,10 @@
 # Runner de notation Go (#116) : toolchain Go (go build) + superviseur.
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
 # /box, /tmp et /dev/shm (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
-# cgo inutile aux harnais et surface en moins pour la compilation ROOT de sources non fiables.
+# cgo est coupé par le SUPERVISEUR (CGO_ENABLED=0 dans base_env et student_build_env) pour toute
+# compilation qu'il lance — le code soumis compile sous l'UID étudiant, le noteur sous root : un
+# préambule cgo pouvait inclure le noteur. L'ENV ci-dessous ne survit pas à l'env= de Popen ;
+# il ne sert qu'aux commandes lancées à la main dans l'image (docker run … go build).
 FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
 
 ENV CGO_ENABLED=0

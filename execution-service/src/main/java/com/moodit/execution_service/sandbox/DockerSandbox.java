@@ -254,6 +254,90 @@ public class DockerSandbox {
         this.responseTimeout = responseTimeout;
     }
 
+    /**
+     * NanoCPUs appliqués, plafonnés au nombre de CPU de l'hôte (lu une fois, au premier usage du
+     * démon) ; {@code null} tant que la lecture n'a pas réussi.
+     */
+    private volatile Long cappedNanoCpus;
+    /** Une lecture de {@code /info} est en cours : les autres exécutions ne l'attendent pas. */
+    private final AtomicBoolean cpuReadInFlight = new AtomicBoolean();
+    /** Échéance ({@link #nanoClock}) avant laquelle une lecture en échec n'est pas retentée. */
+    private volatile long cpuReadRetryAtNs;
+    /** Une lecture a échoué : {@link #cpuReadRetryAtNs} s'applique. */
+    private volatile boolean cpuReadFailed;
+    /** Délai avant de retenter une lecture de {@code /info} en échec. */
+    static final Duration CPU_READ_RETRY = Duration.ofSeconds(60);
+    /** Horloge monotone ; remplaçable par les tests seulement. */
+    java.util.function.LongSupplier nanoClock = System::nanoTime;
+
+    /**
+     * Le démon REFUSE à la création un NanoCPUs au-delà de ses propres CPU (« Range of CPUs is
+     * from 0.01 to N.00 ») : avec SANDBOX_CPUS=2.0 sur un hôte à 1 vCPU, chaque exécution
+     * répondait 502. Plafonner à NCPU garde une limite effective — tout l'hôte, au lieu d'un
+     * refus. Lu au premier usage et pas au démarrage : le service doit démarrer sans démon
+     * joignable.
+     *
+     * <p>Au plus UN appel {@code /info} par exécution, et jamais d'attente sur celui d'une
+     * autre : une seule lecture à la fois, HORS verrou ; pendant qu'elle court, les autres
+     * exécutions prennent la valeur configurée. En échec (démon muet sur {@code /info},
+     * réponse sans NCPU), la valeur configurée est gardée et l'échec est retenu
+     * {@link #CPU_READ_RETRY} avant une nouvelle tentative : un démon qui ne répond pas ne
+     * coûte pas un délai de réponse complet à chaque exécution, en plus des appels que core
+     * compte dans son miroir de délai.
+     */
+    long effectiveNanoCpus(DockerClient docker) {
+        Long cached = cappedNanoCpus;
+        if (cached != null) {
+            return cached;
+        }
+        if (cpuReadFailed && nanoClock.getAsLong() - cpuReadRetryAtNs < 0) {
+            return nanoCpus;   // échec récent : pas de nouvelle tentative avant l'échéance
+        }
+        if (!cpuReadInFlight.compareAndSet(false, true)) {
+            return nanoCpus;   // une autre exécution lit déjà : ne pas l'attendre
+        }
+        try {
+            cached = cappedNanoCpus;   // lue par une exécution précédente entre-temps
+            if (cached != null) {
+                return cached;
+            }
+            Long read = readCappedNanoCpus(docker);
+            if (read == null) {
+                cpuReadRetryAtNs = nanoClock.getAsLong() + CPU_READ_RETRY.toNanos();
+                cpuReadFailed = true;
+                return nanoCpus;
+            }
+            cappedNanoCpus = read;
+            return read;
+        } finally {
+            cpuReadInFlight.set(false);
+        }
+    }
+
+    /** NanoCPUs plafonnés au nombre de CPU du démon, ou {@code null} si illisible. */
+    private Long readCappedNanoCpus(DockerClient docker) {
+        Integer hostCpus;
+        try {
+            hostCpus = docker.infoCmd().exec().getNCPU();
+        } catch (RuntimeException e) {
+            log.debug("Nombre de CPU du démon illisible ({}) : SANDBOX_CPUS gardé tel quel",
+                    e.getMessage());
+            return null;
+        }
+        if (hostCpus == null || hostCpus < 1) {
+            return null;
+        }
+        long hostNanos = hostCpus * 1_000_000_000L;
+        long effective = nanoCpus;
+        if (nanoCpus > hostNanos) {
+            log.warn("app.sandbox.cpus (SANDBOX_CPUS) = {} dépasse les {} CPU de l'hôte Docker : "
+                    + "plafonné à {} (le démon refuserait sinon chaque conteneur de notation)",
+                    nanoCpus / 1e9, hostCpus, hostCpus);
+            effective = hostNanos;
+        }
+        return effective;
+    }
+
     /** Plus petite mémoire de conteneur que Docker accepte (6 Mo). */
     static final long MIN_MEMORY_MB = 6;
     /** Plus grande mémoire dont la taille en octets tient dans un {@code long}. */
@@ -400,7 +484,12 @@ public class DockerSandbox {
      * du create, copie, start, puis après le mur {@code exitCodeIfStopped} et {@code oomKilled}),
      * le mur lui-même ({@code DockerEvaluator.MAX_WALL_MS}, 15 min), la lecture des journaux
      * (30 s) et six établissements de connexion ({@link #CONNECTION_TIMEOUT} : copie, start,
-     * wait, deux inspections, journaux) — soit 21 min 5 s ; 25 min laissent de la marge.
+     * wait, deux inspections, journaux) — soit 900 + 30 + 5 × 60 + 6 × 5 = 1 260 s, 21 min ;
+     * 25 min laissent de la marge. Décompte PRUDENT : les connexions de {@code /wait} et des
+     * journaux tombent déjà dans leurs attentes bornées (le mur, la lecture des journaux) et
+     * sont comptées deux fois. Des sept appels au démon hors mur que compte core, deux sortent
+     * de cette vie : {@code /info} ({@link #effectiveNanoCpus}) la PRÉCÈDE, et la suppression
+     * du {@code finally} la termine.
      */
     static final long ORPHAN_GRACE_MS = 25 * 60_000;
 
@@ -456,7 +545,7 @@ public class DockerSandbox {
                     .withMemory(memoryBytes)
                     .withMemorySwap(memoryBytes)
                     .withPidsLimit(pidsLimit)
-                    .withNanoCPUs(nanoCpus)
+                    .withNanoCPUs(effectiveNanoCpus(docker))
                     // Écritures de l'UID étudiant CONFINÉES aux trois tmpfs bornés ci-dessous
                     // (comptés dans la mémoire du conteneur) : les images verrouillent leurs
                     // répertoires monde-inscriptibles (/var/tmp, /go, cargo… — cf. Dockerfiles),

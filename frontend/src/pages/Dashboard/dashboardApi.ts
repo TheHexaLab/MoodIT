@@ -271,6 +271,12 @@ const SUBMISSION_IN_PROGRESS_CAUSE = 'en_cours';
  * tentative précédente (sans reprise, core répond « déjà soumis », en texte).
  */
 const SUBMISSION_REGRADING_CAUSE = 'relance';
+/**
+ * Corps EXACT (texte brut) du 409 de core pour une tentative unique déjà consommée
+ * (AlreadySubmittedException). Core émet d'autres 409 en texte (« Contrainte non respectée : … »,
+ * conflit d'écriture) : eux restent des échecs ordinaires, à réessayer.
+ */
+const ALREADY_SUBMITTED_BODY = 'Quiz already submitted';
 
 /**
  * Soumettre une tentative de façon ASYNCHRONE : le backend enregistre la tentative et répond
@@ -282,10 +288,11 @@ const SUBMISSION_REGRADING_CAUSE = 'relance';
  * - « relance » (quiz AVEC reprise : l'enseignant relance la correction de la tentative
  *   précédente) → `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente
  *   (l'id relancé est déjà connu, son verdict ne conclurait pas cet envoi) ;
- * - corps TEXTE (tentative unique déjà consommée — y compris pendant une relance, sur un quiz
- *   sans reprise) → `SubmissionRejectedError` de raison `alreadySubmitted` : refus définitif,
- *   la vue rouvre le résumé ;
- * - corps JSON d'une autre cause, ou vide → échec ordinaire.
+ * - texte EXACT `Quiz already submitted` (tentative unique déjà consommée — y compris pendant une
+ *   relance, sur un quiz sans reprise) → `SubmissionRejectedError` de raison `alreadySubmitted` :
+ *   refus définitif, la vue rouvre le résumé ;
+ * - tout autre 409 (autre texte, ex. « Contrainte non respectée : … » ; JSON d'une autre cause
+ *   ou non objet ; corps vide) → échec ordinaire, avec « Réessayer ».
  * 400 (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ;
  * 413 (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`.
  * Les raisons `tooLarge`, `regrading` et `alreadySubmitted` prennent leur texte dans les libellés
@@ -299,9 +306,9 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
   });
   if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
   if (res.status === 409) {
-    // Trois 409 de core (cf. JSDoc) : deux en JSON (cause), « déjà soumis » en texte brut. Un
-    // corps JSON d'une autre cause, ou vide, ne vaut ni « en cours » (30 min d'attente pour rien)
-    // ni « relance » ni « déjà soumis » : échec ordinaire.
+    // Trois 409 reconnus (cf. JSDoc) : deux en JSON (cause), « déjà soumis » par son texte EXACT.
+    // Tout autre corps ne vaut ni « en cours » (30 min d'attente pour rien), ni « relance », ni
+    // « déjà soumis » (un conflit de contrainte se réessaie) : échec ordinaire.
     const body = (await res.text().catch(() => '')).trim();
     let cause: unknown;
     try {
@@ -311,9 +318,7 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     }
     if (cause === SUBMISSION_IN_PROGRESS_CAUSE) throw new SubmissionInProgressError();
     if (cause === SUBMISSION_REGRADING_CAUSE) throw new SubmissionRejectedError('', 'regrading');
-    if (body !== '' && !body.startsWith('{') && body !== 'null') {
-      throw new SubmissionRejectedError('', 'alreadySubmitted');
-    }
+    if (body === ALREADY_SUBMITTED_BODY) throw new SubmissionRejectedError('', 'alreadySubmitted');
     throw new Error('Échec de la soumission du quiz');
   }
   if (res.status === 400) {

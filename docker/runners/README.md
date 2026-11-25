@@ -257,8 +257,8 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 
 ### Restes ouverts
 
-- **Pas de borne par utilisateur sur le chemin interne** (3 fils de correction de code dans core,
-  partagés). Au pire, une soumission tient une place le temps d'une compilation étudiante jusqu'à
+- **Pas de borne par utilisateur sur le chemin interne** (`QUIZ_CODE_GRADING_THREADS` fils de
+  correction de code dans core, partagés : 3 par défaut, 2 en prod, = `EXEC_MAX_CONCURRENT` − 1). Au pire, une soumission tient une place le temps d'une compilation étudiante jusqu'à
   90 s (deux fois si elle expire ou est tuée), puis, par cas, de la compilation du noteur
   (bouchons au maximum des bornes : jusqu'à ~32 s par cas mesurés (Go à cache froid, /box
   rempli ; ~16 s à vide)), des outils
