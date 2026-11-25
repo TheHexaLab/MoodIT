@@ -584,14 +584,22 @@ class DockerSandboxTest {
                 created * 1000L + DockerSandbox.ORPHAN_GRACE_MS)).isTrue();
         assertThat(DockerSandbox.removable(container("exited", created),
                 created * 1000L + DockerSandbox.ORPHAN_GRACE_MS - 1)).isFalse();
-        // Le délai couvre le plus long mur possible, journaux compris : lus sur les vraies
-        // valeurs (plafond du mur de DockerEvaluator, délai de lecture des journaux par défaut),
-        // pas recopiés — relever le mur sans relever ce délai doit faire échouer ce test.
+        // Le délai couvre la plus longue vie possible d'un conteneur, comptée depuis sa date de
+        // création chez le démon. Lus sur les vraies valeurs, pas recopiés : relever le mur, la
+        // lecture des journaux ou un délai du démon sans relever ce délai fait échouer ce test.
+        // Appels bornés par RESPONSE_TIMEOUT après la création (DockerSandbox.run) : réponse du
+        // create, copie, start, puis, au mur, exitCodeIfStopped et oomKilled. Le /wait n'a pas
+        // de délai de réponse (il est borné par le mur). Établissements de connexion après la
+        // création : copie, start, wait, deux inspections, journaux.
+        int responseBoundedCalls = 5;
+        int connections = 6;
         long logReadMs = new DockerSandbox(
                 org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class), 512, 64, 1.0)
                 .logReadTimeout.toMillis();
         assertThat(DockerSandbox.ORPHAN_GRACE_MS)
-                .isGreaterThan(DockerEvaluator.MAX_WALL_MS + logReadMs);
+                .isGreaterThan(DockerEvaluator.MAX_WALL_MS + logReadMs
+                        + responseBoundedCalls * DockerSandbox.RESPONSE_TIMEOUT.toMillis()
+                        + connections * DockerSandbox.CONNECTION_TIMEOUT.toMillis());
     }
 
     private static com.github.dockerjava.api.model.Container container(String state, long createdSeconds) {
@@ -728,7 +736,21 @@ class DockerSandboxTest {
         // depuis le VPS). Doublée par un cas d'intégration (sortie TCP refusée).
         assertThat(hostConfig.getNetworkMode()).isEqualTo("none");
         // Aucun montage hôte : les fichiers du job arrivent par docker cp (docker-outside-of-docker).
+        // Ni bind, ni montage déclaratif, ni volumes empruntés à un autre conteneur.
         assertThat(hostConfig.getBinds()).isNullOrEmpty();
+        assertThat(hostConfig.getMounts()).isNullOrEmpty();
+        assertThat(hostConfig.getVolumesFrom()).isNullOrEmpty();
+        // Aucun périphérique de l'hôte exposé.
+        assertThat(hostConfig.getDevices()).isNullOrEmpty();
+        // Jamais privilégié (toutes les capacités, tous les périphériques, seccomp et AppArmor
+        // levés : le cap-drop ci-dessous ne vaudrait plus rien).
+        assertThat(hostConfig.getPrivileged()).isNotEqualTo(Boolean.TRUE);
+        // Espaces de noms PRIVÉS (défaut du démon) : partager le PID, l'IPC ou l'espace
+        // utilisateur de l'hôte ou d'un autre conteneur (« host », « container:… ») ouvrirait
+        // ses processus, sa mémoire partagée ou ses UID au code soumis.
+        assertThat(hostConfig.getPidMode()).isNull();
+        assertThat(hostConfig.getIpcMode()).isNull();
+        assertThat(hostConfig.getUsernsMode()).isNull();
 
         // Capacités : tout retiré, puis le strict nécessaire au superviseur root.
         assertThat(hostConfig.getCapDrop()).containsExactly(com.github.dockerjava.api.model.Capability.ALL);
@@ -939,16 +961,24 @@ class DockerSandboxTest {
     @Test
     void memory_below_docker_minimum_refused_at_startup() {
         // 0 = « illimité » pour Docker, négatif = 502 à chaque notation : refusé au démarrage.
-        for (long memoryMb : new long[] {0, -1, DockerSandbox.MIN_MEMORY_MB - 1,
-                Long.MAX_VALUE / (1024 * 1024) + 1}) {
+        for (long memoryMb : new long[] {0, -1, DockerSandbox.MIN_MEMORY_MB - 1}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(
                             () -> new DockerSandbox("tcp://localhost:1", memoryMb, 512, 1.0))
                     .as("mémoire %d", memoryMb)
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("SANDBOX_MEMORY_MB");
+                    .hasMessageContaining("SANDBOX_MEMORY_MB")
+                    .hasMessageContaining("au moins 6 Mo");
         }
-        // Borne exacte acceptée.
+        // Au-delà, la taille en octets déborderait (négative) : message propre à cette borne.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new DockerSandbox(
+                        "tcp://localhost:1", DockerSandbox.MAX_MEMORY_MB + 1, 512, 1.0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("SANDBOX_MEMORY_MB")
+                .hasMessageContaining("au plus")
+                .hasMessageNotContaining("au moins");
+        // Bornes exactes acceptées.
         new DockerSandbox("tcp://localhost:1", DockerSandbox.MIN_MEMORY_MB, 512, 1.0);
+        new DockerSandbox("tcp://localhost:1", DockerSandbox.MAX_MEMORY_MB, 512, 1.0);
     }
 
     @Test
@@ -966,16 +996,20 @@ class DockerSandboxTest {
 
     @Test
     void cpus_not_strictly_positive_refused_at_startup() {
-        // 0 = « illimité » pour Docker ; une fraction qui s'arrondit à 0 nanoCPU aussi.
-        for (double cpus : new double[] {0, -1, 1e-10, Double.NaN, Double.POSITIVE_INFINITY}) {
+        // 0 = « illimité » pour Docker. Sous 10 000 nanoCPU (1e-9), le quota CFS vaut 0 :
+        // aucune borne non plus ; sous 0,01 CPU (0,005), il passe sous 1 ms et le noyau refuse
+        // chaque démarrage (EINVAL, 502 à chaque notation).
+        for (double cpus : new double[] {0, -1, 1e-10, 1e-9, 0.005, 0.0099,
+                Double.NaN, Double.POSITIVE_INFINITY}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(
                             () -> new DockerSandbox("tcp://localhost:1", 512, 512, cpus))
                     .as("CPU %s", cpus)
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("SANDBOX_CPUS");
+                    .hasMessageContaining("SANDBOX_CPUS")
+                    .hasMessageContaining("au moins 0,01");
         }
-        // Plus petite valeur représentable : un nanoCPU.
-        new DockerSandbox("tcp://localhost:1", 512, 512, 1e-9);
+        // Borne exacte acceptée : 0,01 CPU, soit un quota de 1 ms.
+        new DockerSandbox("tcp://localhost:1", 512, 512, 0.01);
     }
 
     @Test
@@ -983,14 +1017,14 @@ class DockerSandboxTest {
         // Les valeurs acceptées sont bien celles imposées au conteneur.
         var create = createCmdReturning("cid");
         var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
-        new DockerSandbox(dockerMock(create, remove, 0), 6, 1, 1e-9)
+        new DockerSandbox(dockerMock(create, remove, 0), 6, 1, 0.01)
                 .run("img", Map.of("job.json", "{}"), 5000);
         org.mockito.ArgumentCaptor<com.github.dockerjava.api.model.HostConfig> host =
                 org.mockito.ArgumentCaptor.forClass(com.github.dockerjava.api.model.HostConfig.class);
         org.mockito.Mockito.verify(create).withHostConfig(host.capture());
         assertThat(host.getValue().getMemory()).isEqualTo(6L * 1024 * 1024);
         assertThat(host.getValue().getPidsLimit()).isEqualTo(1L);
-        assertThat(host.getValue().getNanoCPUs()).isEqualTo(1L);
+        assertThat(host.getValue().getNanoCPUs()).isEqualTo(DockerSandbox.MIN_NANO_CPUS);
     }
 
     @Test
@@ -1016,6 +1050,37 @@ class DockerSandboxTest {
                     .isNotInstanceOf(NoVerdictException.class)
                     .hasMessageNotContaining("Image runner absente")
                     .hasMessageContaining(shutdown ? "Service en cours d'arrêt" : "disparu");
+        }
+    }
+
+    @Test
+    void not_found_during_copy_names_a_non_runner_image() {
+        // 404 PENDANT LA COPIE : /opt/moodit manque dans l'image (préfixe ou étiquette qui
+        // désigne une image non runner) — ni « conteneur disparu », ni « image absente ». Sous
+        // l'arrêt du service, c'est l'arrêt qui est nommé. Toujours une panne (« indisponible »),
+        // jamais « sans verdict ».
+        for (boolean shutdown : new boolean[] {false, true}) {
+            var create = createCmdReturning("cid");
+            var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+            var docker = dockerMock(create, remove, 0);
+            DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+            var copy = docker.copyArchiveToContainerCmd("cid");
+            org.mockito.Mockito.when(copy.exec()).thenAnswer(inv -> {
+                if (shutdown) {
+                    sandbox.removeInFlight();
+                }
+                throw new com.github.dockerjava.api.exception.NotFoundException("no such path");
+            });
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                    .as("arrêt %s", shutdown)
+                    .isInstanceOf(SandboxException.class)
+                    .isNotInstanceOf(NoVerdictException.class)
+                    .hasMessageNotContaining("Image runner absente")
+                    .hasMessageNotContaining("disparu")
+                    .hasMessageContaining(shutdown ? "Service en cours d'arrêt"
+                            : "Zone de transit /opt/moodit absente de l'image img");
+            org.mockito.Mockito.verify(docker, org.mockito.Mockito.never()).startContainerCmd("cid");
         }
     }
 }

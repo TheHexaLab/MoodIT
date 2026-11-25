@@ -11,7 +11,8 @@ import org.springframework.http.ResponseEntity;
 /**
  * Traduction des exceptions métier en réponses HTTP par {@link GlobalExceptionHandler} : chaque
  * exception a SON code (404 / 409 / 503 / 403 / 400) et renvoie son message en corps, sauf la
- * violation de contrainte BD dont le message technique est remplacé par un libellé générique.
+ * violation de contrainte BD dont le message technique est remplacé par un libellé générique, et
+ * les 409 « en_cours » et « relance » de la soumission, dont le corps est un JSON {cause, message}.
  */
 class GlobalExceptionHandlerTest {
 

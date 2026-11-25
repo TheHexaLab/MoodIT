@@ -1447,6 +1447,18 @@ describe('Dashboard — compléments', () => {
       });
     });
 
+    it('verdict d’un AUTRE quiz : n’écrase pas celui du quiz ouvert (un verdict par quiz)', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      act(() => programsWs().onQuizAttemptFailed(7, 100));
+      act(() => programsWs().onQuizAttemptGraded(8, 200));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 7,
+        attemptId: 100,
+        ok: false,
+      });
+    });
+
     it('quiz ouvert modifié via WS : liste rechargée, bannière affichée puis retirée au rechargement', async () => {
       vi.mocked(api.fetchPublishedQuizzes).mockResolvedValue([{ id: 7, title: 'Quiz intro v2' }]);
       await openGlo();

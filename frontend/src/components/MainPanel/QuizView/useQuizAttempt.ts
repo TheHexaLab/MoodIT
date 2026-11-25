@@ -175,8 +175,10 @@ interface UseQuizAttemptParams {
   onSubmitQuiz?: SubmitQuizHandler;
   /**
    * Verdict PUSH de la correction asynchrone (WebSocket), remonté depuis le Dashboard (room
-   * `user:<id>`). Quand il concerne ce quiz et la tentative en cours d'attente, il résout
-   * immédiatement l'attente (succès → résumé ; échec → l'étudiant peut renvoyer).
+   * `user:<id>`), qui garde le DERNIER verdict de CHAQUE quiz et passe celui du quiz ouvert —
+   * même reçu vue fermée. Quand il concerne la tentative en cours d'attente, il résout
+   * immédiatement l'attente (succès → résumé ; échec → l'étudiant peut renvoyer). Le Dashboard ne
+   * le vide jamais : le hook ne fait que l'ignorer une fois traité (refs locales).
    */
   attemptOutcome?: AttemptOutcome | null;
   /** Message d'erreur affiché si le chargement échoue (label, surchargeable). */
@@ -195,6 +197,11 @@ interface UseQuizAttemptParams {
    * relance la correction de la tentative précédente) — label, surchargeable.
    */
   submitRegradingMessage?: string;
+  /**
+   * Message d'un refus définitif (409 « déjà soumis » : tentative unique déjà consommée, ex. dans
+   * un autre onglet) — label, surchargeable. La vue rouvre ensuite le résumé.
+   */
+  submitAlreadySubmittedMessage?: string;
   /**
    * Message affiché si la vérification du code est indisponible (503) : la tentative n'a pas été
    * enregistrée, l'étudiant peut renvoyer (label, surchargeable).
@@ -307,6 +314,7 @@ export function useQuizAttempt({
   submitRejectedMessage = 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
   submitTooLargeMessage = 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
   submitRegradingMessage = 'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.',
+  submitAlreadySubmittedMessage = 'Ce quiz a déjà été soumis.',
   codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
 }: UseQuizAttemptParams): QuizAttemptApi {
@@ -336,7 +344,7 @@ export function useQuizAttempt({
   // pour résoudre immédiatement une correction sans attendre le prochain sondage.
   const outcomeRef = useRef<AttemptOutcome | null>(null);
   // Id du DERNIER verdict vu pour ce quiz (jamais vidé, contrairement à `outcomeRef`). Le
-  // Dashboard garde le dernier verdict reçu, même vue fermée, et le représente au montage : à
+  // Dashboard garde le dernier verdict de ce quiz, même vue fermée, et le représente au montage : à
   // l'envoi, cet id rejoint les tentatives connues du marqueur, pour qu'un verdict d'AVANT l'envoi
   // (ex. échec d'une tentative supprimée, absente de l'historique) ne conclue jamais l'attente.
   const lastSeenOutcomeIdRef = useRef<number | null>(null);
@@ -392,8 +400,10 @@ export function useQuizAttempt({
         // Échéance comptée depuis l'ENVOI (marqueur), pas depuis ce montage. Un retour après
         // l'échéance conclut aussitôt (l'historique vient d'être relu par `reload`) : « non
         // confirmée », renvoi possible — sûr, puisqu'un renvoi pendant une correction encore en
-        // cours reçoit un 409 « en_cours » et rejoint l'attente.
-        const started = pending.submittedAt ?? Date.now();
+        // cours reçoit un 409 « en_cours » et rejoint l'attente. Marqueur d'ANCIEN format (sans
+        // date, âge inconnu) : tenu pour expiré. Date dans le futur (horloge qui a reculé) :
+        // ramenée à maintenant, sans quoi l'attente pouvait durer bien plus que le plafond.
+        const started = Math.min(pending.submittedAt ?? 0, Date.now());
         const ceiling = started + RECONCILE_CEILING_MS;
         const takeOutcome = () => {
           const outcome = outcomeRef.current;
@@ -815,24 +825,24 @@ export function useQuizAttempt({
     } catch (e) {
       // 409 de cause « en_cours » : une tentative est déjà en correction (renvoi après le plafond,
       // autre onglet). Pas un échec : on rejoint l'attente, qui ouvre le résumé dès que la
-      // tentative apparaît (ou que son verdict est poussé). Seuls comptent les verdicts reçus à
-      // partir de maintenant, d'une tentative pas encore connue. (Tentative unique déjà
-      // consommée, relance par l'enseignant : autres 409, traités plus bas comme des refus.)
+      // tentative apparaît (ou que son verdict est poussé). Seul conclut le verdict d'une
+      // tentative absente de `knownAttemptIds` (tentatives connues + dernier verdict vu à
+      // l'envoi) — y compris celui arrivé PENDANT le POST, qu'il ne faut donc pas jeter.
+      // (« Déjà soumis » et « relance » : autres 409, traités plus bas comme des refus.)
       if (usingServer && e instanceof SubmissionInProgressError) {
         if (!mountedRef.current) return;
         // Échéance : depuis ce renvoi (le début de la correction en cours est inconnu).
         const pending = { answers, attemptsBefore, knownAttemptIds, submittedAt: Date.now() };
         writePending(initialQuiz.id, pending);
-        outcomeRef.current = null;
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
         return;
       }
-      // Échec du POST lui-même (réseau, 5xx) : rien « en vol ».
+      // Échec du POST lui-même (refus, réseau, 5xx) : rien « en vol ».
       if (usingServer) clearPending(initialQuiz.id);
       if (!mountedRef.current) return;
-      // Refus (400, 413, 409 « relance ») : le message dit quoi faire, « réessayez » non. Le
-      // brouillon de passation reste en place (rien n'est enregistré).
+      // Refus (400, 413, 409 « relance » ou « déjà soumis ») : le message dit quoi faire,
+      // « réessayez » non. Le brouillon de passation reste en place (rien n'est enregistré).
       if (e instanceof SubmissionRejectedError) {
         setSubmitRejected(true);
         setSubmitError(
@@ -840,8 +850,14 @@ export function useQuizAttempt({
             ? submitTooLargeMessage
             : e.reason === 'regrading'
               ? submitRegradingMessage
-              : e.message || submitRejectedMessage
+              : e.reason === 'alreadySubmitted'
+                ? submitAlreadySubmittedMessage
+                : e.message || submitRejectedMessage
         );
+        // Déjà soumis : la tentative consommée est dans l'historique (corrigée, ou à revoir —
+        // relance comprise), jamais seulement « en correction » (core répondrait alors
+        // « en_cours ») ; recharger ouvre donc son résumé, sans boucle (aucun envoi).
+        if (e.reason === 'alreadySubmitted') void reload();
       } else {
         setSubmitError(submitErrorMessage);
       }
@@ -851,7 +867,8 @@ export function useQuizAttempt({
     }
   }, [
     quiz, initialQuiz.id, answers, attempts, onSubmitQuiz, submitErrorMessage,
-    submitRejectedMessage, submitTooLargeMessage, submitRegradingMessage, reconcilePending,
+    submitRejectedMessage, submitTooLargeMessage, submitRegradingMessage,
+    submitAlreadySubmittedMessage, reconcilePending, reload,
   ]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */

@@ -282,11 +282,14 @@ const SUBMISSION_REGRADING_CAUSE = 'relance';
  * - « relance » (quiz AVEC reprise : l'enseignant relance la correction de la tentative
  *   précédente) → `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente
  *   (l'id relancé est déjà connu, son verdict ne conclurait pas cet envoi) ;
- * - tout autre 409 (tentative unique déjà consommée — y compris pendant une relance, sur un quiz
- *   sans reprise —, corps texte) → échec ordinaire.
+ * - corps TEXTE (tentative unique déjà consommée — y compris pendant une relance, sur un quiz
+ *   sans reprise) → `SubmissionRejectedError` de raison `alreadySubmitted` : refus définitif,
+ *   la vue rouvre le résumé ;
+ * - corps JSON d'une autre cause, ou vide → échec ordinaire.
  * 400 (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ;
  * 413 (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`.
- * Les raisons `tooLarge` et `regrading` prennent leur texte dans les libellés de la vue.
+ * Les raisons `tooLarge`, `regrading` et `alreadySubmitted` prennent leur texte dans les libellés
+ * de la vue.
  */
 export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
@@ -296,9 +299,10 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
   });
   if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
   if (res.status === 409) {
-    // Trois 409 de core (cf. JSDoc). Un corps illisible ne vaut ni « en cours » ni « relance » :
-    // une attente de 30 min pour rien, ou un refus temporaire qui n'en est pas un.
-    const body = await res.text().catch(() => '');
+    // Trois 409 de core (cf. JSDoc) : deux en JSON (cause), « déjà soumis » en texte brut. Un
+    // corps JSON d'une autre cause, ou vide, ne vaut ni « en cours » (30 min d'attente pour rien)
+    // ni « relance » ni « déjà soumis » : échec ordinaire.
+    const body = (await res.text().catch(() => '')).trim();
     let cause: unknown;
     try {
       cause = (JSON.parse(body) as { cause?: unknown } | null)?.cause;
@@ -307,6 +311,9 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     }
     if (cause === SUBMISSION_IN_PROGRESS_CAUSE) throw new SubmissionInProgressError();
     if (cause === SUBMISSION_REGRADING_CAUSE) throw new SubmissionRejectedError('', 'regrading');
+    if (body !== '' && !body.startsWith('{') && body !== 'null') {
+      throw new SubmissionRejectedError('', 'alreadySubmitted');
+    }
     throw new Error('Échec de la soumission du quiz');
   }
   if (res.status === 400) {

@@ -42,8 +42,9 @@ class ExecutionIntegrationTest {
     private static final boolean SANDBOX_REQUIRED =
             Boolean.parseBoolean(System.getenv().getOrDefault("SANDBOX_REQUIRED", "false"));
 
-    // Dossier vendor (bundles JSX/HTML). Absent → les questions JSX/HTML sont ignorées ici (testées
-    // par les scripts E2E dans le conteneur). Les langages « appel de fonction » n'en ont pas besoin.
+    // Dossier vendor (bundles JSX/HTML). Absent → les tests JSX/TSX et HTML sont ignorés en local,
+    // et ÉCHOUENT en CI (SANDBOX_REQUIRED=true, via gate). Les autres langages, JSON compris, n'en
+    // ont pas besoin.
     private final CodeAssembler assembler =
             new CodeAssembler(System.getenv().getOrDefault("APP_VENDOR_DIR", "/nonexistent-vendor"));
     private static final RunnerExec RUNNER = new RunnerExec(
@@ -683,6 +684,39 @@ class ExecutionIntegrationTest {
                 "function Composant(): JSX.Element { return React.createElement('span', null, 2 + 3); }", h)).isTrue();
         assertThat(passes("TSX",
                 "function Composant(): JSX.Element { return React.createElement('span', null, 99); }", h)).isFalse();
+    }
+
+    // ─────────────────────── HTML / JSON (données validées par un harnais JS) ───────────────────────
+    // La soumission est une DONNÉE, lue depuis un fichier voisin par le noteur et jamais exécutée :
+    // aucun code étudiant ne tourne, il n'y a donc pas de chemin vers le nonce à sonder. On vérifie
+    // la notation réelle sur le runner : juste, faux, et contenu actif ignoré (script, JSON invalide).
+
+    @Test
+    void html_graded_on_the_real_runner() {
+        requireRuntime("javascript");
+        gate(htmlParserAvailable(), "Bundle htmlparser.js absent (APP_VENDOR_DIR) — HTML");
+        String h = "return doc.querySelector('h1')?.textContent.trim() === 'Bonjour';";
+        assertThat(passes("HTML", "<!DOCTYPE html><html><body><h1>Bonjour</h1></body></html>", h)).isTrue();
+        assertThat(passes("HTML", "<!DOCTYPE html><html><body><h1>Salut</h1></body></html>", h)).isFalse();
+        // Un <script> n'est que du texte pour le parseur : il ne s'exécute pas et ne peut ni
+        // quitter en 0 ni écrire quoi que ce soit — la réponse fausse reste fausse.
+        assertThat(passes("HTML", "<html><body><h1>Salut</h1>"
+                + "<script>process.exit(0)</script></body></html>", h)).isFalse();
+    }
+
+    @Test
+    void json_graded_on_the_real_runner() {
+        requireRuntime("javascript");
+        String h = "return data.nom === 'Ada';";
+        assertThat(passes("JSON", "{\"nom\": \"Ada\"}", h)).isTrue();
+        assertThat(passes("JSON", "{\"nom\": \"Bob\"}", h)).isFalse();
+        // JSON invalide : échec explicite, jamais un harnais lancé sur des données absentes.
+        assertThat(detail("JSON", "{\"nom\": \"Ada\"", h)).contains("JSON invalide");
+    }
+
+    private static boolean htmlParserAvailable() {
+        String dir = System.getenv().getOrDefault("APP_VENDOR_DIR", "/nonexistent-vendor");
+        return java.nio.file.Files.isReadable(java.nio.file.Path.of(dir, "htmlparser.js"));
     }
 
     // Les langages COMPILÉS ne passent plus par Piston (#116) : leur filet d'intégration vit dans

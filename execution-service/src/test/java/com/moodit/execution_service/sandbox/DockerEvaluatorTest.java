@@ -80,6 +80,9 @@ class DockerEvaluatorTest {
                     """);
             List<TestResult> results = evaluator.evaluate("Go", "code", TWO_CASES, null);
             assertThat(results).extracting(TestResult::passed).containsExactly(true, false);
+            // Journalisés, jamais annexés : le « plein » de l'événement du cas 1 n'entre pas
+            // dans son détail (les deux verdicts n'en portent aucun).
+            assertThat(results).extracting(TestResult::detail).containsExactly(null, null);
             assertThat(appender.list)
                     .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
                     .extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)

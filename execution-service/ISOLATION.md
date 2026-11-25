@@ -109,8 +109,9 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   dont la compilation JEP 330 vit dans la fenêtre de run —, 10 s par cas de notation,
   configurable par question jusqu'à 60 s) ; mémoire/PID/CPU bornés PAR CONTENEUR
   (`SANDBOX_MEMORY_MB` 1,5 Go, `SANDBOX_PIDS_LIMIT` 512, `SANDBOX_CPUS` 2 ; vérifiés au démarrage :
-  au moins 6 Mo, 1 PID et un CPU strictement positif, sinon le service refuse de démarrer — Docker
-  lit 0 comme « illimité »). Rlimits du processus
+  au moins 6 Mo, 1 PID et 0,01 CPU, sinon le service refuse de démarrer — Docker lit 0 comme
+  « illimité », un quota CFS nul (moins de 10 000 nanoCPU) ne borne plus rien et un quota sous
+  1 ms fait refuser chaque démarrage par le noyau). Rlimits du processus
   étudiant (fichiers, nproc, nofile) ; sorties tronquées (64 Ko en notation, 1,2 Mo en exec —
   le dump SQL de la phase 1 peut approcher `app.sql.max-dump-chars`).
 - **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` conteneurs runner simultanés (file

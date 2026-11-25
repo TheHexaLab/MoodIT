@@ -221,22 +221,31 @@ public class DockerSandbox {
         // Un SANDBOX_MEMORY_MB, SANDBOX_PIDS_LIMIT ou SANDBOX_CPUS à 0 lançait donc des
         // conteneurs de notation sans borne mémoire, PID ou CPU, sans que rien ne le signale ;
         // une mémoire négative faisait échouer chaque notation en 502.
-        if (memoryMb < MIN_MEMORY_MB || memoryMb > Long.MAX_VALUE / (1024 * 1024)) {
+        if (memoryMb < MIN_MEMORY_MB) {
             throw new IllegalArgumentException("Limite du bac à sable invalide : "
                     + "app.sandbox.memory-mb (SANDBOX_MEMORY_MB) doit valoir au moins "
                     + MIN_MEMORY_MB + " Mo (minimum de Docker), reçu " + memoryMb);
+        }
+        if (memoryMb > MAX_MEMORY_MB) {
+            throw new IllegalArgumentException("Limite du bac à sable invalide : "
+                    + "app.sandbox.memory-mb (SANDBOX_MEMORY_MB) doit valoir au plus "
+                    + MAX_MEMORY_MB + " Mo (au-delà, la taille en octets déborde), reçu " + memoryMb);
         }
         if (pidsLimit < 1) {
             throw new IllegalArgumentException("Limite du bac à sable invalide : "
                     + "app.sandbox.pids-limit (SANDBOX_PIDS_LIMIT) doit valoir au moins 1 "
                     + "(0 et -1 signifient « illimité » pour Docker), reçu " + pidsLimit);
         }
-        // NaN, nul, négatif ou fraction sous le nanoCPU : tous donnent nanos ≤ 0.
+        // Docker traduit NanoCPUs en quota CFS sur une période de 100 ms : quota = nanos × 100 000
+        // / 1e9 µs. Sous 10 000 nanoCPU, le quota vaut 0 — AUCUNE borne CPU (« max » en
+        // cgroup v2) ; sous 0,01 CPU, il passe sous 1 ms, que le noyau refuse (EINVAL) : chaque
+        // démarrage de conteneur échouait, donc chaque notation en 502. NaN, nul et négatif
+        // donnent nanos ≤ 0 et tombent sous le même plancher.
         long nanos = (long) (cpus * 1_000_000_000L);
-        if (Double.isInfinite(cpus) || nanos <= 0) {
+        if (Double.isInfinite(cpus) || nanos < MIN_NANO_CPUS) {
             throw new IllegalArgumentException("Limite du bac à sable invalide : "
-                    + "app.sandbox.cpus (SANDBOX_CPUS) doit être strictement positif "
-                    + "(0 signifie « illimité » pour Docker), reçu " + cpus);
+                    + "app.sandbox.cpus (SANDBOX_CPUS) doit valoir au moins 0,01 (quota CFS "
+                    + "minimal de 1 ms ; 0 signifie « illimité » pour Docker), reçu " + cpus);
         }
         this.dockerHost = dockerHost == null || dockerHost.isBlank() ? defaultDockerHost() : dockerHost;
         this.memoryBytes = memoryMb * 1024 * 1024;
@@ -247,6 +256,10 @@ public class DockerSandbox {
 
     /** Plus petite mémoire de conteneur que Docker accepte (6 Mo). */
     static final long MIN_MEMORY_MB = 6;
+    /** Plus grande mémoire dont la taille en octets tient dans un {@code long}. */
+    static final long MAX_MEMORY_MB = Long.MAX_VALUE / (1024 * 1024);
+    /** 0,01 CPU : plus petit quota CFS accepté par le noyau (1 ms sur la période de 100 ms). */
+    static final long MIN_NANO_CPUS = 10_000_000;
 
     /** Pour les tests : client Docker injecté (aucune résolution d'hôte). */
     DockerSandbox(DockerClient client, long memoryMb, long pidsLimit, double cpus) {
@@ -382,11 +395,14 @@ public class DockerSandbox {
 
     /**
      * Âge minimal d'un conteneur runner avant de le balayer, QUEL QUE SOIT son statut : au-delà,
-     * plus aucune notation ne peut le posséder. Un mur ne dépasse jamais
-     * {@code DockerEvaluator.MAX_WALL_MS} (15 min), plus la lecture des journaux (30 s) : 20 min
-     * laissent de la marge.
+     * plus aucune notation ne peut le posséder. Vie maximale d'un conteneur, comptée depuis sa
+     * date de création chez le démon : cinq appels bornés par {@link #RESPONSE_TIMEOUT} (réponse
+     * du create, copie, start, puis après le mur {@code exitCodeIfStopped} et {@code oomKilled}),
+     * le mur lui-même ({@code DockerEvaluator.MAX_WALL_MS}, 15 min), la lecture des journaux
+     * (30 s) et six établissements de connexion ({@link #CONNECTION_TIMEOUT} : copie, start,
+     * wait, deux inspections, journaux) — soit 21 min 5 s ; 25 min laissent de la marge.
      */
-    static final long ORPHAN_GRACE_MS = 20 * 60_000;
+    static final long ORPHAN_GRACE_MS = 25 * 60_000;
 
     /**
      * Ce conteneur orphelin peut-il être supprimé maintenant ? Seulement s'il a dépassé
@@ -530,10 +546,24 @@ public class DockerSandbox {
             // dans la couche image, masquée par le montage). Au démarrage, le superviseur attend
             // la sentinelle .ready (dernière entrée du tar) puis DÉPLACE le job dans le tmpfs
             // /box, seul endroit où le code étudiant écrit.
-            docker.copyArchiveToContainerCmd(containerId)
-                    .withTarInputStream(new ByteArrayInputStream(tarOf(files)))
-                    .withRemotePath("/opt/moodit")
-                    .exec();
+            try {
+                docker.copyArchiveToContainerCmd(containerId)
+                        .withTarInputStream(new ByteArrayInputStream(tarOf(files)))
+                        .withRemotePath("/opt/moodit")
+                        .exec();
+            } catch (NotFoundException e) {
+                // 404 PENDANT LA COPIE : soit le conteneur vient d'être supprimé par l'arrêt du
+                // service, soit le chemin de destination manque — l'image n'est pas une image
+                // runner (préfixe ou étiquette mal réglés). Ni l'un ni l'autre n'est un
+                // conteneur « disparu » ni une image absente.
+                if (closed) {
+                    throw new SandboxException(
+                            "Service en cours d'arrêt : conteneur de notation supprimé", e);
+                }
+                throw new SandboxException("Zone de transit /opt/moodit absente de l'image " + image
+                        + " (image non runner ? vérifier SANDBOX_IMAGE_PREFIX et "
+                        + "SANDBOX_IMAGE_TAG)", e);
+            }
 
             docker.startContainerCmd(containerId).exec();
 
@@ -624,8 +654,9 @@ public class DockerSandbox {
                     stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status,
                     oomKilled);
         } catch (NotFoundException e) {
-            // Un 404 APRÈS la création vise le conteneur, pas l'image : supprimé en vol (arrêt
-            // du service, removeInFlight). « Image runner absente » égarait le diagnostic.
+            // Un 404 APRÈS la copie (démarrage, attente, journaux) vise le conteneur, pas
+            // l'image : supprimé en vol (arrêt du service, removeInFlight). « Image runner
+            // absente » égarait le diagnostic. Le 404 de la copie est traité à part, plus haut.
             if (containerId != null) {
                 throw new SandboxException(closed
                         ? "Service en cours d'arrêt : conteneur de notation supprimé"

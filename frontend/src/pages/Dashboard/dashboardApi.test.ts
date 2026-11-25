@@ -391,8 +391,18 @@ describe('submitQuiz', () => {
     expect((error as SubmissionRejectedError).reason).toBe('regrading');
   });
 
+  it('409 texte (tentative unique déjà consommée) → refus définitif « déjà soumis », sans attente', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => 'Quiz already submitted',
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as SubmissionRejectedError).reason).toBe('alreadySubmitted');
+  });
+
   it.each([
-    ['texte (tentative déjà soumise)', 'Vous avez déjà soumis ce quiz.'],
     ['JSON d’une autre cause', '{"cause":"autre"}'],
     ['JSON illisible', '{pas du json'],
     ['JSON null', 'null'],

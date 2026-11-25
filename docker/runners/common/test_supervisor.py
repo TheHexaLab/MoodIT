@@ -633,12 +633,20 @@ class BoxExhaustedTest(unittest.TestCase):
                         grader.index("run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S"))
         self.assertLess(grader.index("run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S"),
                         grader.index("drop_new_cache_files(grader_cache, before)"))
-        self.assertIn("GO_GRADER_CACHE_WARM[grader_cache] = True", grader)
+        self.assertIn("elif grader_cache and grader_cache_warm_after(code, expired):\n"
+                      "                GO_GRADER_CACHE_WARM[grader_cache] = True", grader)
+        # Chaud seulement après une RÉUSSITE : après une compilation tuée ou expirée, le cache
+        # est à moitié fait, et le marquer chaud ferait retirer à chaque cas les paquets
+        # standard compilés ensuite (bibliothèque standard recompilée à chaque cas).
+        self.assertTrue(supervisor.grader_cache_warm_after(0, False))
+        for code, expired in ((1, False), (None, True), (-9, False), (0, True)):
+            with self.subTest(code=code, expired=expired):
+                self.assertFalse(supervisor.grader_cache_warm_after(code, expired))
 
     def test_purge_forks_rm_once_per_batch_not_per_entry(self):
-        # Un `rm` par entrée de premier niveau : 5 110 dossiers vides déposés par le code soumis
-        # dans /tmp tenaient la purge 22,6 s par cas hors délai (moodit-runner-c, 1 CPU) ;
-        # en lots : 0,14 s.
+        # Un `rm` par entrée de premier niveau : 5 118 dossiers vides déposés par le code soumis
+        # dans /tmp et /dev/shm (pleins en inodes, 4 096 et 1 024) tenaient la purge 16,2 s par
+        # cas hors délai (moodit-runner-c, 1 CPU) ; en lots : 0,08 s.
         self.assertEqual([["a", "b"], ["c"]], supervisor.rm_batches(["a", "b", "c"], limit=4))
         self.assertEqual([["x" * 10], ["y"]], supervisor.rm_batches(["x" * 10, "y"], limit=4))
         root = tempfile.mkdtemp()

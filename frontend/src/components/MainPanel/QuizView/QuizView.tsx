@@ -91,6 +91,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     submitRejectedMessage: t.submitRejected,
     submitTooLargeMessage: t.submitTooLarge,
     submitRegradingMessage: t.submitRegrading,
+    submitAlreadySubmittedMessage: t.submitAlreadySubmitted,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
   });

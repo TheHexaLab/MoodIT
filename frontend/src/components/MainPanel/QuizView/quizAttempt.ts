@@ -459,12 +459,14 @@ export class SubmissionRejectedError extends Error {
    * `regrading` : 409 de cause « relance » — quiz AVEC reprise dont l'enseignant relance la
    * correction de la tentative précédente ; refus TEMPORAIRE, à renvoyer plus tard (aucune attente : l'id relancé est déjà
    * connu, son verdict ne conclurait pas cet envoi).
-   * Le texte affiché vient alors des libellés de la vue (`submitTooLarge`, `submitRegrading`),
-   * pas de ce message.
+   * `alreadySubmitted` : 409 « déjà soumis » (corps texte) — tentative unique déjà consommée
+   * (autre onglet…) ; refus DÉFINITIF, la vue rouvre le résumé depuis l'historique.
+   * Le texte affiché vient alors des libellés de la vue (`submitTooLarge`, `submitRegrading`,
+   * `submitAlreadySubmitted`), pas de ce message.
    */
-  readonly reason?: 'tooLarge' | 'regrading';
+  readonly reason?: 'tooLarge' | 'regrading' | 'alreadySubmitted';
 
-  constructor(message: string, reason?: 'tooLarge' | 'regrading') {
+  constructor(message: string, reason?: 'tooLarge' | 'regrading' | 'alreadySubmitted') {
     super(message);
     this.name = 'SubmissionRejectedError';
     this.reason = reason;

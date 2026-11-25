@@ -796,8 +796,9 @@ def remove_trees(paths):
     """Supprime chaque chemin de `paths` (dossier ou fichier) sans suivre de lien, et SANS
     JAMAIS LEVER, avec UN `rm` par lot de chemins (rm_batches) et non un par chemin.
 
-    Un `rm` par entrée coûtait un fork complet (preexec_fn compris) chacune : 5 110 dossiers vides
-    déposés par le code soumis dans /tmp tenaient la purge 16,2 s par cas, hors de tout délai.
+    Un `rm` par entrée coûtait un fork complet (preexec_fn compris) chacune : 5 118 dossiers vides
+    déposés par le code soumis dans /tmp et /dev/shm (pleins en inodes, 4 096 et 1 024) tenaient
+    la purge 16,2 s par cas, hors de tout délai ; en lots, 0,08 s (moodit-runner-c, 1 CPU).
     Fichiers et liens sont retirés directement ; les dossiers vont à `rm -rf` par lots, puis au
     repli itératif s'il en reste."""
     directories = []
@@ -7223,6 +7224,15 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
 GO_GRADER_CACHE_WARM = {}
 
 
+def grader_cache_warm_after(code, expired):
+    """La compilation du noteur a-t-elle laissé un cache CHAUD (bibliothèque standard complète) ?
+    FONCTION PURE (testée). Seulement si elle a RÉUSSI : marqué chaud après une compilation
+    tuée ou expirée, à moitié faite, le cache verrait retirer à chaque cas les paquets standard
+    compilés ensuite (drop_new_cache_files) — bibliothèque standard recompilée à chaque cas,
+    budget épuisé."""
+    return code == 0 and not expired
+
+
 def go_cache_files(root):
     """Fichiers présents sous `root` (chemins relatifs), sans suivre de lien. Testée."""
     if not root:
@@ -7337,7 +7347,7 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
             code, expired = run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
             if warm:
                 drop_new_cache_files(grader_cache, before)
-            elif grader_cache and code == 0 and not expired:
+            elif grader_cache and grader_cache_warm_after(code, expired):
                 GO_GRADER_CACHE_WARM[grader_cache] = True
         if expired or code != 0:
             stderr_text = read_capped(os.path.join(case_dir, "cc.err"))

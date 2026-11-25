@@ -30,6 +30,11 @@ export interface QuizViewLabels {
    * relance la correction de la tentative précédente. Le brouillon est gardé, à renvoyer plus tard.
    */
   submitRegrading: string;
+  /**
+   * Soumission refusée DÉFINITIVEMENT (409 « déjà soumis ») : la tentative unique est déjà
+   * consommée (autre onglet…). La vue rouvre le résumé.
+   */
+  submitAlreadySubmitted: string;
   /** Message d'erreur quand la vérification du code est indisponible (503) : la tentative
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
@@ -93,6 +98,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   submitTooLarge: 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
   submitRegrading:
     'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.',
+  submitAlreadySubmitted: 'Ce quiz a déjà été soumis.',
   codeVerificationUnavailable:
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:

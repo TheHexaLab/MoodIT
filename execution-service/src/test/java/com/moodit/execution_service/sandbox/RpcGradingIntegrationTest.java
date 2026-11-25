@@ -1579,6 +1579,20 @@ class RpcGradingIntegrationTest {
                 new TestCaseInput("deux", "return doubler(2) == 4;", 1),
                 new TestCaseInput("trois", "return doubler(3) == 6;", 1)), null);
         assertThat(r).extracting(TestResult::passed).containsExactly(true, true, true);
+
+        // TÉMOIN : la même sonde, dans un seul cas, voit bien un processus de son UID quand il en
+        // existe un (son propre enfant, encore vivant). Sans lui, une sonde qui ne verrait jamais
+        // rien (/proc illisible, UID mal lu) laisserait le test ci-dessus vert à vide.
+        String witness = code.replace("int doubler(int n) {", """
+                int temoin(int n) {
+                    if (fork() == 0) { sleep(30); _exit(0); }
+                    usleep(300000);
+                    return autres_processus() > 0 ? n * 2 : 0;
+                }
+
+                int doubler(int n) {""");
+        assertThat(grade("C", "return temoin(1) == 2;", witness).passed())
+                .as("la sonde doit voir l'enfant vivant de son propre cas").isTrue();
     }
 
     @Test
@@ -1595,6 +1609,23 @@ class RpcGradingIntegrationTest {
                     return n * 2;
                 }
                 """).passed()).isTrue();
+        // TÉMOIN : la même écriture dans $TMPDIR, que le code soumis possède, réussit. Sans lui,
+        // une sonde qui échouerait partout (fopen cassé, système de fichiers en lecture seule)
+        // rendrait le test ci-dessus vert sans rien dire de /box.
+        assertThat(grade("C", "return doubler(5) == 10;", """
+                #include <stdio.h>
+                #include <stdlib.h>
+                int doubler(int n) {
+                    const char *tmp = getenv("TMPDIR");
+                    char chemin[512];
+                    if (!tmp) return 0;
+                    snprintf(chemin, sizeof chemin, "%s/sonde", tmp);
+                    FILE *f = fopen(chemin, "w");
+                    if (!f) return 0;
+                    fclose(f);
+                    return n * 2;
+                }
+                """).passed()).as("l'écriture dans $TMPDIR doit réussir").isTrue();
     }
 
     // ───────── 1 bis. Les OBJETS : poignées, l'instance vit chez l'étudiant ─────────

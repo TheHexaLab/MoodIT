@@ -247,6 +247,42 @@ describe('QuizView — pied de navigation', () => {
     expect(localStorage.getItem('moodit:quiz-draft:55')).not.toBeNull();
   });
 
+  it('409 « déjà soumis » : message sans « Réessayer », puis le résumé de la tentative consommée', async () => {
+    const graded = {
+      attemptId: 7, earned: 2, max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 7, attemptNo: 1, earned: 2, max: 3, status: 'done' }]);
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz({ allowRetry: false }))}
+        onFetchAttempts={onFetchAttempts}
+        onFetchAttemptResult={vi.fn(async () => graded)}
+        onSubmitQuiz={vi.fn(async () => {
+          throw new SubmissionRejectedError('', 'alreadySubmitted');
+        })}
+      />
+    );
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText('Ce quiz a déjà été soumis.')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+  });
+
   it('attente de la correction : texte d’état, contenu inerte, « Soumettre » désactivé', async () => {
     // L'attente peut durer de longues minutes : la région d'état le dit, et rien sous le voile
     // n'est actionnable (un second envoi lançait une seconde attente).

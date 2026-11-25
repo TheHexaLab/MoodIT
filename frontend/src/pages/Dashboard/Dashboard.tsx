@@ -206,8 +206,11 @@ export default function Dashboard() {
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   // Id du quiz modifié à distance (WS) → rechargement si c'est le quiz ouvert.
   const [staleQuizId, setStaleQuizId] = useState<number | null>(null);
-  // Dernier verdict PUSH (WS) d'une correction async de tentative → remonté à la vue de quiz.
-  const [attemptOutcome, setAttemptOutcome] = useState<AttemptOutcome | null>(null);
+  // Dernier verdict PUSH (WS) d'une correction async de tentative, PAR QUIZ → remonté à la vue du
+  // quiz ouvert. Un emplacement unique était écrasé par le verdict d'un autre quiz : celui de A
+  // (échec, tentative supprimée) était perdu si B en recevait un ensuite, et le retour sur A
+  // attendait jusqu'au plafond au lieu d'afficher « vérification impossible ».
+  const [attemptOutcomes, setAttemptOutcomes] = useState<Record<number, AttemptOutcome>>({});
   // Id du quiz actuellement ouvert (ref lisible depuis les closures WS, ex. resync).
   const openQuizIdRef = useRef<number | null>(null);
   // Popup actuellement ouvert (avec son contexte), ou null. Un seul à la fois.
@@ -363,9 +366,12 @@ export default function Dashboard() {
       // Correction ASYNCHRONE d'une de MES tentatives terminée / échouée (room user) : on remonte
       // le verdict à la vue de quiz ouverte, qui résout l'attente (résumé) ou invite à renvoyer.
       onQuizAttemptGraded: (quizId, attemptId) =>
-        setAttemptOutcome({ quizId, attemptId, ok: true }),
+        setAttemptOutcomes((prev) => ({ ...prev, [quizId]: { quizId, attemptId, ok: true } })),
       onQuizAttemptFailed: (quizId, attemptId, reason) =>
-        setAttemptOutcome({ quizId, attemptId, ok: false, reason }),
+        setAttemptOutcomes((prev) => ({
+          ...prev,
+          [quizId]: { quizId, attemptId, ok: false, reason },
+        })),
     });
   }, [ws, currentUser.id, applyGlobalRoles, setView]);
 
@@ -1259,7 +1265,7 @@ export default function Dashboard() {
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
         onSubmitQuiz={api.submitQuiz}
-        attemptOutcome={attemptOutcome}
+        attemptOutcome={openQuizId != null ? (attemptOutcomes[openQuizId] ?? null) : null}
         onRunCode={api.runCode}
         quizRefreshKey={quizRefreshKey}
         quizStale={quizStale}

@@ -22,8 +22,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * internes (JS/PHP/Python/Bash), alias, exécution simple (« run ») de chaque langage et cas limites
  * du découpage SQL. Les langages COMPILÉS ne sont plus assemblés ici pour la notation (#116 :
  * l'assembleur les refuse, DockerEvaluator les note) ; seul leur « run » l'est encore. Le fait que
- * le programme s'exécute et note correctement relève d'ExecutionIntegrationTest (interprétés, SQL,
- * vues) et de RpcGradingIntegrationTest (compilés).
+ * le programme s'exécute et note correctement sur le vrai runner relève d'ExecutionIntegrationTest
+ * (interprétés, SQL, JSX/TSX, HTML et JSON) et de RpcGradingIntegrationTest (compilés).
  */
 class CodeAssemblerLanguagesTest {
 

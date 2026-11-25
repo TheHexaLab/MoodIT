@@ -15,9 +15,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Client de correction (execution-service, endpoint interne) : appel avec le jeton, verdicts dans
- * l'ordre des harnais, {@code null} en cas de panne, et délai de lecture proportionnel au nombre
- * d'appels au sandbox, attente d'une place comprise (#31, #216). Mini serveur HTTP (JDK) en guise
- * d'execution-service.
+ * l'ordre des harnais ; {@code null} sur une panne ordinaire, exception dédiée sur un 502
+ * « sans_verdict » (comptée par étudiant et par quiz) ; nouveaux essais limités dans le temps tant
+ * que le service est injoignable, puis interruption à l'arrêt ({@code GradingInterruptedException}) ;
+ * délai de lecture par unité d'appel, attente d'une place comprise, plafonné par le budget du serveur
+ * (interprétés) ou par le mur du conteneur (compilés) (#31, #216, #116). Mini serveur HTTP (JDK) en
+ * guise d'execution-service.
  */
 class ExecutionClientTest {
 

@@ -175,7 +175,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > l'étape 2 : si l'une porte sur un quiz que le contrôle a mis en cause (fermé plutôt que
 > corrigé), noter son id avec les tentatives de la fenêtre de l'étape 2, à rendre à l'étudiant
 > de la même façon. Noter aussi l'heure de la bascule EN UTC, comme `submitted_at` (commande
-> de l'étape 2 : `SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;` — pas `NOW()` seul, à l'heure
+> de fin d'étape 1 : `SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;` — pas `NOW()` seul, à l'heure
 > de Toronto dans ce conteneur) ; **juste après** le second `update.sh` vient son étape 2,
 > `check-compiled-harnesses.py --unpublish`, avec les mêmes `--ack`.
 >
@@ -346,15 +346,20 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > impossible, fermer avant la bascule tous les quiz publiés qui portent une question de code
 > compilée ou interprétée, et ne les rouvrir qu'après une sortie en 0.
 >
+> Juste avant de lancer `./deploy/update.sh`, sur le serveur, noter l'heure de la bascule : elle
+> borne la fenêtre de l'étape 2.
+>
+> ```bash
+> # Horloge de la base, EN UTC : `Attempt.submitted_at` est écrit en UTC (core tourne en UTC),
+> # alors que la session psql du conteneur est à l'heure de Toronto (PGTZ) — `NOW()::timestamp`
+> # seul décalait la fenêtre de 4 à 5 h et listait des tentatives notées avant la bascule.
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+>   "SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;"
+> ```
+>
 > **2. Juste APRÈS `./deploy/update.sh`.** Rejouer contre la prod, qui est la seule référence :
 >
 > ```bash
-> # Heure de la bascule, à noter AVANT update.sh (horloge de la base), EN UTC : elle borne la
-> # fenêtre ci-dessous, et `Attempt.submitted_at` est écrit en UTC (core tourne en UTC), alors
-> # que la session psql du conteneur est à l'heure de Toronto (PGTZ) — `NOW()::timestamp` seul
-> # décalait la fenêtre de 4 à 5 h et listait des tentatives notées avant la bascule.
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
->   "SELECT (NOW() AT TIME ZONE 'UTC')::timestamp;"
 > # Rejoue tout, et ferme (is_published = false) les quiz publiés qui portent un BLOQUANT ou un
 > # À VÉRIFIER non acquitté, le temps de les régler dans l'éditeur. Mêmes --ack qu'à l'étape 1.
 > python3 deploy/check-compiled-harnesses.py --unpublish --ack <id>,<id>
@@ -445,9 +450,14 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > réponses des tentatives supprimées suivent par cascade) :
 >
 > ```bash
+> # Sous-shell `set -euo pipefail` : un pg_dump en échec arrête tout AVANT la purge, et son
+> # fichier tronqué est effacé (il passerait sinon pour une sauvegarde).
+> (
+> set -euo pipefail
 > mkdir -p backups
-> docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" \
->   | gzip > "backups/db-avant-purge-tentatives-$(date +%Y%m%d-%H%M%S).sql.gz"
+> f="backups/db-avant-purge-tentatives-$(date +%Y%m%d-%H%M%S).sql.gz"
+> docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$f" \
+>   || { rm -f "$f"; exit 1; }
 > # <ids> : ceux de la liste ci-dessus retenus avec les enseignants. Le DELETE ne voit que l'état
 > # d'avant lui : seules les tentatives qui étaient les dernières de leur couple partent.
 > docker exec moodit_postgres psql -1 -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
@@ -455,6 +465,7 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >         AND a.attempt_no = (SELECT max(a2.attempt_no) FROM Attempt AS a2
 >                             WHERE a2.quiz_id = a.quiz_id AND a2.user_id = a.user_id);" \
 >   -c "UPDATE Attempt SET status = 'review' WHERE id IN (<ids>) AND status = 'pending';"
+> )
 > ```
 >
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
@@ -659,7 +670,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   Les conteneurs runner portent l'étiquette `moodit.runner=1` : si le service est tué en pleine
   notation, son nettoyage ne s'exécute pas et le conteneur reste en « Exited » —
   `execution-service` les balaie au démarrage puis toutes les 10 min (`OrphanSweeper`), une fois
-  passé un délai de grâce de 20 min qui protège les corrections en cours ; on peut les lister à la main avec
+  passé un délai de grâce de 25 min qui protège les corrections en cours ; on peut les lister à la main avec
   `docker ps -a -f label=moodit.runner`. Pour lancer ces conteneurs, `execution-service` monte
   `/var/run/docker.sock` : c'est un accès
   **root-équivalent au démon de l'hôte**, et il faut en mesurer la portée — contrairement à
