@@ -139,8 +139,9 @@ export interface Quiz {
    */
   questionCount?: number;
   /**
-   * Tentatives « à revoir » du quiz : leur correction a échoué sans verdict trop souvent, elles
-   * attendent l'enseignant (#116). Vue ÉDITEUR seulement (absent de la vue étudiant).
+   * Tentatives « à revoir » du quiz : correction automatique en échec, gardées pour l'enseignant
+   * (#116 ; règle : cf. REVIEW_REASON, QuizView/quizAttempt.ts). Vue ÉDITEUR seulement (absent de
+   * la vue étudiant).
    */
   reviewAttemptCount?: number;
 }
@@ -448,7 +449,10 @@ export interface QuizResponse {
   allowRetry?: boolean;
   questionCount?: number;
   createdAt?: string;
-  /** Tentatives « à revoir » (correction sans verdict), sur la route `/manage` seulement. */
+  /**
+   * Tentatives « à revoir » (correction en échec gardée pour l'enseignant, cf. REVIEW_REASON), sur
+   * la route `/manage` seulement.
+   */
   reviewAttemptCount?: number;
 }
 

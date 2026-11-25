@@ -6,7 +6,7 @@
 -- tentative unique, un code soumis capable de provoquer cet échec obtenait autant d'essais qu'il
 -- voulait. La tentative étant supprimée, le compte vit ici.
 --
--- Au-delà du plafond (app.quiz.grading.max-no-verdict-failures, 3 par défaut), la tentative
+-- Dès que le compte atteint le plafond (app.quiz.grading.max-no-verdict-failures, 3 par défaut), la tentative
 -- n'est plus supprimée : elle reste en statut 'review' (« à revoir » par l'enseignant, qui peut
 -- relancer la correction). Attempt.status prend donc une troisième valeur : 'pending' →
 -- 'done' | 'review'. Une sandbox simplement INDISPONIBLE (démon arrêté, image absente) ne compte

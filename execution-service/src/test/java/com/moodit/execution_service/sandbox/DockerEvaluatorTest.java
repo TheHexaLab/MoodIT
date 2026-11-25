@@ -114,8 +114,11 @@ class DockerEvaluatorTest {
                 ],"events":[],"canaries":"ok","incomplet":true}
                 """);
         // Chemin INTERNE (la correction d'une soumission) : ce n'est pas une note. Avant, le cas
-        // saute arrivait en passed=false et core l'enregistrait — tentative UNIQUE perdue a
-        // cause de la charge. Cause « sans verdict » : core compte ces échecs (S4).
+        // saute arrivait en passed=false et core l'enregistrait — un 0 définitif sur une
+        // tentative UNIQUE, pour une panne du noteur ou de la plateforme. « Incomplet » ne
+        // vient que des causes « erreur » (bogue du superviseur) et « interrompu » (plateforme) ;
+        // un budget épuisé, lui, reste une note partielle. Cause « sans verdict » : core compte
+        // ces échecs (S4).
         assertThatThrownBy(() -> evaluator.evaluate("Go", "code", TWO_CASES, null))
                 .isInstanceOf(NoVerdictException.class);
         // Chemin PUBLIC (« Tester ») : les verdicts restent rendus, detail compris.
@@ -238,9 +241,11 @@ class DockerEvaluatorTest {
         // Jackson 3 ne lève PAS sur une sortie vide : readTree("") rend un MissingNode. Sans
         // garde, `results` était simplement vide, chaque cas recevait « Notation incomplète »
         // passed=false — une liste de verdicts VALIDE aux yeux de core, qui persistait un 0
-        // sur une tentative UNIQUE. Un superviseur tué (OOM du cgroup, image cassée, collecte
-        // des logs expirée) n'est jamais un 0 : NoVerdictException → 502 de cause
-        // « sans_verdict », que core compte par étudiant et par quiz (S4).
+        // sur une tentative UNIQUE. Un superviseur mort APRÈS sa ligne témoin (OOM du cgroup,
+        // tué pendant le code soumis) n'est jamais un 0 : NoVerdictException → 502 de cause
+        // « sans_verdict », que core compte par étudiant et par quiz (S4). Mort AVANT la ligne
+        // témoin (image cassée) : panne « indisponible », test suivant ; journaux non lus à
+        // temps : SandboxException dès DockerSandbox.run, jamais une sortie vide ici.
         for (String stdout : new String[] {"", "   \n", "null"}) {
             when(sandbox.run(any(), anyMap(), anyLong())).thenReturn(new DockerSandbox.ContainerRun(
                     stdout, DockerEvaluator.SUBMITTED_CODE_STAGE + " tué (OOM ?)", 137));

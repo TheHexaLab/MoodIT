@@ -15,8 +15,9 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
   À VÉRIFIER  rien ne prouve que le harnais a tourné : le code de départ ne compile pas seul,
               n'existe pas ou ne déclare aucune fonction aux types transportables (aucune
               fonction du tout, ou seulement des types non transportables : le superviseur ne
-              distingue pas les deux), la compilation du harnais a expiré ou a été tuée, le
-              compilateur n'a rien dit, le harnais appelle une fonction absente du code de
+              distingue pas les deux), la compilation du harnais ou un outil de la notation
+              (inventaire javap, javac du serveur RPC Java, sonde des noms réservés) a expiré
+              ou a été tué, le compilateur n'a rien dit, le harnais appelle une fonction absente du code de
               départ (squelette à compléter), le noteur n'a pas répondu ou a refusé le format,
               ou le détail n'est pas reconnu : le script ne peut pas conclure, rejouer à la main
               avec une solution (« Tester ») ;
@@ -58,8 +59,9 @@ solution s'acquitte par --ack (ids séparés par des virgules), à repasser à l
                   (joignable depuis un hôte Linux ; sous Docker Desktop, donner EXEC_URL) ;
   INTERNAL_TOKEN  jeton interne, sinon lu dans l'environnement du conteneur execution-service ;
   EXEC_INTERNAL_QUEUE_WAIT_MS, EXEC_INTERPRETED_BUDGET_MS
-                  à donner seulement si le .env d'execution-service les change : le délai
-                  d'attente de chaque réponse en dépend (read_timeout_s).
+                  lus d'abord dans l'environnement du conteneur execution-service ; à donner
+                  seulement sans conteneur (étape 1) si le .env du service les change : le
+                  délai d'attente de chaque réponse en dépend (read_timeout_s).
 Le jeton n'est jamais affiché.
 """
 
@@ -236,10 +238,12 @@ _RUN_MARGIN_MS = 5_000            # RUN_MARGIN_MS
 _EXEC_WALL_MS = 75_000            # EXEC_WALL_SLACK_MS (RunnerExec.WALL_OVERHEAD_MS)
 _CONTAINER_LIFECYCLE_MS = 35_000  # CONTAINER_LIFECYCLE_MS
 _EVAL_MAX_WALL_MS = 15 * 60_000   # EVAL_MAX_WALL_MS (DockerEvaluator.MAX_WALL_MS)
-# Réglages d'execution-service partagés par le .env commun (lus ici dans l'environnement du
-# script s'ils y sont, sinon leur défaut d'application.properties).
+# Réglages d'execution-service partagés par le .env commun : lus dans l'environnement de son
+# conteneur, sinon dans celui du script, sinon leur défaut d'application.properties
+# (cf. server_settings).
 _DEFAULT_QUEUE_WAIT_MS = 120_000          # EXEC_INTERNAL_QUEUE_WAIT_MS
 _DEFAULT_INTERPRETED_BUDGET_MS = 900_000  # EXEC_INTERPRETED_BUDGET_MS
+SERVER_SETTINGS = ("EXEC_INTERNAL_QUEUE_WAIT_MS", "EXEC_INTERPRETED_BUDGET_MS")
 # Marge au-delà du pire cas modélisé : surestimer ne coûte que de l'attente.
 _READ_SAFETY_MS = 60_000
 
@@ -247,6 +251,32 @@ _READ_SAFETY_MS = 60_000
 def _env_ms(environ, name, default):
     value = (environ.get(name) or "").strip()
     return int(value) if value.isdigit() else default
+
+
+def container_setting(env_lines, name):
+    """Valeur de `name` dans les lignes NOM=valeur de l'environnement d'un conteneur, ou None.
+    FONCTION PURE (testée)."""
+    for line in env_lines:
+        key, _, value = line.partition("=")
+        if key == name:
+            return value.strip()
+    return None
+
+
+def server_settings(env_lines, environ):
+    """Réglages d'execution-service dont dépend le délai d'attente. FONCTION PURE (testée).
+
+    Ceux du CONTENEUR d'abord, comme le port et le jeton : sur l'hôte de prod (étape 2), le
+    shell qui lance le script n'a pas chargé .env.docker, et un budget relevé là ne raccourcit
+    plus l'attente du script sous la correction réelle. Le shell ensuite (étape 1 : service lancé
+    par bootRun, sans conteneur), puis les défauts (read_timeout_s)."""
+    settings = {}
+    for name in SERVER_SETTINGS:
+        for value in (container_setting(env_lines, name), environ.get(name)):
+            if value and value.strip().isdigit():
+                settings[name] = value.strip()
+                break
+    return settings
 
 
 def read_timeout_s(environ):
@@ -289,8 +319,8 @@ def classify(detail, passed, start_code=""):
         return OK
     text = detail or ""
     if text.startswith((HARNESS_BUILD_ABORTED, TOOL_ABORTED)):
-        # Compilation du noteur, inventaire javap ou sonde des noms réservés expirés ou tués
-        # (machine chargée) : pas un diagnostic. Sur le chemin interne, ces cas arrivent déjà en
+        # Compilation du noteur, inventaire javap, javac du serveur RPC (Java) ou sonde des
+        # noms réservés expirés ou tués (machine chargée) : pas un diagnostic. Sur le chemin interne, ces cas arrivent déjà en
         # 502 « sans verdict » (exception ci-dessous) ; le préfixe n'est qu'un filet. Même
         # verdict que le repli final aujourd'hui : la branche est EN TÊTE pour qu'aucune règle
         # OK ou BLOQUANT ajoutée plus bas ne puisse s'appliquer à ces messages.
@@ -359,22 +389,27 @@ def exec_port(env_lines):
     Le service écoute sur EXEC_SERVICE_PORT (défaut 8085, cf. application.properties). Avec le
     port en dur, un déploiement sur un autre port voyait chaque appel refusé, et toutes les
     questions sortaient « À VÉRIFIER » sans que rien ne désigne la cause."""
-    for line in env_lines:
-        name, _, value = line.partition("=")
-        if name == "EXEC_SERVICE_PORT" and value.strip().isdigit():
-            return int(value.strip())
-    return DEFAULT_EXEC_PORT
+    value = container_setting(env_lines, "EXEC_SERVICE_PORT")
+    return int(value) if value and value.isdigit() else DEFAULT_EXEC_PORT
 
 
-def exec_url(container):
+def container_env(container):
+    """Lignes NOM=valeur de l'environnement du conteneur execution-service ; vide s'il n'existe
+    pas (étape 1 : service lancé par bootRun, EXEC_URL et INTERNAL_TOKEN donnés)."""
+    try:
+        return run(["docker", "inspect", "-f",
+                    "{{range .Config.Env}}{{println .}}{{end}}", container]).splitlines()
+    except (subprocess.CalledProcessError, OSError):
+        return []
+
+
+def exec_url(container, env_lines):
     if os.environ.get("EXEC_URL"):
         return os.environ["EXEC_URL"].rstrip("/")
     ip = run(["docker", "inspect", "-f",
               "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", container]).split()
     if not ip:
         raise RuntimeError("IP du conteneur %s introuvable (donner EXEC_URL)" % container)
-    env_lines = run(["docker", "inspect", "-f",
-                     "{{range .Config.Env}}{{println .}}{{end}}", container]).splitlines()
     return "http://%s:%d" % (ip[0], exec_port(env_lines))
 
 
@@ -393,7 +428,7 @@ def case_name(case, index):
     return name if name and name.strip() else "cas %d" % (index + 1)
 
 
-def evaluate(base_url, token, question):
+def evaluate(base_url, token, question, timeout_s=None):
     body = {
         "language": question["language"],
         "code": question["start_code"],
@@ -413,17 +448,19 @@ def evaluate(base_url, token, question):
         base_url + "/internal/exec/evaluate", data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "X-Internal-Token": token}, method="POST")
     # Une correction peut tenir une vingtaine de minutes (attente d'une place, compilations ou
-    # budget interprété) : cf. read_timeout_s.
-    with urllib.request.urlopen(request, timeout=read_timeout_s(os.environ)) as response:
+    # budget interprété) : cf. read_timeout_s ; main le calcule avec les réglages du conteneur.
+    if timeout_s is None:
+        timeout_s = read_timeout_s(os.environ)
+    with urllib.request.urlopen(request, timeout=timeout_s) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def check_question(base_url, token, question):
+def check_question(base_url, token, question, timeout_s=None):
     """(statut, lignes de détail) d'une question."""
     if not (question.get("start_code") or "").strip():
         return TO_CHECK, ["pas de code de départ : rejouer à la main avec une solution"]
     try:
-        results = evaluate(base_url, token, question)
+        results = evaluate(base_url, token, question, timeout_s=timeout_s)
     except (OSError, http.client.HTTPException, ValueError) as e:
         # OSError couvre URLError, le délai dépassé et la connexion coupée PENDANT la lecture de
         # la réponse (ConnectionResetError), HTTPException une réponse tronquée : sans eux le
@@ -486,7 +523,8 @@ def main():
     ex = os.environ.get("EXEC_CONTAINER", "moodit_execution")
     try:
         questions = json.loads(psql(pg, INVENTORY_SQL).strip() or "[]")
-        base_url = exec_url(ex)
+        env_lines = container_env(ex)
+        base_url = exec_url(ex, env_lines)
         token = internal_token(ex)
     except (subprocess.CalledProcessError, RuntimeError, ValueError) as e:
         print("Inventaire impossible : %s" % e, file=sys.stderr)
@@ -498,7 +536,9 @@ def main():
         print("Inventaire vide : aucune question à rejouer. Le dump est-il chargé ? "
               "(--allow-empty si la base n'en a vraiment aucune)", file=sys.stderr)
         return 2
-    print("%d question(s) à rejouer." % len(questions))
+    timeout_s = read_timeout_s(server_settings(env_lines, os.environ))
+    print("%d question(s) à rejouer (attente maximale de %d s par question)."
+          % (len(questions), timeout_s))
     counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0}
     # Quiz publiés qui portent une question non réglée : eux seuls bloquent la sortie, et
     # --unpublish les ferme. Un À VÉRIFIER non acquitté en fait partie : un harnais qui teste
@@ -506,7 +546,7 @@ def main():
     blocked_published = set()
     drafts = 0
     for question in questions:
-        status, lines = check_question(base_url, token, question)
+        status, lines = check_question(base_url, token, question, timeout_s)
         if status == TO_CHECK and int(question["question_id"]) in acknowledged:
             status = OK
             lines = ["acquittée (--ack) : rejouée à la main"] + lines

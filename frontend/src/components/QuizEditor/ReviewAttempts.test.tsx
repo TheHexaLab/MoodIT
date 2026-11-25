@@ -335,6 +335,43 @@ describe('QuizEditor — tentatives à revoir', () => {
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(3));
     expect(await screen.findByText(listT.reviewBadge(1))).toBeTruthy();
   });
+
+  it('retour à la liste pendant la relance, déjà comptée par le serveur : la pastille n\'est pas décomptée une fois de trop', async () => {
+    // La lecture du retour arrive APRÈS l'enregistrement de la relance (« 1 à revoir ») : la
+    // réponse de la relance ne doit pas retirer un « à revoir » de plus à ce compte serveur. La
+    // relecture qu'elle demande reste en attente, pour que seule la garde de markRegraded compte.
+    let resolveRegrade!: () => void;
+    const onRegradeAttempt = vi.fn(
+      () => new Promise<void>((resolve) => { resolveRegrade = resolve; })
+    );
+    const onFetchQuizzes = vi
+      .fn()
+      .mockResolvedValueOnce([makeQuiz({ reviewAttemptCount: 2 })])
+      .mockResolvedValueOnce([makeQuiz({ reviewAttemptCount: 1 })])
+      .mockImplementation(() => new Promise<Quiz[]>(() => {}));
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
+        onClose={vi.fn()}
+        handlers={{
+          onFetchQuizzes,
+          onFetchReviewAttempts: vi.fn(async () => [EVA, BOB]),
+          onRegradeAttempt,
+        }}
+      />
+    );
+    fireEvent.click(await screen.findByLabelText(listT.reviewAria('Quiz A', 2)));
+    fireEvent.click(await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2)));
+    fireEvent.click(screen.getByLabelText(/retour/i));
+    expect(await screen.findByText(listT.reviewBadge(1))).toBeTruthy();
+
+    await act(async () => {
+      resolveRegrade();
+    });
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(3));
+    expect(screen.getByText(listT.reviewBadge(1))).toBeTruthy();
+  });
 });
 
 describe('ReviewAttemptsBody', () => {

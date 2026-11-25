@@ -1,6 +1,7 @@
 /**
  * Libellés du corps « Tentatives à revoir » d'un quiz (#116) : tentatives dont la correction
- * automatique a échoué sans verdict trop souvent, et qui attendent l'enseignant.
+ * automatique a échoué et que core a gardées pour l'enseignant (relance en échec, ou plafond
+ * d'échecs sans verdict atteint — cf. REVIEW_REASON, QuizView/quizAttempt.ts).
  * Passés via `labels` (en Partial) ; les champs omis prennent les défauts.
  */
 export interface ReviewAttemptsLabels {
@@ -37,7 +38,7 @@ function formatDate(iso: string | null): string | null {
 /** Textes par défaut (FR). */
 export const defaultReviewAttemptsLabels: ReviewAttemptsLabels = {
   intro:
-    "La correction automatique de ces tentatives n'a pas abouti malgré plusieurs essais : le code de l'étudiant faisait peut-être tomber le conteneur de correction. Relancez-la ; si elle échoue encore, la tentative revient ici.",
+    "La correction automatique de ces tentatives n'a pas abouti : après plusieurs échecs, le code de l'étudiant faisait peut-être tomber le conteneur de correction, ou une relance a elle-même échoué. Relancez-la ; si elle échoue encore, la tentative revient ici.",
   loading: 'Chargement des tentatives…',
   empty: 'Aucune tentative à revoir.',
   attemptLabel: (attemptNo) => `Tentative ${attemptNo}`,

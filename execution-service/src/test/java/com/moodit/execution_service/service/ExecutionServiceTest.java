@@ -139,6 +139,27 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void public_budget_exhausted_by_slot_wait_stays_a_grade() throws Exception {
+        // Même charge que ci-dessus (place tenue 600 ms par une correction interne, budget
+        // 200 ms, harnais instantanés), mais sur le chemin PUBLIC (« Tester ») : aucune tentative
+        // à reprendre, rien que core compterait. Le 502 « sans verdict » est réservé au chemin
+        // interne ; ici, le second harnais reçoit son verdict « Non évalué » et l'appel rend 200.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        Thread other = holdSlot(limiter, 600);
+
+        List<TestResult> r = svc.evaluate(twoPythonCases());
+        other.join();
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isTrue();
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
     void slow_solution_within_delay_without_wait_gets_partial_grade() {
         // Le scenario de la revue : une solution CORRECTE mais lente, chaque harnais sous son
         // delai, aucune attente de place. Le budget s'epuise de facon REPRODUCTIBLE — en faire un
@@ -213,6 +234,36 @@ class ExecutionServiceTest {
         other.join();
         assertThat(r).hasSize(2);
         assertThat(r.get(0).detail()).startsWith("Interrompu");
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    @Test
+    void budget_exhausted_by_killed_compilation_stays_a_grade() throws Exception {
+        // Variante TypeScript (job avec une étape de compilation tsc) : c'est la COMPILATION qui
+        // est tuée après 800 ms (signal, sans code, aucune étape run). Son temps compte comme
+        // une interruption due au code soumis, au même titre qu'une exécution tuée : sinon
+        // l'attente (500 ms) l'emportait sur 0 ms d'interruption, et un code qui fait exploser
+        // tsc dans une file chargée partait en 502 — un essai de plus. Mêmes marges que le test
+        // précédent : budget dépassé (1300 contre 1000), travail dedans (800), 800 > 500.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 1000;
+        when(runner.execute(anyString(), any(), any(), any())).thenAnswer(inv -> {
+            sleep(800);
+            return new RunnerExec.Result(
+                    new RunnerExec.Stage("", "", null, "SIGKILL", null), null, null);
+        });
+        Thread other = holdSlot(limiter, 500);
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(new EvaluateRequest(
+                "TypeScript", null, "function solution(): number { return 5; }",
+                List.of(new TestCaseInput("a", "return true;", 1),
+                        new TestCaseInput("b", "return true;", 2)))));
+        other.join();
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(0).detail()).startsWith("Interrompu à la compilation");
         assertThat(r.get(1).passed()).isFalse();
         assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
     }

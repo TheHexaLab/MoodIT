@@ -10,8 +10,8 @@ import java.util.Objects;
 /**
  * Échecs de correction SANS VERDICT d'un étudiant sur un quiz (#116, S4 ; table grading_failure).
  * Le conteneur runner a tourné sans rendre de verdict ; la tentative échouée est supprimée, le
- * compte vit donc ici. Au-delà du plafond, la tentative est gardée « à revoir » au lieu d'être
- * supprimée (cf. QuizService#failGrading).
+ * compte vit donc ici. Dès que le compte atteint le plafond, la tentative est gardée « à revoir »
+ * au lieu d'être supprimée (cf. QuizService#failGrading).
  */
 @Entity
 @Data

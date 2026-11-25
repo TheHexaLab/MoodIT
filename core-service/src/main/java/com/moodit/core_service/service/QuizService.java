@@ -575,11 +575,13 @@ public class QuizService {
      * reste en {@value #REVIEW}, « à revoir » par l'enseignant, et l'événement porte la raison
      * {@value #REVIEW}. Le compte n'est pas une note : l'enseignant relance la correction
      * ({@link #regradeAttempt}). Sur un quiz SANS reprise, une fois le plafond atteint, TOUT échec
-     * garde la tentative à revoir : l'étudiant ne peut plus soumettre, la seule correction encore
-     * possible est une relance de l'enseignant, et une panne de la sandbox pendant celle-ci ne
-     * doit pas effacer la tentative qu'il a sous les yeux. Sur un quiz AVEC reprise, une panne
-     * supprime la tentative comme d'habitude (l'étudiant resoumet ; la garder ne ferait que
-     * charger l'enseignant). Une correction aboutie remet le compte à zéro (cf. finalizeAttempt).
+     * garde aussi la tentative à revoir. Cas rare : après la tentative gardée au plafond,
+     * l'étudiant ne peut plus soumettre et une relance est couverte par son marqueur (ci-dessous) ;
+     * il reste un quiz dont la reprise a été retirée, ou un plafond abaissé dans la configuration,
+     * pendant qu'une correction tournait. La tentative unique est alors consommée ou en jeu :
+     * l'effacer sur une simple panne la rendrait à un étudiant déjà au plafond. Sur un quiz AVEC
+     * reprise, une panne supprime la tentative comme d'habitude (l'étudiant resoumet ; la garder
+     * ne ferait que charger l'enseignant). Une correction aboutie remet le compte à zéro (cf. finalizeAttempt).
      * Une tentative RELANCÉE par l'enseignant ({@link Attempt#isRegrade()}) revient à revoir quel
      * que soit l'échec et quel que soit le compte : sur un quiz avec reprise, une autre tentative
      * corrigée entre-temps a pu le remettre à zéro.

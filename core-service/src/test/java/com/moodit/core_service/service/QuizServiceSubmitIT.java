@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.QuestionResultDTO;
+import com.moodit.core_service.dto.QuizDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.dto.SubmittedAnswerDTO;
@@ -18,6 +19,7 @@ import com.moodit.core_service.model.Quiz;
 import com.moodit.core_service.model.TestCase;
 import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
+import com.moodit.core_service.repository.AttemptRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -49,7 +51,9 @@ import org.springframework.test.context.transaction.TestTransaction;
  *   4. relance qui échoue sur un quiz avec reprise → la tentative reste « à revoir » pendant la
  *      relance et y revient après l'échec, même si une autre tentative corrigée a remis le
  *      compte à zéro ; une seconde relance qui aboutit la note et retire le marqueur.
- * Les scénarios 3 et 4 committent leurs données (chaque correction tourne dans ses propres
+ *   5. compteur « à revoir » de l'éditeur → la requête par cours, statut et quiz, interrogée sur la
+ *      vraie base (sans commit, dans la transaction du test).
+ * Les scénarios 1, 3 et 4 committent leurs données (chaque correction tourne dans ses propres
  * transactions, comme en prod) ; {@link #purgeCommitted} les efface.
  * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
  */
@@ -77,6 +81,7 @@ class QuizServiceSubmitIT {
 
   @Autowired private QuizService quizService;
   @Autowired private TestEntityManager em;
+  @Autowired private AttemptRepository attemptRepository;
 
   // Dépendances hors périmètre JPA : mockées.
   @MockitoBean private RealtimeEventPublisher realtimePublisher;
@@ -339,11 +344,18 @@ class QuizServiceSubmitIT {
   void reviewCounter_countsReviewAttemptsOfTheCourseOnly() {
     // La requête JPQL (AttemptRepository.countByStatusPerQuiz) n'est que mockée dans les tests
     // unitaires : ici, son filtre par cours, son filtre par statut et son regroupement par quiz
-    // tournent vraiment.
+    // tournent vraiment. Interrogée DIRECTEMENT : listQuizzes ne lit que les quiz du cours, et
+    // ne verrait pas une ligne d'un autre cours qu'un filtre perdu laisserait passer.
     Quiz quiz = em.find(Quiz.class, quizId);
     User user = em.getEntityManager()
         .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
         .setParameter("email", USER_EMAIL).getSingleResult();
+    // Deux quiz du MÊME cours aux comptes différents (2 et 1) : un regroupement par cours
+    // donnerait une seule ligne à 3.
+    Quiz sibling = Quiz.builder()
+        .title("Quiz voisin").isDaily(false).isPublished(true).allowRetry(true)
+        .position(1).createdAt(LocalDateTime.now()).course(quiz.getCourse()).build();
+    em.persist(sibling);
     Course other = Course.builder().title("Autre cours").code("C2").build();
     em.persist(other);
     Quiz otherQuiz = Quiz.builder()
@@ -353,18 +365,25 @@ class QuizServiceSubmitIT {
     persistAttempt(quiz, user, 1, QuizService.REVIEW);
     persistAttempt(quiz, user, 2, QuizService.REVIEW);
     persistAttempt(quiz, user, 3, "done");
+    persistAttempt(sibling, user, 1, QuizService.REVIEW);
     persistAttempt(otherQuiz, user, 1, QuizService.REVIEW);
     Integer courseId = quiz.getCourse().getId();
+    Integer siblingId = sibling.getId();
+    Integer otherQuizId = otherQuiz.getId();
     Integer otherCourseId = other.getId();
     em.flush();
     em.clear();
 
+    assertThat(attemptRepository.countByStatusPerQuiz(courseId, QuizService.REVIEW))
+        .extracting(row -> List.of(((Number) row[0]).intValue(), ((Number) row[1]).intValue()))
+        .containsExactlyInAnyOrder(List.of(quizId, 2), List.of(siblingId, 1));
+    assertThat(attemptRepository.countByStatusPerQuiz(otherCourseId, QuizService.REVIEW))
+        .extracting(row -> List.of(((Number) row[0]).intValue(), ((Number) row[1]).intValue()))
+        .containsExactly(List.of(otherQuizId, 1));
+    // Et le compteur tel que l'éditeur le reçoit.
     assertThat(quizService.listQuizzes(courseId, false))
-        .singleElement()
-        .satisfies(q -> assertThat(q.getReviewAttemptCount()).isEqualTo(2));
-    assertThat(quizService.listQuizzes(otherCourseId, false))
-        .singleElement()
-        .satisfies(q -> assertThat(q.getReviewAttemptCount()).isEqualTo(1));
+        .extracting(QuizDTO::getReviewAttemptCount)
+        .containsExactly(2, 1);
   }
 
   private void persistAttempt(Quiz quiz, User user, int attemptNo, String status) {

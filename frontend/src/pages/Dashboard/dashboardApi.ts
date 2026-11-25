@@ -300,8 +300,9 @@ export async function fetchQuizAttempts(quizId: number): Promise<AttemptSummary[
 }
 
 /**
- * Tentatives « à revoir » d'un quiz (enseignant, #116) : leur correction a échoué sans verdict
- * trop souvent pour être resoumise.
+ * Tentatives « à revoir » d'un quiz (enseignant, #116) : correction automatique en échec, gardées
+ * par core pour l'enseignant — relance en échec, ou plafond d'échecs sans verdict atteint (règle
+ * complète : REVIEW_REASON, QuizView/quizAttempt.ts).
  */
 export async function fetchReviewAttempts(quizId: number): Promise<ReviewAttempt[]> {
   const res = await apiFetch(`/api/quizzes/${quizId}/review-attempts`);
@@ -339,7 +340,8 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     language: input.language,
     code: input.code,
     timeoutMs: input.execTimeoutMs,
-    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare.
+    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare,
+    // en Python, JavaScript, TypeScript et Bash seulement (PHP et compilés : refus inchangé).
     startCode: input.startCode,
     testCases: input.testCases.map((t) => ({
       name: t.name,

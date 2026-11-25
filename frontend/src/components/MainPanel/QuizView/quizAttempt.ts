@@ -217,7 +217,9 @@ export interface CodeEvaluationInput {
   execTimeoutMs?: number;
   /**
    * Code de départ de la question (#22) : une fonction qu'il déclare est celle que l'énoncé
-   * impose, et peut porter le nom d'une intégrée (`sum`, `max`) sans être refusée.
+   * impose, et peut porter le nom d'une intégrée (`sum`, `max`) sans être refusée comme « Nom
+   * réservé » — en Python, JavaScript, TypeScript et Bash seulement (CodeAssembler.notImposed,
+   * execution-service). En PHP et dans les six compilés, le refus vaut quel que soit ce code.
    */
   startCode?: string;
 }
@@ -298,7 +300,7 @@ export interface AttemptAccepted {
  * Verdict PUSH d'une correction asynchrone (WebSocket `quiz:attempt-graded` / `-failed`), reçu par
  * l'auteur de la tentative. `ok=false` → la tentative a échoué à l'évaluation (code inévaluable) et
  * a été supprimée : l'étudiant peut renvoyer — SAUF avec `reason` {@link REVIEW_REASON} : la
- * correction a échoué sans verdict trop souvent, la tentative est GARDÉE et attend l'enseignant.
+ * tentative est GARDÉE et attend l'enseignant (cf. {@link REVIEW_REASON}).
  */
 export interface AttemptOutcome {
   quizId: number;
@@ -307,7 +309,13 @@ export interface AttemptOutcome {
   reason?: string;
 }
 
-/** Raison d'un `quiz:attempt-failed` dont la tentative est gardée « à revoir » (#116). */
+/**
+ * Raison d'un `quiz:attempt-failed` dont la tentative est gardée « à revoir » (#116). Règle de
+ * core (QuizService.failGrading) : une correction en échec garde la tentative si c'était une
+ * RELANCE de l'enseignant (quelle que soit la cause, même avec un compte d'échecs à 0), ou si le
+ * plafond d'échecs SANS VERDICT de l'étudiant sur ce quiz est atteint et que l'échec est lui-même
+ * sans verdict ou que le quiz n'autorise pas de reprise. Sinon la tentative est supprimée.
+ */
 export const REVIEW_REASON = 'review';
 
 /** Résumé d'une tentative (historique). */

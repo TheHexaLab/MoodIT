@@ -19,9 +19,9 @@ public class AttemptSummaryDTO {
     private Double max;
     private Instant submittedAt;
     /**
-     * {@code "done"} (corrigée) ou {@code "review"} : correction impossible à répéter, la tentative
-     * attend l'enseignant (#116, S4) — {@code earned} vaut alors {@code null}, aucun verdict
-     * n'existant.
+     * {@code "done"} (corrigée) ou {@code "review"} : la correction a échoué et la tentative
+     * attend l'enseignant, qui peut la relancer — relance en cours comprise (#116, S4) ;
+     * {@code earned} vaut alors {@code null}, aucun verdict n'existant.
      */
     private String status;
 }

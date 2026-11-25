@@ -218,7 +218,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > interne de correction, puis classe chaque question : **BLOQUANT** (le harnais ne compile pas
 > contre la signature, diagnostic du compilateur à l'appui : 0 pour tout le monde), **À VÉRIFIER**
 > (pas de code de départ, code de départ qui ne compile pas seul ou sans fonction aux types
-> transportables, compilation du harnais expirée ou tuée, harnais qui appelle une fonction absente
+> transportables, compilation du harnais ou outil de la notation — `javap`, `javac` du serveur
+> RPC Java, sonde des noms réservés — expiré ou tué, harnais qui appelle une fonction absente
 > du code de départ, noteur muet ou qui refuse le format, détail non reconnu : rejouer à la main
 > avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
@@ -242,7 +243,10 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > fonctionne toujours. Le rejeu du code de départ, qui ne lève rien,
 > ne le montre pas : le script détecte ces harnais à leur texte et les sort À VÉRIFIER. Les
 > réécrire sans exception (la fonction rend une valeur sentinelle, par exemple), puis les
-> rejouer avec une solution.
+> rejouer avec une solution. Le script ne distingue pas les deux cas : il sort **aussi** À
+> VÉRIFIER le harnais Java ou Go qui vérifie seulement qu'une exception a lieu (il reconnaît tout
+> `catch (` et tout `recover(`). Celui-là n'est pas à réécrire : le rejouer avec une solution
+> (« Tester »), puis acquitter la question (`--ack`).
 >
 > **Questions interprétées : noms réservés.** Le même script rejoue aussi les questions Python,
 > JavaScript, TypeScript et Bash, pour un seul contrôle. Depuis #116, une fonction ou une classe
@@ -329,7 +333,10 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > ```
 >
 > `EXEC_URL` est obligatoire sous Docker Desktop : l'IP d'un conteneur n'y est pas joignable
-> depuis l'hôte. Le harnais C/C++ dispose de
+> depuis l'hôte. Le script attend chaque réponse aussi longtemps que le pire cas du serveur
+> (une vingtaine de minutes), calculé avec `EXEC_INTERNAL_QUEUE_WAIT_MS` et
+> `EXEC_INTERPRETED_BUDGET_MS` : lus dans le conteneur execution-service à l'étape 2 ; ici, sans
+> conteneur, les donner aussi si le `.env` local les change. Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.
 > Régler dans l'éditeur de la prod encore en place chaque quiz publié en cause (corriger ses
 > harnais, ou le fermer), rejouer à la main les À VÉRIFIER, puis reprendre un dump frais et
@@ -378,10 +385,19 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 >   ```bash
 >   git reset --hard <commit d'avant la fusion>
+>   # Images runner de la version RESTAURÉE, tag calculé comme update.sh (runner_tag) : sans
+>   # lui, le compose retombe sur `latest`, qui porte celles de la version quittée. update.sh
+>   # garde le tag de la version précédente : il doit figurer dans `docker images
+>   # moodit-runner-java` (sinon `bash docker/runners/build.sh` le reconstruit, latest compris).
+>   # Sans effet pour une version d'avant #116, qui ne lit pas ce tag.
+>   export MOODIT_RUNNER_TAG="$(git log -1 --format=%H HEAD -- docker/runners execution-service | cut -c1-12)"
+>   docker images moodit-runner-java
 >   docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build --remove-orphans
 >   ```
 >
->   et réactiver le cron, s'il y en a un, une fois le revert arrivé sur `deploiement`.
+>   et réactiver le cron, s'il y en a un, une fois le revert arrivé sur `deploiement`. Garder
+>   `MOODIT_RUNNER_TAG` exporté pour toute autre commande `docker compose` lancée à la main
+>   d'ici là.
 >
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
 > image et son volume (qui porte ses paquets) sont encore là, et le compose recrée ses conteneurs.
@@ -617,7 +633,12 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   `docker/runners/` ou `execution-service/`, pour qu'un déploiement qui ne les change pas ne
   redémarre pas le service en pleine correction (`MOODIT_RUNNER_TAG`,
   repris par execution-service via `SANDBOX_IMAGE_TAG` dans le compose) en plus de `latest` :
-  le format d'échange avec le superviseur n'a pas de version, et un service ne tourne ainsi
-  jamais avec les images d'un autre commit — ni pendant un déploiement, ni après un rollback,
-  qui reconstruit celles de la version restaurée. Les tags des commits plus anciens que le
-  précédent sont supprimés à chaque déploiement.
+  le format d'échange avec le superviseur n'a pas de version, et un service lancé par
+  `update.sh` ne tourne ainsi pas avec les images d'un autre commit — ni pendant un déploiement,
+  ni après son rollback automatique, qui reconstruit celles de la version restaurée. Une
+  commande `docker compose` lancée à la main, elle, retombe sur `latest`, qui porte les images
+  du DERNIER build : après un retour arrière à la main, exporter d'abord le tag de la version
+  restaurée (recette « Retour arrière », section « Changement de schéma »). Les tags des
+  commits plus anciens que le précédent sont supprimés à chaque déploiement. Fonctionnement du
+  noteur, des runners et de leur isolation : page wiki
+  [Exécution de code](https://github.com/TheHexaLab/MoodIT/wiki/Exécution-de-code).

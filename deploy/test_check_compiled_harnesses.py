@@ -52,9 +52,17 @@ class ClassifyTest(unittest.TestCase):
         detail = ("Le harnais n'a pas fini de compiler (temps limite de compilation dépassé ou "
                   "compilateur arrêté) : rejouer la correction.")
         self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f(int x) { return x; }"))
-        # Inventaire javap ou sonde des noms réservés expirés : même chose.
-        tool = "Un outil de la notation n'a pas abouti : l'inventaire des méthodes a expiré."
-        self.assertEqual(chk.TO_CHECK, chk.classify(tool, False, "int f(int x) { return x; }"))
+        # Inventaire javap, javac du serveur RPC (Java) ou sonde des noms réservés expirés :
+        # même chose (les trois messages TOOL_ABORTED du superviseur).
+        for tool in ("Un outil de la notation n'a pas abouti : l'inventaire des méthodes de la "
+                     "classe Solution (javap) a dépassé 30 s ou a été arrêté.",
+                     "Un outil de la notation n'a pas abouti : la compilation du serveur RPC "
+                     "(javac) n'a pas fini (temps limite dépassé ou compilateur arrêté).",
+                     "Un outil de la notation n'a pas abouti : la vérification des noms réservés "
+                     "(compilateur) a dépassé 20 s ou a été arrêtée."):
+            with self.subTest(tool=tool):
+                self.assertEqual(chk.TO_CHECK,
+                                 chk.classify(tool, False, "int f(int x) { return x; }"))
 
     def test_diagnostic_vide_a_verifier(self):
         for detail in ("Le harnais ne compile pas contre le code soumis :\n",
@@ -115,7 +123,7 @@ class ClassifyTest(unittest.TestCase):
         try:
             for error in (ConnectionResetError("coupée"), http.client.RemoteDisconnected("fermée"),
                           http.client.IncompleteRead(b"")):
-                def fails(base_url, token, q, error=error):
+                def fails(base_url, token, q, timeout_s=None, error=error):
                     raise error
                 chk.evaluate = fails
                 with self.subTest(error=type(error).__name__):
@@ -347,11 +355,13 @@ class ClassifyTest(unittest.TestCase):
     def test_inventaire_vide_echoue_sauf_allow_empty(self):
         # Un dump non chargé donnait « 0 question », bilan vide, sortie 0 : un faux feu vert.
         with mock.patch.object(chk, "psql", return_value="[]"), \
+                mock.patch.object(chk, "container_env", return_value=[]), \
                 mock.patch.object(chk, "exec_url", return_value="http://x"), \
                 mock.patch.object(chk, "internal_token", return_value="t"), \
                 mock.patch.object(chk.sys, "argv", ["check"]):
             self.assertEqual(2, chk.main())
         with mock.patch.object(chk, "psql", return_value="[]"), \
+                mock.patch.object(chk, "container_env", return_value=[]), \
                 mock.patch.object(chk, "exec_url", return_value="http://x"), \
                 mock.patch.object(chk, "internal_token", return_value="t"), \
                 mock.patch.object(chk.sys, "argv", ["check", "--allow-empty"]):
@@ -382,6 +392,7 @@ class ClassifyTest(unittest.TestCase):
             calls.clear()
             with self.subTest(argv=argv), \
                     mock.patch.object(chk, "psql", side_effect=fake_psql), \
+                    mock.patch.object(chk, "container_env", return_value=[]), \
                     mock.patch.object(chk, "exec_url", return_value="http://x"), \
                     mock.patch.object(chk, "internal_token", return_value="t"), \
                     mock.patch.object(chk, "evaluate", return_value=verdict), \
@@ -469,6 +480,55 @@ class ReadTimeoutTest(unittest.TestCase):
         # Valeur vide ou illisible : le défaut du service.
         self.assertEqual(default, chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "",
                                                       "EXEC_INTERNAL_QUEUE_WAIT_MS": "abc"}))
+
+    def test_reglages_lus_d_abord_dans_le_conteneur(self):
+        # Revue #246 : sur l'hôte de prod, le shell n'a pas chargé .env.docker ; un budget relevé
+        # pour le service ne rallongeait pas l'attente du script, qui renonçait avant le noteur.
+        lines = ["PATH=/usr/bin", "EXEC_INTERPRETED_BUDGET_MS=1800000",
+                 "EXEC_INTERNAL_QUEUE_WAIT_MS=abc"]
+        shell = {"EXEC_INTERPRETED_BUDGET_MS": "600000", "EXEC_INTERNAL_QUEUE_WAIT_MS": "300000"}
+        # Conteneur d'abord ; valeur illisible dans le conteneur : celle du shell.
+        self.assertEqual({"EXEC_INTERPRETED_BUDGET_MS": "1800000",
+                          "EXEC_INTERNAL_QUEUE_WAIT_MS": "300000"},
+                         chk.server_settings(lines, shell))
+        # Sans conteneur (étape 1, bootRun) : le shell ; sans rien : les défauts.
+        self.assertEqual(shell, chk.server_settings([], shell))
+        self.assertEqual({}, chk.server_settings([], {}))
+        self.assertEqual("1", chk.container_setting(["A=0", "AB=2", "B=1"], "B"))
+        self.assertIsNone(chk.container_setting(["AB=2"], "A"))
+
+    def test_main_attend_selon_le_conteneur(self):
+        # Le délai passé à chaque appel suit le conteneur, même quand le shell n'a rien.
+        inventory = [{"quiz_id": 1, "quiz_title": "Q", "published": True, "question_id": 1,
+                      "language": "Java", "start_code": "class S {}", "exec_timeout_ms": None,
+                      "cases": [{"id": 1, "name": "c", "harnessCode": "return S.f() == 1;",
+                                 "weight": 1}]}]
+        seen = []
+
+        def fake_evaluate(base_url, token, question, timeout_s=None):
+            seen.append(timeout_s)
+            return [{"passed": True, "detail": None}]
+        with mock.patch.object(chk, "psql", return_value=chk.json.dumps(inventory)), \
+                mock.patch.object(chk, "container_env",
+                                  return_value=["EXEC_INTERPRETED_BUDGET_MS=1800000"]), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk, "evaluate", side_effect=fake_evaluate), \
+                mock.patch.dict(chk.os.environ, {}, clear=True), \
+                mock.patch.object(chk.sys, "argv", ["check"]):
+            self.assertEqual(0, chk.main())
+        self.assertEqual([chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "1800000"})], seen)
+        self.assertGreater(seen[0], chk.read_timeout_s({}))
+
+    def test_container_env_vide_sans_conteneur(self):
+        # Étape 1 : service lancé par bootRun, pas de conteneur — ni arrêt ni exception.
+        failure = chk.subprocess.CalledProcessError(1, ["docker"])
+        for error in (failure, FileNotFoundError("docker")):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(chk, "run", side_effect=error):
+                self.assertEqual([], chk.container_env("moodit_execution"))
+        with mock.patch.object(chk, "run", return_value="A=1\nB=2\n"):
+            self.assertEqual(["A=1", "B=2"], chk.container_env("moodit_execution"))
 
     def test_la_demande_attend_ce_delai(self):
         seen = {}

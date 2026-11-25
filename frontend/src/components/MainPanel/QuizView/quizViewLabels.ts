@@ -84,7 +84,7 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   awaitingReviewStatus: "En attente de l'enseignant",
   awaitingReviewTitle: 'Tentative transmise à votre enseignant',
   awaitingReview:
-    "La correction automatique de votre code n'a pas abouti malgré plusieurs essais. Votre tentative est enregistrée et votre enseignant va relancer sa correction : vous recevrez votre résultat ici.",
+    "La correction automatique de votre code n'a pas abouti. Votre tentative est enregistrée et votre enseignant va relancer sa correction : vous recevrez votre résultat ici.",
   reviewGraded: 'Votre tentative a été corrigée : son résultat est affiché.',
   errorTitle: 'Soumission impossible',
   retry: 'Réessayer',

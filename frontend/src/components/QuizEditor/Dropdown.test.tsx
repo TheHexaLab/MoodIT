@@ -135,10 +135,12 @@ describe('Dropdown', () => {
     mockControlRect({ top: 100, bottom: 130, left: 20, width: 200 });
     renderDropdown();
     fireEvent.click(control());
+    // Le contrôle a bougé (remonté de 40 px) AVANT le défilement de la liste : c'est donc la garde
+    // « défilement dans le menu » qui le garde ouvert, pas l'absence de mouvement du contrôle.
+    mockControlRect({ top: 60, bottom: 90, left: 20, width: 200 });
     fireEvent.scroll(screen.getByRole('listbox'));
     expect(screen.getByRole('listbox')).toBeTruthy();
-    // Le corps défile vraiment : le contrôle est remonté de 40 px à l'écran.
-    mockControlRect({ top: 60, bottom: 90, left: 20, width: 200 });
+    // Le corps défile vraiment (même déplacement) : le menu se ferme.
     fireEvent.scroll(document);
     expect(screen.queryByRole('listbox')).toBeNull();
   });

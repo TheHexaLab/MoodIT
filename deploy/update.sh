@@ -334,6 +334,9 @@ fi
 docker image prune -f >/dev/null 2>&1 || true
 # Images runner des commits ANTÉRIEURS : on garde latest, la version déployée et la précédente
 # (rollback à la main). Une image encore utilisée par un conteneur n'est pas supprimée.
+# `latest` porte TOUJOURS les images de ce déploiement : un retour arrière à la main doit
+# exporter MOODIT_RUNNER_TAG=<tag de la version restaurée> avant `docker compose up`, sans quoi
+# l'ancien service tournerait avec les nouvelles images (recette : DEPLOY.md, « Retour arrière »).
 docker images --format '{{.Repository}}:{{.Tag}}' | grep '^moodit-runner-' | while read -r image; do
   case "${image##*:}" in
     latest|"$NEW_RUNNER_TAG"|"$OLD_RUNNER_TAG") ;;

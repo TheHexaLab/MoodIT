@@ -209,9 +209,9 @@ export interface QuizAttemptApi {
   /** Le quiz autorise-t-il une nouvelle tentative ? */
   allowRetry: boolean;
   /**
-   * La tentative affichée attend l'ENSEIGNANT : sa correction automatique a échoué sans verdict
-   * trop souvent (#116). Elle compte comme soumise, mais n'a ni note ni corrigé : la vue affiche un
-   * message à la place du résumé.
+   * La tentative affichée attend l'ENSEIGNANT (#116) : sa correction automatique a échoué et core
+   * l'a gardée « à revoir » (règle : cf. REVIEW_REASON, quizAttempt.ts). Elle compte comme soumise,
+   * mais n'a ni note ni corrigé : la vue affiche un message à la place du résumé.
    */
   awaitingReview: boolean;
   /**

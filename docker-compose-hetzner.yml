@@ -5,10 +5,12 @@
 #   2. Caddy AJOUTÉ     → seul conteneur exposé sur Internet (HTTPS auto Let's Encrypt).
 # Le frontend (nginx) reste le reverse-proxy applicatif interne (/api, /mcp, /ws → gateway).
 #
-# Lancer depuis la RACINE du repo :
-#   docker compose -f deploy/docker-compose-hetzner.yml up -d --build
+# Lancer depuis la RACINE du repo (c'est ce que fait deploy/update.sh, qui tague en plus les
+# images runner par commit — cf. deploy/DEPLOY.md, « 5. Démarrer » et « Mettre à jour la prod ») :
+#   ./docker/runners/build.sh
+#   docker compose --env-file .env.docker -f docker-compose-hetzner.yml up -d --build
 #
-# Pré-requis : un fichier .env.docker à la racine (cf. deploy/.env.docker.example).
+# Pré-requis : un fichier .env.docker à la racine (cf. deploy/env.docker.example).
 
 services:
   # ── Reverse-proxy public + TLS automatique ───────────────────────────────

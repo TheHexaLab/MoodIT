@@ -79,9 +79,11 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    // Pas de verdicts (question Code sans harnais, ou résultat « en cours ») : placeholder.
-    // La correction est ASYNCHRONE (202 puis verdict poussé par WebSocket) : tant qu'elle tourne,
-    // la tentative n'a pas encore les verdicts de ses harnais.
+    // Pas de verdicts : placeholder. Un résultat n'est lu qu'une fois la tentative corrigée
+    // (`done`), donc jamais pendant la correction asynchrone. Causes réelles : question sans
+    // harnais, ou sans verdict enregistré pour ses harnais ACTUELS (harnais modifiés après la
+    // correction ; core répond alors « en cours », CodeGrading.pending), et le mode maquette, où
+    // le grader local ne sait pas exécuter le code (« non évalué », grading.ts).
     return (
       <p className={styles.testNote}>
         <Spinner tone="current" size={14} /> {labels.evaluating}

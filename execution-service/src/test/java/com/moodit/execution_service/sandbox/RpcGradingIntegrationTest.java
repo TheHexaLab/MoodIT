@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * du nonce dans les fichiers du noteur (section 3). Elles doivent échouer parce qu'il n'y a plus
  * RIEN à attaquer dans le processus de l'étudiant — pas parce qu'on les détecte. La lecture du
  * jeton dans sa propre mémoire n'est plus rejouée : le nonce vit dans un autre processus, sous un
- * autre UID (cf. java_forged_answer_and_token_fail).
+ * autre UID (cf. java_forged_answer_fails).
  */
 class RpcGradingIntegrationTest {
 
@@ -2372,7 +2372,7 @@ class RpcGradingIntegrationTest {
     // ──────────────────── 2. Forger le résultat : plus aucun canal ────────────────────
 
     @Test
-    void java_forged_answer_and_token_fail() {
+    void java_forged_answer_fails() {
         // Devancer la réponse RPC (dès le chargement de la classe, puis à l'appel) et rendre
         // une valeur fausse : si une réponse forgée était prise pour la vraie, le cas passerait.
         // (Le nonce n'est pas dans la mémoire du code soumis — autre processus, autre UID — :

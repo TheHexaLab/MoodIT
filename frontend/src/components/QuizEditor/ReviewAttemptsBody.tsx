@@ -21,7 +21,8 @@ interface ReviewAttemptsBodyProps {
 
 /**
  * Corps « Tentatives à revoir » d'un quiz (#116) : liste des tentatives dont la correction a
- * échoué sans verdict au-delà du plafond, avec un bouton « Relancer la correction » par
+ * échoué et que core a gardées (relance en échec, ou plafond d'échecs sans verdict atteint — cf.
+ * REVIEW_REASON, QuizView/quizAttempt.ts), avec un bouton « Relancer la correction » par
  * tentative. Une relance réussie retire la ligne (la tentative repart en correction ; si elle
  * échoue encore, elle reviendra). Rendu dans la coquille commune par `QuizEditor`.
  */

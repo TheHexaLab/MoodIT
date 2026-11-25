@@ -154,5 +154,6 @@ docker-compose.override.yml
 *.log
 logs/
 
-# Python (scripts de .github/scripts)
+# Python : cache des scripts et de leurs tests, où qu'ils soient (.github/scripts, deploy/,
+# docker/runners/common/…)
 __pycache__/

@@ -407,8 +407,9 @@ public class DockerEvaluator {
         // « null » un NullNode). Sans cette garde, `results` était simplement vide, chaque cas
         // recevait « Notation incomplète » passed=false — une liste de verdicts VALIDE aux yeux
         // de core, qui persistait un 0 sur une tentative UNIQUE. Un superviseur mort sans JSON
-        // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée, collecte des
-        // logs expirée) n'est pas une note : 502 (cf. deadSupervisor pour sa cause).
+        // (OOM du cgroup — les tmpfs comptent dans la mémoire —, image cassée) n'est pas une note :
+        // 502 (cf. deadSupervisor pour sa cause ; une collecte des journaux expirée lève dès
+        // DockerSandbox.run et n'arrive pas ici).
         if (!root.isObject()) {
             log.warn("Superviseur de notation muet (exit {}) : {}", run.exitCode(),
                     truncate(run.stderr()));
@@ -420,12 +421,15 @@ public class DockerEvaluator {
         }
         // Notation INCOMPLETE : une erreur interne du superviseur en traitant le code soumis, ou un
         // cas INTERROMPU par la plateforme (cause « interrompu » côté superviseur : compilation
-        // du noteur expirée ou tuée, inventaire javap ou sonde des noms réservés expirés). Ces
+        // du noteur, inventaire javap, javac du serveur RPC Java ou sonde des noms réservés,
+        // expirés ou tués). Ces
         // derniers arrivaient ici comme des verdicts ordinaires (passed=false) : un 0 définitif
         // que personne ne pouvait rejouer (regradeAttempt n'accepte que « à revoir »). Sur
         // le chemin interne, ce n'est pas une note (502, tentative a reprendre), mais c'est
-        // COMPTE « sans verdict » (#116, S4) : l'extraction des signatures et les bouchons lisent
-        // le code soumis, qui peut donc la provoquer. Un bogue deterministe du superviseur sur
+        // COMPTE « sans verdict » (#116, S4). Seule la cause « erreur » peut venir du code soumis
+        // (l'extraction des signatures et les bouchons le lisent) ; « interrompu » ne le peut pas
+        // (bornes du superviseur, cf. platform_aborted), mais le drapeau « incomplet » ne sépare
+        // pas les deux : un incident de plateforme compte donc aussi. Un bogue deterministe du superviseur sur
         // une soumission honnete finit ainsi « a revoir ». Un budget epuise, lui, reste une note partielle :
         // dans le conteneur l'attente de place a deja eu lieu, le budget ne mesure que le
         // travail, et son epuisement est reproductible. Le « Tester » garde ses verdicts.

@@ -83,8 +83,10 @@ export class QuizSaveRejectedError extends Error {
 
 /**
  * Tentative « à revoir » d'un quiz, vue par l'enseignant (#116) : sa correction automatique a
- * échoué sans verdict trop souvent. `noVerdictFailures` = échecs sans verdict de l'étudiant sur ce
- * quiz.
+ * échoué et core l'a gardée — relance de l'enseignant en échec (quelle que soit la cause), ou
+ * plafond d'échecs sans verdict atteint (règle complète : REVIEW_REASON, QuizView/quizAttempt.ts).
+ * `noVerdictFailures` = échecs sans verdict de l'étudiant sur ce quiz (peut valoir 0 : remis à
+ * zéro par une autre tentative corrigée).
  */
 export interface ReviewAttempt {
   attemptId: number;

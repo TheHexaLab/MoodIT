@@ -4474,11 +4474,16 @@ def c_reserved_names(names, compiler, std, case_dir, env):
                                      case_dir, env, remaining,
                                      os.path.join(case_dir, "sonde.out"),
                                      os.path.join(case_dir, "sonde.err"), preexec_compile)
-        if expired:
+        # Expirée OU TUÉE par un signal (OOM du cgroup ou de l'hôte : les outils sont à
+        # oom_score_adj 500) : une sonde morte ne dit rien du nom, et un code < 0 lu comme
+        # « ne compile pas » refusait un nom innocent. Non provocable par le code soumis : la
+        # sonde ne porte que les noms que le HARNAIS emploie, dans un fichier d'en-têtes
+        # (0,2 s et 50 Mo mesurés, 1 CPU, 1 Go).
+        if expired or (code is not None and code < 0):
             raise ToolAborted(
                 TOOL_ABORTED + " : la vérification des noms réservés (compilateur) a dépassé "
-                "%d s (machine de correction chargée). Le code soumis n'est pas en cause : la "
-                "correction est à rejouer." % C_PROBE_BUDGET_S)
+                "%d s ou a été arrêtée (machine de correction chargée). Le code soumis n'est pas "
+                "en cause : la correction est à rejouer." % C_PROBE_BUDGET_S)
         return code == 0
 
     if not names or compiles(names):
@@ -6496,13 +6501,16 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             case_dir, env, LIST_TIMEOUT_S,
                             os.path.join(case_dir, "javap.out"), os.path.join(case_dir, "javap.err"),
                             preexec_compile)
-    # Inventaire NON abouti : ce n'est pas le code soumis qui est en cause (JVM froide sur un
-    # hôte chargé). Le dire, plutôt que « aucune méthode exploitable », qui accuse la réponse.
-    if expired:
+    # Inventaire NON abouti — expiré, ou TUÉ par un signal (OOM du cgroup ou de l'hôte : javap
+    # est à oom_score_adj 500) : ce n'est pas le code soumis qui est en cause (JVM froide sur
+    # un hôte chargé). Le dire, plutôt que « aucune méthode exploitable », qui accuse la
+    # réponse. Non provocable : au plus JAVA_MAX_CLASSES classes, javap 1,1 s et 59 Mo à 256
+    # classes (1 CPU, 1 Go).
+    if expired or (code is not None and code < 0):
         return None, (TOOL_ABORTED + " : l'inventaire des méthodes de la classe " + klass
-                      + " (javap) a dépassé " + str(LIST_TIMEOUT_S) + " s (machine de "
-                      "correction chargée). Le code soumis n'est pas en cause : la correction "
-                      "est à rejouer.")
+                      + " (javap) a dépassé " + str(LIST_TIMEOUT_S) + " s ou a été arrêté "
+                      "(machine de correction chargée). Le code soumis n'est pas en cause : la "
+                      "correction est à rejouer.")
     # Plafond LARGE : une signature par ligne, et la troncature « tête + queue » de read_capped
     # retirait celles du milieu dès 64 Kio — méthodes absentes du bouchon, harnais qui ne
     # compile plus. La taille reste bornée par les classes que javac vient d'accepter.

@@ -1489,7 +1489,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         # Le noteur n'accepte qu'une ligne portant l'identifiant de SON appel : sans lui, une
         # exception du code soumis n'était jamais consommée et le couple s'attendait jusqu'au
         # temps limite. Les cinq autres langages tenaient déjà cet invariant.
-        server = supervisor.java_server_source("Solution")
+        server = supervisor.java_server_source(["Solution"])
         self.assertIn('"{\\"ok\\":false,\\"id\\":\\""', server)
         self.assertIn('entre(ligne, "\\"id\\":\\"", "\\"")', server)
 
@@ -1526,7 +1526,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
     # CI : c'est le seul garde-fou qui ferme vraiment le motif « invariant tenu presque partout »,
     # celui qui a produit quatre des cinq tours de correctifs de cette série.
     DISPATCHERS = (
-        ("java", lambda: supervisor.java_server_source("Solution")),
+        ("java", lambda: supervisor.java_server_source(["Solution"])),
         ("go", lambda: supervisor.go_server_source([("int", "f", [])])),
         ("go objets", lambda: supervisor.go_server_source(
             [], [("R", [], [("int", "m", [])])], {"R": [("c", "int")]})),
@@ -1567,8 +1567,40 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
                      if emitted.search(l) and "stderr" not in l and "__asm__" not in l]
             self.assertTrue(sites, "aucun site de réponse trouvé en " + ident)
             for site in sites:
-                self.assertIn(chr(92) + "n", site.split("(", 1)[1][:24],
-                              "réponse non cadrée en %s : %s" % (ident, site))
+                # Le PREMIER argument émis — l'expression entière (`"\n" + reponse + "\n"`) ou la
+                # chaîne de format (`"\n%s|ok|%d\n"`, `"\n{}\n"`) — doit COMMENCER par un saut
+                # de ligne (il referme une ligne partielle du code soumis, l'objet du test) et
+                # FINIR par un (la réponse est une ligne entière). Chercher un `\n` dans les
+                # premiers caractères ne voyait pas l'absence du premier : le `\n` final d'un
+                # format court suffisait à rendre le test vert.
+                emitted_arg = self.first_argument(site[emitted.search(site).end():])
+                self.assertTrue(emitted_arg.startswith('"' + chr(92) + "n"),
+                                "réponse sans saut de ligne AVANT en %s : %s" % (ident, site))
+                self.assertTrue(emitted_arg.endswith(chr(92) + 'n"'),
+                                "réponse sans saut de ligne APRÈS en %s : %s" % (ident, site))
+
+    @staticmethod
+    def first_argument(rest):
+        """Premier argument d'un appel, `rest` commençant juste après sa parenthèse ouvrante :
+        jusqu'à la première virgule ou parenthèse fermante de premier niveau hors littéral."""
+        depth, quoted, i = 0, False, 0
+        while i < len(rest):
+            c = rest[i]
+            if quoted:
+                if c == chr(92):
+                    i += 1
+                elif c == '"':
+                    quoted = False
+            elif c == '"':
+                quoted = True
+            elif c == "(":
+                depth += 1
+            elif c == ")" and depth:
+                depth -= 1
+            elif c in ",)":
+                break
+            i += 1
+        return rest[:i].strip()
 
     def test_depth_ignores_literals_and_comments(self):
         # Un comptage naïf se faisait déséquilibrer par une accolade en littéral, et toutes les
@@ -4716,6 +4748,11 @@ class PlatformInterruptionTest(unittest.TestCase):
                 supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17", self.directory, {})
         self.assertTrue(raised.exception.args[0].startswith(supervisor.TOOL_ABORTED))
         self.assertLessEqual(max(timeouts), supervisor.C_PROBE_BUDGET_S)
+        # Une sonde TUÉE par un signal (OOM : code < 0) ne dit rien du nom non plus : lue comme
+        # « ne compile pas », elle refusait un nom innocent.
+        with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (-9, False)):
+            with self.assertRaises(supervisor.ToolAborted):
+                supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17", self.directory, {})
         # Une sonde terminée garde son sens : compile → pas réservé ; échoue → réservé.
         with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (0, False)):
             self.assertEqual([], supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17",
@@ -4735,6 +4772,15 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertFalse(supervisor.platform_aborted(refusal))
         source = inspect.getsource(supervisor.run_java_rpc)
         self.assertLess(source.index("java_class_count_refusal("), source.index('["javap"'))
+
+    def test_killed_javap_is_interrupted_not_graded(self):
+        # javap TUÉ par un signal (code < 0) : seul `expired` était testé, et le cas tombait sur
+        # « Aucune méthode statique ni objet exploitable » — un 0 qui accuse la réponse.
+        source = inspect.getsource(supervisor.run_java_rpc)
+        inventory = source[source.index('["javap"'):]
+        message = inventory.index("l'inventaire des méthodes")
+        self.assertLess(inventory.index("expired or (code is not None and code < 0)"), message)
+        self.assertLess(message, inventory.index("Aucune méthode statique ni objet exploitable"))
 
     def test_java_rpc_server_compile_abort_is_interrupted(self):
         # javac du SERVEUR RPC expiré ou tué : « Erreur interne du noteur » sans cause, donc un 0
