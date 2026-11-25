@@ -20,6 +20,7 @@ import { apiFetch } from '../../helpers/api.ts';
 import { QuizSaveRejectedError } from '../../components/QuizEditor/editorTypes.ts';
 import {
   ExecutionBusyError,
+  SubmissionInProgressError,
   SubmissionRejectedError,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import {
@@ -360,10 +361,34 @@ describe('submitQuiz', () => {
   });
 
   it('throw quand la réponse est en erreur', async () => {
-    mockedApiFetch.mockResolvedValueOnce(errRes(409));
+    mockedApiFetch.mockResolvedValueOnce(errRes(500));
     await expect(
       submitQuiz({ quizId: 5, answers: [] })
     ).rejects.toThrow('Échec de la soumission du quiz');
+  });
+
+  it('409 JSON de cause « en_cours » (correction déjà en cours) → SubmissionInProgressError', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => '{"cause":"en_cours","message":"Une correction de ce quiz est déjà en cours."}',
+    } as Response);
+    await expect(submitQuiz({ quizId: 5, answers: [] })).rejects.toBeInstanceOf(
+      SubmissionInProgressError
+    );
+  });
+
+  it.each([
+    ['texte (tentative déjà soumise)', 'Vous avez déjà soumis ce quiz.'],
+    ['JSON d’une autre cause', '{"cause":"autre"}'],
+    ['JSON illisible', '{pas du json'],
+    ['JSON null', 'null'],
+    ['corps vide', ''],
+  ])('409 %s → échec ordinaire, pas d’attente', async (_case, body) => {
+    mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 409, text: async () => body } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(SubmissionInProgressError);
+    expect((error as Error).message).toBe('Échec de la soumission du quiz');
   });
 
   it.each([

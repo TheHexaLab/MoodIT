@@ -466,3 +466,16 @@ export class SubmissionRejectedError extends Error {
     this.reason = reason;
   }
 }
+
+/**
+ * Soumission refusée en 409 : une tentative de l'étudiant est déjà en correction sur ce quiz
+ * (index `uq_attempt_pending` de core), ou sa tentative unique est déjà consommée (ailleurs, ex.
+ * un autre onglet). Core ne distingue pas les deux : la vue rejoint l'attente de la correction,
+ * qui ouvre le résumé dès que la tentative apparaît dans l'historique.
+ */
+export class SubmissionInProgressError extends Error {
+  constructor() {
+    super('Une tentative est déjà en cours de correction');
+    this.name = 'SubmissionInProgressError';
+  }
+}

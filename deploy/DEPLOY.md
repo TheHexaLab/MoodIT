@@ -377,9 +377,24 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > `origin/deploiement`, donc à la version qu'on veut quitter (et un `update.sh` en cron annule de
 > même un retour fait à la main). Deux voies :
 >
-> - **durable** : un `git revert` de la fusion sur `main`, puis la PR `main → deploiement`
->   habituelle ; `update.sh` déploie alors l'ancienne version (sans `docker/runners/`, il n'y
->   construit pas d'images runner ; pour `V5`, voir plus bas) ;
+> - **durable** : un revert de la fusion sur `main` qui **garde `db/` intact**, puis la PR
+>   `main → deploiement` habituelle ; `update.sh` déploie alors l'ancienne version (sans
+>   `docker/runners/`, il n'y construit pas d'images runner ; pour `V5`, voir plus bas) :
+>
+>   ```bash
+>   git switch -c fix/116-retour-arriere origin/main
+>   git revert -m 1 --no-commit <commit de fusion>
+>   git checkout HEAD -- db     # migrations (V4 à V7) et démo telles que sur main
+>   git commit                   # titre conventionnel, ex. « revert(execution): … (#116) »
+>   ```
+>
+>   Un `git revert` simple supprimerait `V4` à `V7` : le job CI `schema` refuse une migration
+>   supprimée ou modifiée, et CLAUDE.md l'interdit. La prod les a déjà appliquées : sans leurs
+>   fichiers, Flyway les tiendrait pour des versions « futures » et les ignorerait, mais une
+>   migration suivante pourrait reprendre leur numéro, et les bases neuves n'auraient plus le
+>   schéma de la prod. Gardées, elles restent appliquées en prod et s'appliquent aux bases
+>   neuves (dev, e2e, CI) : l'ancienne version tourne sur le schéma de cette version (voir
+>   ci-dessous pourquoi c'est sans danger). `db/demo/` suit la même règle (`V2_3` y a changé) ;
 > - **urgence**, en attendant : si un cron lance `update.sh` (`crontab -l`), suspendre cette
 >   ligne (`crontab -e`), puis
 >
@@ -402,7 +417,11 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
 > image et son volume (qui porte ses paquets) sont encore là, et le compose recrée ses conteneurs.
 > `V4`, `V6` et `V7` sont additives (colonne nullable, nouvelle table, colonne à valeur par
-> défaut) : l'ancien core, en `ddl-auto=validate`, démarre avec elles. `V5`, elle, **n'est pas
+> défaut) : l'ancien core, en `ddl-auto=validate`, démarre avec elles — la validation
+> d'Hibernate vérifie que les tables et colonnes de SES entités existent, et ignore celles en
+> plus (`Question.exec_timeout_ms`, `Attempt.regrade`, `Grading_Failure`). Ses écritures ne les
+> nomment pas : `exec_timeout_ms` reste NULL, `regrade` prend son défaut `FALSE`, et
+> `Grading_Failure` suit la suppression d'un quiz ou d'un compte par `ON DELETE CASCADE`. `V5`, elle, **n'est pas
 > réversible** : elle a réécrit les six gabarits de harnais compilés au format booléen, et
 > l'ancienne version les lirait tels quels — après un retour arrière, restaurer ces gabarits depuis
 > la sauvegarde que `update.sh` prend avant les migrations, ou les recréer dans l'éditeur.
@@ -578,7 +597,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   d'execution-service. Les quiz SANS harnais passent par un autre pool (`quizExecutor`) et
   n'attendent jamais derrière une correction compilée. Au-delà de la file du pool de code
   (`QUIZ_CODE_GRADING_QUEUE`, 500), une soumission est refusée proprement : tentative supprimée,
-  `quiz:attempt-failed` poussé, l'étudiant resoumet. Le bouton « Tester » d'un
+  `quiz:attempt-failed` poussé, l'étudiant resoumet (sauf relance de l'enseignant, ou plafond
+  d'échecs atteint sur un quiz sans reprise : gardée « à revoir », cf. `QuizService#failGrading`). Le bouton « Tester » d'un
   prof sur une question compilée pèse autant qu'une correction (même conteneur, même place).
   Une CLASSE ENTIÈRE qui soumet un quiz compilé dans la même minute (fin de créneau, examen)
   attendra longtemps ses résultats : avant ce scénario, relever **ensemble**

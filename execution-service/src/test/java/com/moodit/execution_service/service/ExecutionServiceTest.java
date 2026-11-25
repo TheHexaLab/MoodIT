@@ -355,8 +355,9 @@ class ExecutionServiceTest {
 
     @Test
     void ample_budget_evaluates_every_harness() {
-        // Contrôle négatif du test ci-dessus : avec le budget par défaut (15 min), l'échéance
-        // n'intervient jamais — sinon le test précédent passerait pour la mauvaise raison.
+        // Contrôle négatif de budget_exceeded_remaining_harnesses_not_launched : avec le budget
+        // par défaut (15 min, plafonné ici à PUBLIC_WALL_MS puisque l'appel est public),
+        // l'échéance n'intervient jamais — sinon ce test-là passerait pour la mauvaise raison.
         runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
 
         List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
@@ -620,8 +621,12 @@ class ExecutionServiceTest {
                     "return true;"));
             assertThat(results).hasSize(1);
             assertThat(results.get(0).passed()).isFalse();
+            // Ni le nom fautif ni son caractère invisible ne sont recopiés dans le détail, pour
+            // CHAQUE nom (U+0001 comme U+200B).
             assertThat(results.get(0).detail()).contains("caractère de contrôle ou invisible")
-                    .doesNotContain(String.valueOf(control));
+                    .doesNotContain(className)
+                    .doesNotContain(String.valueOf(control))
+                    .doesNotContain(String.valueOf(zeroWidthSpace));
         }
         // Nom à la fois TROP LONG et porteur d'un caractère invisible : le diagnostic du caractère
         // passe AVANT celui de la longueur, qui citerait le préfixe, caractère compris.
@@ -756,7 +761,8 @@ class ExecutionServiceTest {
     @Test
     void timeout_is_forwarded_to_the_runner_for_interpreted_and_sql() {
         // Un retour silencieux au défaut (3 s) passerait avec any() : on épingle eq(42_000)
-        // sur le chemin interprété ET sur le chemin SQL (chaque phase a son conteneur).
+        // sur le chemin interprété, sur le chemin SQL en lecture seule (un conteneur) ET sur le
+        // chemin SQL en modification (runSqlIsolated : un conteneur par phase).
         runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         service.evaluate(new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("t", "return True", 1)), 42_000));
@@ -764,8 +770,27 @@ class ExecutionServiceTest {
 
         service.evaluate(new EvaluateRequest("SQL", null, "SELECT 1;",
                 List.of(new TestCaseInput("t", "SELECT 1;", 1)), 42_000));
-        verify(runner, org.mockito.Mockito.atLeastOnce())
-                .execute(eq("sqlite3"), any(), any(), eq(42_000));
+        verify(runner, times(1)).execute(eq("sqlite3"), any(), any(), eq(42_000));
+    }
+
+    @Test
+    void timeout_is_forwarded_to_both_isolated_sql_phases() {
+        // Harnais à marqueur « -- @student » : runSqlIsolated lance DEUX conteneurs (phase 1 qui
+        // rend le dump, phase 2 qui note). Les deux reçoivent le temps limite demandé.
+        runnerRun(files -> {
+            String nonce = nonceIn(files);
+            if (files.get(0).content().contains(".dump")) {
+                return new RunnerExec.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
+                        + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
+                        + CodeAssembler.sqlDumpEnd(nonce) + "\n", "", 0, null, null);
+            }
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
+        });
+        List<TestResult> r = service.evaluate(new EvaluateRequest("SQL", null,
+                "UPDATE t SET n = 0", List.of(new TestCaseInput("t", SQL_MUTATION_HARNESS, 1)),
+                42_000));
+        assertThat(r).singleElement().satisfies(t -> assertThat(t.passed()).isTrue());
+        verify(runner, times(2)).execute(eq("sqlite3"), any(), any(), eq(42_000));
     }
 
     @Test

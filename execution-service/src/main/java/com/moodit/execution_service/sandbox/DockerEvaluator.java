@@ -21,8 +21,8 @@ import java.util.Map;
  * JSON illisible ou des canaris incohérents ne deviennent JAMAIS un « réussi ».
  *
  * Les ÉVÉNEMENTS du superviseur (compilation rejouée, erreur interne, cas sauté…) sont
- * journalisés côté serveur seulement : aucun ne porte d'index de cas, ils ne sont jamais annexés
- * aux verdicts. Des canaris incohérents, eux, invalident les verdicts (« Incohérence détectée »).
+ * journalisés côté serveur seulement : ils portent l'index du cas pour le journal, mais ne sont
+ * jamais annexés aux verdicts et n'en modifient aucun. Des canaris incohérents, eux, invalident les verdicts (« Incohérence détectée »).
  */
 @Component
 public class DockerEvaluator {
@@ -367,12 +367,12 @@ public class DockerEvaluator {
      * dépasse le mur entier (295 s en Java) : le « Tester » du prof ne notait qu'un cas, voire
      * aucun quand un canari passait en premier, sur les six langages compilés.
      *
-     * <p>Ce plancher ne relâche l'invariant QUE là où il était déjà insatisfiable. Dès que
-     * {@code mur ≥ 2,5 × pireCas} — tous les murs non plafonnés, puisque le mur candidat vaut
-     * {@code 30 s + (N+2) × pireCas ≥ 3 × pireCas} — la marge de 40 % couvre le pire cas et
-     * l'invariant tient. Sous le plafond public, il cédait déjà (marge réelle 239 s < 295 s,
-     * pour un budget de 1 s) ; la conséquence d'un mur atteint y est un 502 sur le « Tester »
-     * du prof, sans tentative supprimée — le chemin interne, lui, garde la formule stricte.
+     * <p>Ce plancher ne joue que sur le chemin PUBLIC (mur plafonné à 4 min), où il remplace la
+     * formule stricte : il relâche l'invariant budget + pireCas + marge ≤ mur, y compris là où
+     * la formule stricte restait satisfiable (Go, Rust, C# : 15 s de budget strict avec le
+     * temps limite par défaut ; C/C++ et Java, elle, cédait déjà). Assumé : la conséquence d'un
+     * mur atteint y est un 502 sur le « Tester » du prof, sans tentative supprimée — le chemin
+     * interne, lui, garde la formule stricte.
      */
     static Walls walls(String runnerLanguage, int caseCount, long perRunMs, long maxWallMs) {
         long perCase = perRunMs + PER_CASE_OVERHEAD_MS

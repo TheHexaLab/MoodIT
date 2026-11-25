@@ -141,10 +141,14 @@ ce que le code soumis peut provoquer.
     job, sur un `/box` borné à 32 768), il n'est pas gardé et chaque cas recompile ; un échec qui
     suit une réussite déjà constatée (restauration impossible faute de place) ne la remplace pas ;
   - **échec du compilateur** : même code de sortie et mêmes messages, rejoués dès le cas suivant ;
-  - **échec non concluant** (délai dépassé, compilateur tué par signal) : il peut venir de
-    l'hôte — machine chargée, cache de Go encore froid à la première compilation — et n'est
-    rejoué qu'une fois constaté **deux** fois ; il garde alors sa cause non concluante (même
-    traitement des canaris).
+  - **échec non concluant** (délai dépassé, compilateur tué par signal, ou son travailleur —
+    `cc1`, `cc1plus`, `compile` — tué par l'OOM du conteneur sous un pilote `gcc`/`g++`/`go
+    build` qui survit et sort en 1 : reconnu par la hausse du compteur `oom_kill` du cgroup
+    pendant la compilation, le stderr étant celui du code soumis, qui pourrait en imprimer la
+    signature) : il peut venir de l'hôte — machine chargée, cache de Go encore froid à la
+    première compilation — et n'est rejoué qu'une fois constaté **deux** fois ; il garde alors
+    sa cause non concluante (même traitement des canaris). Il reste un échec noté : jamais
+    `interrompu`, puisque le code soumis peut le provoquer (bombe de compilation).
   Rien n'est mémorisé quand une sortie a été perdue (tmpfs saturé : la cause est l'espace).
 - **UID étudiant tiré entre 2²⁴ et 2³¹ − 2.** Les limites par UID du noyau (RLIMIT_NPROC,
   RLIMIT_SIGPENDING, pages de tubes, instances inotify…) sont communes à l'hôte entier : deux
@@ -184,7 +188,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | expansions de l'extraction et des bouchons dans le superviseur (100 Ko de code soumis, avant toute compilation, hors délai) | quadratiques ou démultipliées : long mot sans `(` dans une classe C++ 115 s, 99 999 `#` en C# 3 s, chaîne d'héritage C++ de 2 000 classes 48 s et 4,9 Go (vides : 43 s), structure Go de 7 000 champs × 1 200 méthodes 54 s et 1,8 Go, Rust 45 s et 3,7 Go, 4 000 paramètres par défaut C++ : serveur de 609 Mo, méthode C++ de 4 000 paramètres héritée par 2 500 classes : serveur de 768 M caractères (3,6 Go), méthode par défaut de trait Rust de 4 000 paramètres sur 1 500 `impl` 70 s et 2 Go, type Go embarqué 19 000 fois 3,5 s ; après, mesuré sur ces formes et leurs voisines (balayage des six chaînes d'extraction) : au plus 0,3 s par cas dans le conteneur et 46 Mo, ou **refus avec message** (un échec noté, jamais un 502 ni un faux verdict ; décidé sur le seul code soumis, donc pour canaris et cas réels ensemble). Bornes, chacune refusée à part : **8 paramètres à valeur par défaut** par fonction, méthode ou constructeur (`MAX_DEFAULT_PARAMS`) ; **64 ancêtres** du code soumis par classe (`MAX_ANCESTORS`) ; trois compteurs à **10 000** chacun (`MAX_INHERITED_METHODS`) : méthodes héritées (C++, Java, C#, Go), constructeurs repris par `using Base::Base;` (C++), méthodes par défaut de traits reportées sur les `impl` (Rust) ; **5 000 copies de champs** en capture de champs Go/Rust (champs × (méthodes + constructeurs + 1), `MAX_FIELD_COPIES`) ; et, sur l'API FINALE de chaque runner (fonctions, constructeurs et méthodes, après héritage et arités réduites, toutes classes, sans regarder le harnais), **1 000 entrées** (`MAX_RELAYED_ENTRIES`) et **20 000 paramètres relayés** en tout (`MAX_RELAYED_PARAMS`, `check_relayed_params`) ; en Java, **256 classes** produites par la compilation du code soumis (`JAVA_MAX_CLASSES`), vérifiées avant `javap`. Ces trois dernières bornes rendent la compilation du noteur, `javap` et le javac du serveur RPC impossibles à pousser au délai par le code soumis : leur expiration est « interrompue », sans note (voir plus bas, `incomplet`), et n'est donc plus un essai gratuit. Pire cas mesuré sous ces bornes (1 CPU, 1 Go, configuration de production) : noteur Go 15,9 s (cache froid) et 228 Mo, Rust 2,5 s et 392 Mo, Java 2,9 s, C# 2,7 s, C++ 0,4 s pour 90 s ; `javap` 1,1 s et javac du serveur 2,1 s à 256 classes pour 5 s et 90 s ; avant : noteur Rust de 99 000 paramètres tué par l'OOM (1,09 Go), noteur Go à 13 600 copies de champs 495 Mo, 7 611 classes Java faisant expirer `javap` à chaque cas. Types embarqués Go et parents dédoublonnés ; segment C/C++ aux directives traitées borné aussi en caractères | corrigé (borné) |
 | sortie qui casse le JSON (octets nuls, UTF-8 invalide, substituts, U+2028) | JSON rendu dans les deux modes (`read_capped` décode avec remplacement) | conception |
 | 127 processus en boucle, zombies, bombe de fork | notes justes, canaris `ok`, ≤ 2 s par cas | réglage existant |
-| bombes de compilation (3 cas + 2 canaris, 1024 Mo) | compilateur tué par l'OOM ; avant → après : templates C++ 75 → 21 s et préprocesseur C++ 14 → 5 s (le pilote de gcc sort en 1 : rejoué dès le 2e cas), macro Rust 27 → 12 s et `static` géant Rust 5 → 3 s (rustc tué par signal : rejoué une fois constaté deux fois) ; `static char[1 Gio]` C : gcc élimine le tableau (binaire de 15 Ko), réussit, binaire rejoué, canaris `ok` | corrigé (compilation rejouée) |
+| bombes de compilation (3 cas + 2 canaris, 1024 Mo) | compilateur tué par l'OOM ; avant → après : templates C++ 75 → 21 s et préprocesseur C++ 14 → 5 s (mesures d'avant 95b1ac6d, quand le pilote de gcc, sorti en 1, faisait rejouer l'échec dès le 2e cas ; depuis, `cc1plus` tué par l'OOM est reconnu non concluant par `oom_kill` et l'échec n'est rejoué qu'une fois constaté deux fois, comme pour rustc : une compilation de plus, non remesurée), macro Rust 27 → 12 s et `static` géant Rust 5 → 3 s (rustc tué par signal : rejoué une fois constaté deux fois) ; `static char[1 Gio]` C : gcc élimine le tableau (binaire de 15 Ko), réussit, binaire rejoué, canaris `ok` | corrigé (compilation rejouée) |
 | boucle d'évaluation constante Rust | 90 s de compilation **par cas** : 451 s de place pour 3 cas + 2 canaris → 183 s (délai dépassé : rejoué une fois constaté deux fois) | corrigé (compilation rejouée) |
 | compilation lente qui RÉUSSIT juste avant le délai | refaite à chaque cas ; après : une fois par job, binaire recopié | corrigé (compilation rejouée) |
 | code soumis à des milliers de fonctions (100 Ko) : bouchons du noteur recompilés à chaque cas (ils portent le nonce) | avant : 3 cas + 2 canaris : C 34 s, C++ 43 s, Go 60 s, Java 28 s, C# 8 s, tous notés ; Rust 2 730 fonctions : compilateur tué à 1 Go, échec noté ; après : au-delà de 1 000 fonctions, méthodes et constructeurs relayés, refus noté avant toute compilation (`MAX_RELAYED_ENTRIES`) | borné (≤ une solution lente honnête) |
@@ -251,7 +255,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 
 - **Pas de borne par utilisateur sur le chemin interne** (3 fils de correction de code dans core,
   partagés). Au pire, une soumission tient une place le temps d'une compilation étudiante jusqu'à
-  90 s (deux fois si elle expire), puis, par cas, de la compilation du noteur (bouchons gonflés :
+  90 s (deux fois si elle expire ou est tuée), puis, par cas, de la compilation du noteur (bouchons gonflés :
   jusqu'à ~12 s par cas mesurés) et de l'exécution jusqu'au temps limite du prof — ce dernier
   terme est aussi celui d'une solution honnête qui boucle —, sous le plafond de 15 min. Un
   artefact de plus de 64 Mo ou de 256 fichiers n'est pas gardé : sa compilation est refaite à
@@ -303,12 +307,13 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   `interrompu`, `platform_aborted`) ; « tué » comprend le travailleur tué sous un pilote qui
   survit et sort en 1 (`gcc: fatal error: Killed signal terminated program cc1`, `…/compile:
   signal: killed` sous `go build`, `tool_killed`) — signature lue sur le stderr du noteur ou de
-  la sonde seulement, que le code soumis ne contrôle pas ; pour la compilation du code soumis,
-  qui peut l'imprimer (`#line` + `#pragma GCC error`), seul le compteur `oom_kill` du cgroup
-  la rend non concluante. Ces cas devenaient un 0 définitif que personne ne pouvait
-  rejouer. Le code soumis ne peut pas les provoquer : l'API relayée, les classes Java et les
-  noms sondés sont bornés en amont (refus noté), et le pire cas mesuré reste loin des délais. Le « Tester » garde leur message. Sur le
-  chemin interne, `DockerEvaluator` en fait un 502 « sans verdict », compté par core, et la
+  la sonde seulement, que le code soumis ne contrôle pas. Ces cas devenaient un 0 définitif que
+  personne ne pouvait rejouer. Le code soumis ne peut pas les provoquer : l'API relayée, les
+  classes Java et les noms sondés sont bornés en amont (refus noté), et le pire cas mesuré reste
+  loin des délais. Le « Tester » garde leur message. La compilation du CODE SOUMIS tuée, elle,
+  n'est jamais `interrompu` ni `incomplet` : c'est un échec noté (le code soumis peut la
+  provoquer), non concluant seulement pour son rejeu et pour les canaris (cf. « Compilation du
+  code soumis faite une fois par job »). Sur le chemin interne, `DockerEvaluator` en fait un 502 « sans verdict », compté par core, et la
   tentative est à reprendre ou, au plafond, « à revoir ». `canaries` vaut `aucun` seulement pour
   un job sans canaris : `DockerEvaluator` le refuse, chaque job en portant deux. Des canaris incohérents l'emportent : la notation n'est alors
   jamais « incomplète ».

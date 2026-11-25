@@ -22,6 +22,7 @@ import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.AttemptNotReviewableException;
 import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
+import com.moodit.core_service.exception.GradingInProgressException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Attempt;
@@ -109,14 +110,46 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Déjà soumis et reprise interdite → AlreadySubmittedException (409), aucun insert")
+        @DisplayName("Tentative déjà corrigée (done) et reprise interdite → AlreadySubmittedException (409 texte), aucun insert")
         void dejaSoumis_sansReprise_409() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            // Aucune correction en cours : la tentative existante est terminée.
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(1L);
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
                     .isInstanceOf(AlreadySubmittedException.class);
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Correction déjà en cours (pending), quiz sans reprise → GradingInProgressException, pas « déjà soumis »")
+        void pendingAttempt_noRetry_inProgress() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+
+            // Le pending compte aussi parmi les tentatives : vérifié AVANT la tentative unique, il
+            // ne retombe pas dans le 409 « déjà soumis ».
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(GradingInProgressException.class)
+                    .hasMessage("Une correction de ce quiz est déjà en cours.");
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Correction déjà en cours (pending), quiz AVEC reprise → GradingInProgressException, aucun insert")
+        void pendingAttempt_withRetry_inProgress() {
+            quiz.setAllowRetry(true);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(GradingInProgressException.class);
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
@@ -307,16 +340,43 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Insert concurrent (contrainte UNIQUE / pending) → AlreadySubmittedException, pas d'évènement")
+        @DisplayName("Insert concurrent, aucun pending à la relecture → AlreadySubmittedException, pas d'évènement")
         void violationContrainte_409() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
+            when(attemptRepository.saveAndFlush(any(Attempt.class)))
+                    .thenThrow(new DataIntegrityViolationException("uq_quiz_user_attempt_no"));
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(AlreadySubmittedException.class);
+            verify(attemptRepository, times(2)).existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending");
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Insert concurrent, pending de l'autre soumission relu → GradingInProgressException, dans une transaction NOUVELLE")
+        void constraintViolation_pendingReread_inProgress() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            // Contrôle préalable : rien encore (les deux soumissions passent) ; relecture après
+            // l'échec de l'insert : le pending de la soumission concurrente, committé entre-temps.
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending"))
+                    .thenReturn(false, true);
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
-                    .isInstanceOf(AlreadySubmittedException.class);
+                    .isInstanceOf(GradingInProgressException.class);
+            // La transaction de l'insert est annulée (inutilisable sous PostgreSQL après l'erreur) ;
+            // la relecture se fait dans une seconde transaction, en lecture seule.
+            ArgumentCaptor<TransactionDefinition> defs = ArgumentCaptor.forClass(TransactionDefinition.class);
+            verify(transactionManager, times(2)).getTransaction(defs.capture());
+            assertThat(defs.getAllValues().get(0).isReadOnly()).isFalse();
+            assertThat(defs.getAllValues().get(1).isReadOnly()).isTrue();
+            verify(transactionManager).rollback(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
     }

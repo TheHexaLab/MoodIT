@@ -51,6 +51,18 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Correction déjà en cours → 409 en JSON, cause « en_cours » et message français")
+    void gradingInProgress_409Json() {
+        ResponseEntity<java.util.Map<String, String>> r =
+                handler.handleGradingInProgress(new GradingInProgressException());
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        assertThat(r.getBody()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                "cause", "en_cours", "message", "Une correction de ce quiz est déjà en cours."));
+    }
+
+    @Test
     @DisplayName("Vérification du code indisponible → 503 (échec transitoire)")
     void verificationIndisponible_503() {
         assertResponse(handler.handleCodeVerificationUnavailable(new CodeVerificationUnavailableException()),

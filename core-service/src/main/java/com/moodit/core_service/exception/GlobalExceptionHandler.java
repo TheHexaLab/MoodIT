@@ -1,7 +1,9 @@
 package com.moodit.core_service.exception;
 
+import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -78,6 +80,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.CONFLICT) //Code 409
                 .body(ex.getMessage());
+    }
+
+    /**
+     * Soumission pendant qu'une correction du même quiz est encore en cours → 409, avec un corps
+     * JSON {@code {"cause":"en_cours","message":…}} : la cause permet au frontend de distinguer ce
+     * cas du 409 « déjà soumis » (corps texte) et de rejoindre l'attente de la correction.
+     */
+    @ExceptionHandler(GradingInProgressException.class)
+    public ResponseEntity<Map<String, String>> handleGradingInProgress(GradingInProgressException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("cause", GradingInProgressException.CAUSE, "message", ex.getMessage()));
     }
 
     //Relance de correction refusée : tentative pas « à revoir », ou correction déjà en cours (#116, S4)

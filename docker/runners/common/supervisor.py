@@ -1616,12 +1616,14 @@ HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
 # images (travailleur tué par SIGKILL, puis par l'OOM d'un conteneur à 150 Mo) :
 #   gcc: fatal error: Killed signal terminated program cc1        (aussi g++/cc1plus, gcc/as)
 #   runtime: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed     (go build, sortie 1)
-# et, d'après le format de gcc (éditeur de liens trop rapide pour être tué à la main) :
-#   collect2: fatal error: ld terminated with signal 9 [Killed]
-# rustc, javac (JVM) et mcs (mono) sont eux-mêmes le processus tué : `code < 0` suffit.
+#   collect2: fatal error: ld terminated with signal 9 [Killed]   (éditeur de liens sous gcc)
+#     = note: collect2: fatal error: ld terminated with signal 9 [Killed]
+#                     (le même, sous rustc → cc → collect2 → ld : rustc sort en 1 et recopie le
+#                      stderr du lieur derrière `  = note: ` ; relevé dans moodit-runner-rust)
+# Quand c'est rustc lui-même, javac (la JVM) ou mcs (mono) qui est tué, `code < 0` suffit.
 TOOL_KILLED = re.compile(
     r"^(?:gcc|g\+\+|cc|c\+\+): fatal error: Killed signal terminated program [\w+.-]+$"
-    r"|^collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
+    r"|^(?:[ \t]*= note: )?collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
     r"|^[\w./-]+: /\S+/pkg/tool/\w+/(?:compile|link|asm): signal: killed$", re.M)
 
 

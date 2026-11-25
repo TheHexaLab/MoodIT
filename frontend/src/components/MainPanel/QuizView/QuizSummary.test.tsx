@@ -142,7 +142,9 @@ describe('QuizSummary', () => {
     expect(otherChip.className).not.toMatch(/attemptChipActive/);
   });
 
-  it('question Code non évaluée (tests null) → « en attente », score « en validation »', () => {
+  it('question Code sans verdict (tests null) → « Non évalué » sans spinner, score global affiché', () => {
+    // Cause PERMANENTE (sans harnais, harnais remplacés, question ajoutée après la tentative) :
+    // l'ancien « en attente » + score masqué ne se levaient jamais.
     const pendingResult: QuizResult = {
       quizId: 1,
       earned: 5,
@@ -153,10 +155,12 @@ describe('QuizSummary', () => {
       ],
     };
     renderSummary({ result: pendingResult });
-    // Titre « soumis » (pas « terminé »), score global masqué (« - »).
-    expect(screen.getByText('Mon quiz — soumis')).toBeTruthy();
-    expect(screen.getByText('-')).toBeTruthy();
-    expect(screen.getByText('En attente…')).toBeTruthy();
+    expect(screen.getByText('Mon quiz — terminé !')).toBeTruthy();
+    expect(screen.getByText('33.3 %')).toBeTruthy();
+    expect(screen.getByText('Non évalué')).toBeTruthy();
+    // La question notée garde son score ; aucun spinner sur la ligne non évaluée.
+    expect(screen.getByText('5 / 5')).toBeTruthy();
+    expect(document.querySelector('[class*="spinner"]')).toBeNull();
   });
 
   it('score parfait → titre « terminé » et 100 %', () => {

@@ -3,7 +3,6 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { CodeEditor } from '../../../QuizEditor/CodeEditor';
-import { Spinner } from '../../../Spinner/Spinner';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
@@ -70,7 +69,7 @@ export function CodingQuestion({
   );
 }
 
-/** Verdict des harnais en révision (ou note « évalué côté serveur » si non évalué). */
+/** Verdict des harnais en révision, ou mention « Non évalué » faute de verdict. */
 function TestResults({
   tests,
   labels,
@@ -79,17 +78,14 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    // Pas de verdicts : placeholder. Un résultat n'est lu qu'une fois la tentative corrigée
-    // (`done`), donc jamais pendant la correction asynchrone. Causes réelles : question sans
-    // harnais, ou aucun verdict enregistré pour ses harnais ACTUELS — harnais modifiés après la
-    // correction, ou question ajoutée après la tentative (core répond « en cours »,
-    // CodeGrading.pending). La maquette (grading.ts) rend un verdict par harnais : seule une
-    // question sans harnais y donne `null`.
-    return (
-      <p className={styles.testNote}>
-        <Spinner tone="current" size={14} /> {labels.evaluating}
-      </p>
-    );
+    // Pas de verdicts. Un résultat n'est lu qu'une fois la tentative corrigée (`done`), donc
+    // jamais pendant la correction asynchrone : la cause est PERMANENTE — question sans harnais,
+    // ou aucun verdict enregistré pour ses harnais ACTUELS (harnais modifiés après la correction,
+    // question ajoutée après la tentative ; CodeGrading.pending côté core). Un spinner
+    // « évaluation en cours » tournait donc indéfiniment : mention fixe « Non évalué ». La
+    // maquette (grading.ts) rend un verdict par harnais : seule une question sans harnais y donne
+    // `null`.
+    return <p className={styles.testNote}>{labels.notEvaluated}</p>;
   }
   const totalWeight = tests.reduce((sum, test) => sum + test.weight, 0);
 

@@ -161,8 +161,8 @@ export function QuizListBody({
                     type="button"
                     className={[styles.badge, styles.badgeReview].join(' ')}
                     aria-label={t.reviewAria(quiz.title, quiz.reviewAttemptCount ?? 0)}
-                    // Ni glisser-déposer ni révélation des actions de la ligne.
-                    onPointerDown={(e) => e.stopPropagation()}
+                    // Pas de glisser-déposer : usePointerReorder ignore l'appui sur un bouton
+                    // (INTERACTIVE). Le clic, lui, est arrêté : il ne révèle pas les actions.
                     onClick={(e) => {
                       e.stopPropagation();
                       onReview(quiz);

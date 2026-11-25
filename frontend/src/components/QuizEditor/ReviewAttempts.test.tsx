@@ -118,7 +118,8 @@ describe('QuizEditor — tentatives à revoir', () => {
       />
     );
 
-    // Appuyer sur la pastille ne démarre pas le glisser-déposer de la ligne.
+    // Appuyer sur la pastille ne démarre pas le glisser-déposer de la ligne : c'est un bouton,
+    // que usePointerReorder ignore (INTERACTIVE), sans gestionnaire propre à la pastille.
     const badge = screen.getByLabelText(listT.reviewAria('Quiz A', 2));
     fireEvent.pointerDown(badge, { pointerId: 1, button: 0 });
     fireEvent.pointerMove(badge, { pointerId: 1, clientY: 40 });
@@ -175,6 +176,8 @@ describe('QuizEditor — tentatives à revoir', () => {
 
   it('pastille gardée après ouverture du quiz, recalée sur la liste chargée', async () => {
     // Le détail d'édition ne porte pas le compteur : l'ouvrir ne doit pas effacer la pastille.
+    // « Retour » ne le prouverait pas (il restaure la copie de liste prise à l'ouverture) : on
+    // enregistre, SANS onUpdateQuiz, ce qui garde la liste telle que l'ouverture l'a laissée.
     const onFetchQuiz = vi.fn(async () => makeQuiz());
     render(
       <QuizEditor
@@ -190,8 +193,8 @@ describe('QuizEditor — tentatives à revoir', () => {
     );
     fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
     await screen.findByText(editorT.editQuizTitle);
-    fireEvent.click(screen.getByLabelText(/retour/i));
-    expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(await screen.findByText(listT.reviewBadge(2))).toBeTruthy();
 
     // La liste chargée n'en compte qu'une : la pastille suit le serveur.
     fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 2)));

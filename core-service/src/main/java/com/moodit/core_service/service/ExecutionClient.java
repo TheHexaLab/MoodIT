@@ -33,8 +33,9 @@ import java.util.Map;
  * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} en cas
  * d'échec d'appel, et {@link CodeVerificationNoVerdictException} quand le service répond 502
  * {@code sans_verdict} (le conteneur a tourné sans rendre de verdict). {@code QuizService} supprime
- * alors la tentative, ou la garde « à revoir » (plafond d'échecs atteint, ou relance de
- * l'enseignant en échec — cf. QuizService#failGrading).
+ * alors la tentative, ou la garde « à revoir » (relance de l'enseignant en échec, ou plafond
+ * d'échecs atteint sur un échec sans verdict ou sur un quiz sans reprise — cf.
+ * QuizService#failGrading).
  *
  * <p>Un service INJOIGNABLE (connexion refusée, nom introuvable : il redémarre ou n'a pas fini de
  * démarrer) est retenté pendant {@code app.execution-service.unreachable-retry-ms} avant de

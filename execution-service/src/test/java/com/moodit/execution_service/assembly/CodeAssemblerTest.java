@@ -20,7 +20,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class CodeAssemblerTest {
 
     // Dossier vendor bidon : les langages assemblés ici (python/js/ts/php/bash/json/sql) ne le
-    // lisent pas (seuls HTML/JSX chargent un bundle, non couverts par ces tests unitaires).
+    // lisent pas. Seuls HTML et JSX chargent un bundle : le test JSX
+    // (jsx_isolates_render_and_keeps_nonce_out_of_student_reach) fournit son propre dossier
+    // vendor ; HTML n'est pas couvert par ces tests unitaires.
     private final CodeAssembler assembler = new CodeAssembler("/nonexistent-vendor");
 
     private String onlyFileContent(CodeAssembler.Assembled a) {

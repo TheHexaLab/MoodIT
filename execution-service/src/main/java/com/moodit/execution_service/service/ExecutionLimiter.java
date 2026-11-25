@@ -21,7 +21,7 @@ import java.util.function.Supplier;
  *       <b>La garantie porte sur UNE place, pas sur {@code maxConcurrent - 1}</b> : core mène
  *       {@code maxConcurrent - 1} corrections de front, mais dès que les appels publics tiennent
  *       leurs {@code maxConcurrent - 1} places, une seule correction passe ; les autres
- *       attendent {@code internalQueueWaitMs}, puis sont refusées (tentative supprimée, sauf relance de l'enseignant ou plafond atteint, cf. QuizService#failGrading).</li>
+ *       attendent {@code internalQueueWaitMs}, puis sont refusées (tentative supprimée, sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise, cf. QuizService#failGrading).</li>
  *   <li><b>Globale</b> : au plus {@code maxConcurrent} conteneurs runner simultanés, tous appelants
  *       confondus (« Tester », « play », correction interne). Une exécution en trop attend une place
  *       au plus {@code queueWaitMs} (file d'attente courte), puis est refusée. La correction

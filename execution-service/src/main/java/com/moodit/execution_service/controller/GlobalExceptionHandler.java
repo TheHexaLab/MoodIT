@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
     /**
      * Sandbox Docker injoignable / en erreur (#116) → 502 (dépendance amont indisponible).
      * La cause est JOURNALISÉE : la réponse reste générique, et sans cette trace une image runner
-     * absente ou un démon muet — qui font chacun échouer une correction (tentative supprimée, sauf relance de l'enseignant ou plafond atteint, cf. QuizService#failGrading)
+     * absente ou un démon muet — qui font chacun échouer une correction (tentative supprimée, sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise, cf. QuizService#failGrading)
      * — ne laissaient rien à l'exploitant pour les distinguer. Un mur dépassé, lui, est un 502
      * « sans verdict » (NoVerdictException, handleNoVerdict).
      */

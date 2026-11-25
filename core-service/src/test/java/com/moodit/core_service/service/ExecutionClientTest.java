@@ -301,6 +301,41 @@ class ExecutionClientTest {
     }
 
     @Test
+    @DisplayName("Service injoignable plus longtemps : les pauses doublent puis plafonnent à 10 s")
+    void evaluate_unreachableLonger_pausesCappedAtMaxDelay() throws Exception {
+        // Sans plafond, les pauses montaient à 16, 32, 64 s : un execution-service revenu à
+        // t = 20 s n'était recontacté que bien plus tard. Fenêtre de reprise de 60 s (non
+        // consommée ici : le sleeper ne dort pas), service revenu pendant la 5e pause.
+        int port = closedPort();
+        ExecutionClient client = new ExecutionClient("http://localhost:" + port, TOKEN, 2_000,
+                5_000, 5_000, 0, 60_000, 60_000);
+        List<Long> pauses = new java.util.ArrayList<>();
+        client.sleeper = millis -> {
+            pauses.add(millis);
+            if (pauses.size() == 5) {
+                try {
+                    server = HttpServer.create(new InetSocketAddress("localhost", port), 0);
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                server.createContext("/internal/exec", exchange -> {
+                    byte[] bytes = "[{\"name\":\"cas A\",\"weight\":2,\"passed\":true}]"
+                            .getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                    exchange.close();
+                });
+                server.start();
+            }
+        };
+
+        assertThat(client.evaluate("Python", "x", TWO_HARNESSES.subList(0, 1))).containsExactly(true);
+        assertThat(pauses).containsExactly(1_000L, 2_000L, 4_000L, 8_000L,
+                ExecutionClient.RETRY_MAX_DELAY_MS);
+    }
+
+    @Test
     @DisplayName("Service injoignable au-delà du budget de reprise → null, pauses bornées")
     void evaluate_unreachableBeyondRetryBudget_null() throws Exception {
         String url = "http://localhost:" + closedPort();

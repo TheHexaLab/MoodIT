@@ -107,8 +107,10 @@ public class QuizController {
      * Soumet une tentative de façon ASYNCHRONE : le serveur enregistre la tentative et répond
      * <b>202 Accepted</b> avec son id, puis corrige le code en tâche de fond. Le résultat arrive
      * par WebSocket ({@code quiz:attempt-graded} / {@code quiz:attempt-failed}) ; le client le
-     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. Tentative unique →
-     * 409 si déjà soumis ou déjà en cours de correction. `X-User-Email` injecté par la gateway.
+     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. 409 en JSON
+     * {@code {"cause":"en_cours",…}} si une correction de ce quiz est déjà en cours (le client
+     * rejoint son attente), 409 en texte si la tentative unique est déjà consommée.
+     * `X-User-Email` injecté par la gateway.
      */
     @PostMapping("/{quizId}/submissions")
     public ResponseEntity<AttemptAcceptedDTO> submitQuiz(

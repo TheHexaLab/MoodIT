@@ -4,11 +4,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.exception.AlreadySubmittedException;
+import com.moodit.core_service.exception.GradingInProgressException;
 import com.moodit.core_service.service.QuizService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +38,7 @@ class QuizControllerSubmitTest {
     private static final String BODY = "{\"quizId\":1,\"answers\":[]}";
 
     @Test
-    @DisplayName("Tentative déjà soumise (ou déjà en cours de correction) → 409")
+    @DisplayName("Tentative unique déjà consommée → 409, corps texte (pas de cause « en_cours »)")
     void submit_whenAlreadySubmitted_returns409() throws Exception {
         when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
                 .thenThrow(new AlreadySubmittedException());
@@ -45,7 +47,24 @@ class QuizControllerSubmitTest {
                         .header("X-User-Email", "eva@test.ca")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(BODY))
-                .andExpect(status().isConflict()); // 409
+                .andExpect(status().isConflict()) // 409
+                .andExpect(content().string("Quiz already submitted"));
+    }
+
+    @Test
+    @DisplayName("Correction déjà en cours → 409 en JSON {cause: en_cours, message}")
+    void submit_whenGradingInProgress_returns409WithCause() throws Exception {
+        when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
+                .thenThrow(new GradingInProgressException());
+
+        mockMvc.perform(post("/api/quizzes/1/submissions")
+                        .header("X-User-Email", "eva@test.ca")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BODY))
+                .andExpect(status().isConflict()) // 409
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.cause").value("en_cours"))
+                .andExpect(jsonPath("$.message").value("Une correction de ce quiz est déjà en cours."));
     }
 
     @Test

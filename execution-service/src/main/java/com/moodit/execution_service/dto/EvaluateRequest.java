@@ -28,10 +28,11 @@ public record EvaluateRequest(
          * Langages INTERPRÉTÉS seulement (Python, JavaScript, TypeScript, Bash) : une fonction ou
          * une classe qu'il déclare est celle que l'énoncé impose, et peut porter le nom d'une
          * intégrée du langage ({@code sum}, {@code max}, {@code len}…) sans être refusée comme
-         * « Nom réservé » (cf. CodeAssembler#notImposed). Les six langages COMPILÉS ne s'en
-         * servent pas : un nom qui masque un outil du harnais y est refusé quel que soit le code
-         * de départ (le noteur compile ses propres bouchons à ce nom) — l'énoncé y impose donc
-         * un autre nom, ce que « Tester » montre au prof. Jamais fourni par l'étudiant : core le
+         * « Nom réservé » (cf. CodeAssembler#notImposed). Les autres langages ne s'en servent
+         * pas : en Java, C, C++ et Go, un nom qui masque un outil du harnais est refusé quel que
+         * soit le code de départ (le noteur compile ses propres bouchons à ce nom) — l'énoncé y
+         * impose donc un autre nom, ce que « Tester » montre au prof ; PHP, Rust et C# n'ont pas
+         * ce refus. Jamais fourni par l'étudiant : core le
          * lit dans la question, et la route publique est réservée aux éditeurs de quiz.
          */
         @Size(max = 100_000) String startCode) {

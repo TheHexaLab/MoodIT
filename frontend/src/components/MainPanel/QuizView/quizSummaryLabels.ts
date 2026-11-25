@@ -7,14 +7,11 @@ import { formatScore } from './formatScore';
 export interface QuizSummaryLabels {
   /** Titre « <quiz> — terminé ! ». */
   completedTitle: (title: string) => string;
-  /** Titre tant que la correction du code n'est pas finie (« <quiz> — soumis »). */
-  submittedTitle: (title: string) => string;
-  /** Score global affiché quand des questions Code sont encore en validation. */
-  validating: string;
-  /** Sous-titre pendant la validation du code. */
-  validatingSub: string;
-  /** Score d'une ligne de question Code encore en cours d'évaluation. */
-  rowPending: string;
+  /**
+   * Score d'une ligne de question Code SANS verdict (question sans harnais, harnais remplacés,
+   * question ajoutée après la tentative) : cause permanente, pas une correction en cours.
+   */
+  rowNotEvaluated: string;
   /** Pourcentage global. */
   percent: (value: number) => string;
   /** Sous-titre : score + nombre de questions parfaites. */
@@ -38,10 +35,7 @@ export interface QuizSummaryLabels {
 /** Textes par défaut (FR) du récapitulatif. */
 export const defaultQuizSummaryLabels: QuizSummaryLabels = {
   completedTitle: (title) => `${title} — terminé !`,
-  submittedTitle: (title) => `${title} — soumis`,
-  validating: 'Validation en cours…',
-  validatingSub: 'Les questions de code sont en cours d’évaluation…',
-  rowPending: 'En attente…',
+  rowNotEvaluated: 'Non évalué',
   percent: (value) => `${formatScore(value)} %`,
   summarySub: (earned, max, perfect, total) => {
     const s = perfect > 1 ? 's' : '';

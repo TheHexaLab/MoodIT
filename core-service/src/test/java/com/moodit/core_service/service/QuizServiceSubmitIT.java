@@ -53,6 +53,8 @@ import org.springframework.test.context.transaction.TestTransaction;
  *      compte à zéro ; une seconde relance qui aboutit la note et retire le marqueur.
  *   5. compteur « à revoir » de l'éditeur → la requête par cours, statut et quiz, interrogée sur la
  *      vraie base (sans commit, dans la transaction du test).
+ *   6. deux soumissions de suite → la 2e est refusée « correction en cours »
+ *      ({@code GradingInProgressException}), avec ou sans reprise, et non « déjà soumis ».
  * Les scénarios 1, 3 et 4 committent leurs données (chaque correction tourne dans ses propres
  * transactions, comme en prod) ; {@link #purgeCommitted} les efface.
  * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
@@ -337,6 +339,31 @@ class QuizServiceSubmitIT {
     assertThat(count("SELECT count(*) FROM attempt WHERE regrade = TRUE")).isZero();
     assertThat(quizService.getAttemptResult(regradedId, USER_EMAIL).getEarned()).isEqualTo(10.0);
     TestTransaction.end();
+  }
+
+  @Test
+  @DisplayName("Deux soumissions de suite, quiz sans reprise : la 2e est refusée « en cours », pas « déjà soumis »")
+  void secondSubmissionWhileGrading_noRetry_isInProgress() {
+    quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+
+    // Le pending de la 1re compte aussi parmi les tentatives : sans la vérification préalable,
+    // ce serait le 409 « déjà soumis », et le frontend ne rejoindrait pas l'attente.
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class);
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
+  }
+
+  @Test
+  @DisplayName("Deux soumissions de suite, quiz AVEC reprise : la 2e est refusée « en cours », aucune 2e tentative")
+  void secondSubmissionWhileGrading_withRetry_isInProgress() {
+    em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
+    quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class);
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
   }
 
   @Test

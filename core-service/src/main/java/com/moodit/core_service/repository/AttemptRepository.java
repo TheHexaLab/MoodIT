@@ -22,6 +22,13 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
     long countByQuiz_IdAndUser_Id(Integer quizId, Integer userId);
 
     /**
+     * Vrai si l'utilisateur a une tentative dans ce statut sur ce quiz : à la soumission, une
+     * tentative {@code "pending"} signale une correction encore en cours (409 « en_cours »,
+     * distinct du 409 « déjà soumis »).
+     */
+    boolean existsByQuiz_IdAndUser_IdAndStatus(Integer quizId, Integer userId, String status);
+
+    /**
      * Tentatives d'un statut donné, plus anciennes d'abord : au démarrage de core, les
      * {@code "pending"} dont la correction a été perdue (cf. QuizGradingListener).
      */

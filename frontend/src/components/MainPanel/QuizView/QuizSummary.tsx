@@ -7,7 +7,6 @@ import { Chevron } from '../../../assets/Chevron';
 import { QUESTION_TYPE_LABELS, type Quiz } from '../../../types/domain';
 import { type AttemptSummary, type QuizResult } from './quizAttempt';
 import { scoreTone, type ScoreTone } from './scoreTone';
-import { Spinner } from '../../Spinner/Spinner';
 import { defaultQuizSummaryLabels, type QuizSummaryLabels } from './quizSummaryLabels';
 
 interface QuizSummaryProps {
@@ -122,22 +121,17 @@ export function QuizSummary({
   // Une question Code sans verdict (tests null) : question sans harnais, ou aucun verdict
   // enregistré pour ses harnais actuels — harnais modifiés depuis la correction, ou question
   // ajoutée après la tentative (CodeGrading.pending côté core). Jamais une correction en cours :
-  // le résumé ne s'ouvre qu'une fois la tentative corrigée. On affiche « en attente », PAS un
-  // échec, et le score global reste « en validation ».
-  const isPending = (questionId: number): boolean =>
+  // le résumé ne s'ouvre qu'une fois la tentative corrigée. La cause est PERMANENTE : sa ligne
+  // dit « Non évalué » (ni spinner, ni échec), et le score global, déjà calculé par le serveur,
+  // reste affiché — le masquer « en validation » ne se levait jamais.
+  const isNotEvaluated = (questionId: number): boolean =>
     result.questions.find((q) => q.questionId === questionId)?.tests == null;
-  const anyPending = questions.some((q) => q.qType === 'coding' && isPending(q.id));
   // Pourcentage global au dixième près (format X.X).
   const percent = result.max > 0 ? Math.round((result.earned / result.max) * 1000) / 10 : 0;
-  // Palier global (rouge < 50 % / jaune 50-77 % / vert ≥ 78 %) pour l'en-tête. Neutre tant que
-  // la validation du code n'est pas finie (score non définitif).
+  // Palier global (rouge < 50 % / jaune 50-77 % / vert ≥ 78 %) pour l'en-tête.
   const overallTone = scoreTone(result.earned, result.max);
-  const headToneClass = anyPending
-    ? ''
-    : { good: styles.headGood, warn: styles.headWarn, bad: styles.headBad }[overallTone];
-  const scoreToneClass = anyPending
-    ? ''
-    : { good: styles.scoreGood, warn: styles.scoreWarn, bad: styles.scoreBad }[overallTone];
+  const headToneClass = { good: styles.headGood, warn: styles.headWarn, bad: styles.headBad }[overallTone];
+  const scoreToneClass = { good: styles.scoreGood, warn: styles.scoreWarn, bad: styles.scoreBad }[overallTone];
   const perfectCount = result.questions.filter((q) => q.max > 0 && q.earned >= q.max).length;
   // Meilleur score parmi les tentatives (affiché quand il y en a plusieurs).
   // Une tentative à revoir (#116) n'a pas de note : elle ne compte pas dans le meilleur score.
@@ -153,7 +147,7 @@ export function QuizSummary({
     <article className={styles.card}>
       <div className={styles.summaryHead}>
         <span className={[styles.summaryCheck, headToneClass].filter(Boolean).join(' ')}>
-          {anyPending || overallTone === 'good' ? (
+          {overallTone === 'good' ? (
             <Check width={28} height={28} />
           ) : overallTone === 'warn' ? (
             <AlertCircle width={28} height={28} />
@@ -162,15 +156,13 @@ export function QuizSummary({
           )}
         </span>
         <h2 className={styles.summaryTitle}>
-          {anyPending ? t.submittedTitle(quiz.title) : t.completedTitle(quiz.title)}
+          {t.completedTitle(quiz.title)}
         </h2>
         <div className={[styles.summaryScore, scoreToneClass].filter(Boolean).join(' ')}>
-          {anyPending ? '-' : t.percent(percent)}
+          {t.percent(percent)}
         </div>
         <div className={styles.summarySub}>
-          {anyPending
-            ? t.validatingSub
-            : t.summarySub(result.earned, result.max, perfectCount, questions.length)}
+          {t.summarySub(result.earned, result.max, perfectCount, questions.length)}
         </div>
         {attempts.length > 1 && (
           <div className={styles.summarySub}>{t.bestScore(bestPercent)}</div>
@@ -192,7 +184,7 @@ export function QuizSummary({
       <div className={styles.summaryList}>
         {questions.map((question, index) => {
           const qResult = result.questions.find((r) => r.questionId === question.id);
-          const pending = question.qType === 'coding' && isPending(question.id);
+          const notEvaluated = question.qType === 'coding' && isNotEvaluated(question.id);
           const tone = qResult ? scoreTone(qResult.earned, qResult.max) : 'bad';
           const title = firstLine(question.prompt);
           return (
@@ -202,9 +194,10 @@ export function QuizSummary({
               className={styles.summaryRow}
               onClick={() => onReview(index)}
             >
-              {pending ? (
-                <span className={styles.summaryRowIcon}>
-                  <Spinner tone="current" size={14} />
+              {notEvaluated ? (
+                // Icône neutre : ni ✓ ni ✗, la question n'a pas été notée.
+                <span className={styles.summaryRowIcon} aria-hidden="true">
+                  –
                 </span>
               ) : (
                 <StatusDot tone={tone} />
@@ -212,8 +205,8 @@ export function QuizSummary({
               <span className={styles.badge}>{QUESTION_TYPE_LABELS[question.qType]}</span>
               <span className={styles.summaryRowText}>{t.rowText(title)}</span>
               <span className={styles.summaryRowScore}>
-                {pending
-                  ? t.rowPending
+                {notEvaluated
+                  ? t.rowNotEvaluated
                   : t.rowScore(qResult?.earned ?? 0, qResult?.max ?? question.totalScore)}
               </span>
               <span className={styles.summaryRowChevron}>

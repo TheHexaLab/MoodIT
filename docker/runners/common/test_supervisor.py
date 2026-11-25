@@ -4836,11 +4836,18 @@ class PlatformInterruptionTest(unittest.TestCase):
     GXX_KILLED = "g++: fatal error: Killed signal terminated program cc1plus\ncompilation terminated.\n"
     AS_KILLED = "gcc: fatal error: Killed signal terminated program as\ncompilation terminated.\n"
     GO_KILLED = "runtime: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed\n"
+    RUST_LD_KILLED = ('error: linking with `cc` failed: exit status: 1\n  |\n'
+                      '  = note: LC_ALL="C" PATH="/usr/local/cargo/bin" "cc" "-m64" "noteur.o"\n'
+                      '  = note: collect2: fatal error: ld terminated with signal 9 [Killed]\n'
+                      '          compilation terminated.\n\nerror: aborting due to 1 previous error\n')
 
     def test_tool_killed_reads_the_driver_signature(self):
         for stderr in (self.GCC_KILLED, self.GXX_KILLED, self.AS_KILLED, self.GO_KILLED,
                        "# moodit_noteur\nmoodit_noteur: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed\n",
-                       "collect2: fatal error: ld terminated with signal 9 [Killed]\ncompilation terminated.\n"):
+                       "collect2: fatal error: ld terminated with signal 9 [Killed]\ncompilation terminated.\n",
+                       # Éditeur de liens tué sous le noteur RUST (rustc → cc → collect2 → ld) :
+                       # rustc sort en 1 et recopie le stderr du lieur derrière `= note:`.
+                       self.RUST_LD_KILLED):
             with self.subTest(stderr=stderr):
                 self.assertTrue(supervisor.tool_killed(1, stderr))
         self.assertTrue(supervisor.tool_killed(-9, ""))
@@ -4855,7 +4862,7 @@ class PlatformInterruptionTest(unittest.TestCase):
     def test_killed_worker_aborts_the_grader_build(self):
         # Noteur C/C++/Go : sortie 1 et stderr du pilote — c'était « Le harnais ne compile pas »,
         # un 0 définitif, et le script de rejeu en faisait un BLOQUANT (--unpublish).
-        for stderr in (self.GCC_KILLED, self.GXX_KILLED, self.GO_KILLED):
+        for stderr in (self.GCC_KILLED, self.GXX_KILLED, self.GO_KILLED, self.RUST_LD_KILLED):
             with self.subTest(stderr=stderr):
                 detail = supervisor.harness_build_failure(False, 1, "contre le code soumis", stderr)
                 self.assertTrue(detail.startswith(supervisor.HARNESS_BUILD_ABORTED))
@@ -4869,6 +4876,23 @@ class PlatformInterruptionTest(unittest.TestCase):
                                                  "noteur.c:3:1: error: y\n" * 200)
         self.assertTrue(error.startswith(supervisor.HARNESS_BUILD_ERROR))
         self.assertLessEqual(len(error), 1_600)
+
+    def test_runners_give_the_whole_grader_stderr(self):
+        # La signature du pilote vient en DERNIER : les cinq runners doivent passer le stderr
+        # ENTIER du noteur à harness_build_failure (qui tronque lui-même son message). Un
+        # `[:1500]` remis avant l'appel — sur l'argument ou sur la variable qui le porte —
+        # cachait un noteur tué derrière ses avertissements. Seul le message « Échec de
+        # compilation » du code soumis est encore tronqué dans le runner.
+        for runner in (supervisor.run_java_rpc, supervisor.run_csharp_rpc,
+                       supervisor.run_rust_rpc, supervisor.run_c_rpc, supervisor.run_go_rpc):
+            with self.subTest(runner=runner.__name__):
+                source = inspect.getsource(runner)
+                self.assertEqual(1, source.count("harness_build_failure("))
+                for line in source.splitlines():
+                    if re.search(r"\[\s*:\s*\d+\s*\]", line):
+                        self.assertTrue(
+                            line.strip().startswith('return None, "Échec de compilation :'),
+                            "stderr tronqué hors du message de l'étudiant : " + line.strip())
 
     def test_killed_probe_worker_interrupts_instead_of_refusing(self):
         # cc1 tué sous la sonde : g++ sort en 1, que la sonde lisait « le nom ne compile pas ».

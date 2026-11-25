@@ -77,6 +77,7 @@ import {
   ExecutionBusyError,
   type QuizResult,
   type QuizSubmission,
+  SubmissionInProgressError,
   SubmissionRejectedError,
   type RunCodeInput,
   type RunResult,
@@ -267,11 +268,16 @@ export async function fetchLanguages(): Promise<Language[]> {
  * Soumettre une tentative de façon ASYNCHRONE : le backend enregistre la tentative et répond
  * 202 + son id ({@link AttemptAccepted}) ; la correction du code tourne ensuite en tâche de fond.
  * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
- * via {@link fetchAttemptResult}. 409 si déjà soumise ou déjà en cours de correction. 400
+ * via {@link fetchAttemptResult}. 409 de cause « en_cours » (correction déjà en cours) →
+ * `SubmissionInProgressError` : la vue rejoint l'attente ; tout autre 409 (tentative unique déjà
+ * consommée) → échec ordinaire. 400
  * (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ; 413
  * (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`
  * (texte pris dans les libellés de la vue).
  */
+/** Cause du 409 de core quand une correction de ce quiz est déjà en cours pour l'étudiant. */
+const SUBMISSION_IN_PROGRESS_CAUSE = 'en_cours';
+
 export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
     method: 'POST',
@@ -279,6 +285,20 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     body: JSON.stringify(submission),
   });
   if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
+  if (res.status === 409) {
+    // Deux 409 de core : correction DÉJÀ EN COURS (corps JSON, cause « en_cours ») → la vue
+    // rejoint l'attente ; tentative unique déjà consommée (corps texte) → échec ordinaire, rien à
+    // attendre. Un corps illisible ne vaut pas « en cours » : sinon 30 min d'attente pour rien.
+    const body = await res.text().catch(() => '');
+    let cause: unknown;
+    try {
+      cause = (JSON.parse(body) as { cause?: unknown } | null)?.cause;
+    } catch {
+      cause = undefined;
+    }
+    if (cause === SUBMISSION_IN_PROGRESS_CAUSE) throw new SubmissionInProgressError();
+    throw new Error('Échec de la soumission du quiz');
+  }
   if (res.status === 400) {
     // Refus métier de core : texte brut, en français, qui dit quoi corriger. Un corps JSON est
     // une erreur générique de Spring (anglais, technique) : message vide, l'écran affiche le sien.

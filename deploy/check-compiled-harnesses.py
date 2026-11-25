@@ -156,7 +156,7 @@ TOOL_ABORTED = "Un outil de la notation n'a pas abouti"
 # reconnaissance, ou copie divergente) n'est pas une preuve contre le harnais.
 TOOL_KILLED = re.compile(
     r"^(?:gcc|g\+\+|cc|c\+\+): fatal error: Killed signal terminated program [\w+.-]+$"
-    r"|^collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
+    r"|^(?:[ \t]*= note: )?collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
     r"|^[\w./-]+: /\S+/pkg/tool/\w+/(?:compile|link|asm): signal: killed$", re.M)
 NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
 

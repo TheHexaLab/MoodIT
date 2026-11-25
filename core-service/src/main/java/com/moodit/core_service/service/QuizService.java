@@ -8,6 +8,7 @@ import com.moodit.core_service.exception.AttemptNotFoundException;
 import com.moodit.core_service.exception.AttemptNotReviewableException;
 import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
+import com.moodit.core_service.exception.GradingInProgressException;
 import com.moodit.core_service.exception.GradingInterruptedException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.InvalidQuizException;
@@ -388,14 +389,43 @@ public class QuizService {
      * le résultat est poussé par WebSocket ({@code quiz:attempt-graded} / {@code -failed}).
      *
      * <p>Pourquoi async : le sandbox prend plusieurs secondes et ne doit tenir NI la requête HTTP
-     * (risque de timeout proxy) NI une connexion BD (pool partagé). Tentative unique : 409 si déjà
-     * soumise (quiz sans reprise) ou si une correction est déjà en cours (index partiel
-     * {@code uq_attempt_pending}). `userEmail` vient du JWT (header gateway).
+     * (risque de timeout proxy) NI une connexion BD (pool partagé). Deux 409 distincts :
+     * {@link GradingInProgressException} (corps JSON {@code cause = "en_cours"}) si une correction
+     * de ce quiz est déjà en cours pour l'étudiant (tentative {@code "pending"}, index partiel
+     * {@code uq_attempt_pending}) — le frontend rejoint alors son attente ; sinon
+     * {@link AlreadySubmittedException} si la tentative unique est déjà consommée (quiz sans
+     * reprise). `userEmail` vient du JWT (header gateway).
      */
     public Integer submitQuiz(Integer quizId, QuizSubmissionDTO submission, String userEmail) {
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
         TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
-        return writeTx.execute(status -> persistPendingAttempt(quizId, userEmail, byQuestion));
+        try {
+            return writeTx.execute(status -> persistPendingAttempt(quizId, userEmail, byQuestion));
+        } catch (ConcurrentSubmissionException e) {
+            // Insert refusé par une contrainte : la cause se RELIT dans une transaction NOUVELLE.
+            // Celle de l'insert est annulée — sous PostgreSQL, une transaction en erreur refuse
+            // toute requête jusqu'à son rollback. Une soumission concurrente bloquée sur l'index
+            // unique n'échoue qu'une fois l'autre committée : son pending est donc visible ici.
+            TransactionTemplate readTx = new TransactionTemplate(transactionManager);
+            readTx.setReadOnly(true);
+            boolean inProgress = Boolean.TRUE.equals(readTx.execute(status ->
+                    attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(quizId, e.userId, "pending")));
+            throw inProgress ? new GradingInProgressException() : new AlreadySubmittedException();
+        }
+    }
+
+    /**
+     * Insert de la tentative refusé par {@code UNIQUE(quiz,user,attempt_no)} ou
+     * {@code uq_attempt_pending} (soumission concurrente) : la cause du 409 est relue par
+     * {@link #submitQuiz}, hors de la transaction annulée.
+     */
+    private static final class ConcurrentSubmissionException extends RuntimeException {
+        private final Integer userId;
+
+        ConcurrentSubmissionException(Integer userId, Throwable cause) {
+            super(cause);
+            this.userId = userId;
+        }
     }
 
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
@@ -411,9 +441,14 @@ public class QuizService {
      * (tx écriture) Crée la tentative {@code "pending"} + une {@link Submission} brute par question
      * (réponses, SANS verdicts encore) et déclenche la correction async après commit.
      *
+     * <p>Une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
+     * contrôle de tentative unique, par {@link GradingInProgressException} : sur un quiz sans
+     * reprise, elle compte aussi parmi les tentatives et donnerait sinon le 409 « déjà soumis ».
+     *
      * <p>Anti-double-soumission ATOMIQUE : la contrainte {@code UNIQUE(quiz,user,attempt_no)} ET
      * l'index partiel {@code uq_attempt_pending} garantissent qu'un seul pending existe à la fois —
-     * un 2e insert concurrent viole l'un d'eux → {@link AlreadySubmittedException} (409).
+     * un 2e insert concurrent viole l'un d'eux → {@link ConcurrentSubmissionException}, dont
+     * {@link #submitQuiz} relit la cause (409 « en_cours » ou « déjà soumis »).
      */
     private Integer persistPendingAttempt(Integer quizId, String userEmail,
             Map<Integer, SubmittedAnswerDTO> submitted) {
@@ -428,6 +463,9 @@ public class QuizService {
         requireValidOrderings(quiz, byQuestion);
         requireBoundedCode(quiz, byQuestion);
 
+        if (attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(quizId, user.getId(), "pending")) {
+            throw new GradingInProgressException();
+        }
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
@@ -442,8 +480,10 @@ public class QuizService {
         try {
             saved = attemptRepository.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException e) {
-            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending (correction déjà en cours) → 409.
-            throw new AlreadySubmittedException();
+            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending : soumission concurrente. La
+            // cause (correction en cours ou tentative consommée) se relit hors de cette
+            // transaction, désormais inutilisable (cf. submitQuiz).
+            throw new ConcurrentSubmissionException(user.getId(), e);
         }
 
         // Réponses brutes ; les verdicts de code seront ajoutés par la correction async.

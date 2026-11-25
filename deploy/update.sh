@@ -322,11 +322,15 @@ ok "Services démarrés."
 # fichier ; sans elle, Caddy garderait l'ancienne configuration (en-têtes, redirections, domaines).
 # On compare le fichier vu par le conteneur à celui du dépôt plutôt que les commits : un Caddyfile
 # resté périmé après une mise à jour précédente est ainsi rattrapé, `--force` compris.
+# `--no-deps` : Caddy SEUL. Sans lui, compose reprend aussi la chaîne de ses dépendances
+# (frontend → gateway → core → execution-service) ; lancée à la main sans MOODIT_RUNNER_TAG, la
+# commande affichée recréait execution-service sur `latest` (configuration différente du tag
+# par commit) et perdait les corrections en cours.
 if ! docker exec moodit_caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - deploy/Caddyfile; then
-  if stream "Recréation de Caddy (Caddyfile modifié)" $COMPOSE up -d --force-recreate caddy; then
+  if stream "Recréation de Caddy (Caddyfile modifié)" $COMPOSE up -d --no-deps --force-recreate caddy; then
     ok "Caddy recréé avec le nouveau Caddyfile."
   else
-    warn "Recréation de Caddy échouée : lancer « $COMPOSE up -d --force-recreate caddy » à la main."
+    warn "Recréation de Caddy échouée : lancer « $COMPOSE up -d --no-deps --force-recreate caddy » à la main."
   fi
 fi
 

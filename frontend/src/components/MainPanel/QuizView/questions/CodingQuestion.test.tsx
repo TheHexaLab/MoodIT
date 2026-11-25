@@ -250,7 +250,7 @@ describe('CodingQuestion — mode review (lecture seule + TestResults)', () => {
     expect(screen.getByText('Ta réponse')).toBeTruthy();
   });
 
-  it('result.tests null → placeholder « Évaluation en cours »', () => {
+  it('result.tests null → mention fixe « Non évalué », sans spinner (cause permanente)', () => {
     render(
       <CodingQuestion
         question={codingQuestion('Python')}
@@ -260,7 +260,10 @@ describe('CodingQuestion — mode review (lecture seule + TestResults)', () => {
         result={{ questionId: 1, earned: 0, max: 5, tests: null }}
       />
     );
-    expect(screen.getByText('Évaluation du code en cours…')).toBeTruthy();
+    expect(
+      screen.getByText('Non évalué : aucun verdict de test n’est disponible pour cette question.')
+    ).toBeTruthy();
+    expect(document.querySelector('[class*="spinner"]')).toBeNull();
   });
 
   it('result.tests fourni → une ligne par harnais avec nom et verdict', () => {
