@@ -34,13 +34,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Lance le CONTENEUR RUNNER jetable d'une exécution (#116) — notation compilée comme mode exec
- * des interprétés, SQL et vues ({@link RunnerExec}) — et en rapporte la sortie JSON du superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
- * tmpfs bornés {@code /box} et {@code /tmp}, mémoire/PID/CPU bornés, toutes les capacités
- * retirées sauf le minimum du superviseur, {@code no-new-privileges}. {@code SYS_PTRACE} n'est
- * PLUS accordée : elle servait à tracer le code soumis pour détecter une lecture du harnais, ce
- * qui n'a plus d'objet depuis que le harnais n'entre dans aucun fichier ni processus qu'il puisse
- * atteindre (#116). Les
- * fichiers du job sont copiés AVANT le démarrage dans la zone de transit de l'image
+ * des interprétés, SQL et vues ({@link RunnerExec}) — et en rapporte la sortie JSON du
+ * superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
+ * trois tmpfs bornés {@code /box}, {@code /tmp} et {@code /dev/shm}, mémoire/PID/CPU bornés,
+ * toutes les capacités retirées sauf le minimum du superviseur, {@code no-new-privileges}.
+ * {@code SYS_PTRACE} n'est PLUS accordée : elle servait à tracer le code soumis pour détecter une
+ * lecture du harnais, ce qui n'a plus d'objet depuis que le harnais n'entre dans aucun fichier ni
+ * processus qu'il puisse atteindre (#116). Les fichiers du job sont copiés AVANT le démarrage dans la zone de transit de l'image
  * ({@code /opt/moodit/staging}, 0600 root — {@code docker cp} ne sait pas écrire dans un
  * tmpfs), puis déplacés dans le tmpfs {@code /box} par le superviseur (pas de montage hôte :
  * compatible docker-outside-of-docker) ; le conteneur est détruit à la fin, succès ou non.
@@ -416,11 +416,11 @@ public class DockerSandbox {
                     .withMemorySwap(memoryBytes)
                     .withPidsLimit(pidsLimit)
                     .withNanoCPUs(nanoCpus)
-                    // Écritures de l'UID étudiant CONFINÉES aux deux tmpfs bornés ci-dessous
+                    // Écritures de l'UID étudiant CONFINÉES aux trois tmpfs bornés ci-dessous
                     // (comptés dans la mémoire du conteneur) : les images verrouillent leurs
                     // répertoires monde-inscriptibles (/var/tmp, /go, cargo… — cf. Dockerfiles),
-                    // il ne reste donc que /box et /tmp — le code étudiant ne peut pas remplir le
-                    // disque de l'hôte. (`ReadonlyRootfs` ferait pareil en plus strict, mais le
+                    // il ne reste donc que /box, /tmp et /dev/shm — le code étudiant ne peut pas
+                    // remplir le disque de l'hôte. (`ReadonlyRootfs` ferait pareil en plus strict, mais le
                     // démon refuse alors TOUT `docker cp`, même vers un tmpfs.) /box porte le job
                     // ET les artefacts de compilation (cible cargo, GOCACHE…) donc PAS de noexec ;
                     // /tmp couvre les outils qui l'exigent en dur (JVM hsperfdata, mono, sort…).

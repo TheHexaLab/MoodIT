@@ -370,5 +370,37 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(8085, chk.exec_port(["EXEC_SERVICE_PORT=abc", "AUTRE_EXEC_SERVICE_PORT=1"]))
 
 
+class CaseNameTest(unittest.TestCase):
+    def test_empty_name_becomes_case_n_like_core(self):
+        # Revue #246 : un nom vide donnait un 400 (@NotBlank) et classait À VÉRIFIER une question
+        # que core corrige normalement (il envoie « cas N »).
+        question = {"language": "Python", "start_code": "",
+                    "cases": [{"name": "", "harnessCode": "return True", "weight": 1},
+                              {"name": "  ", "harnessCode": "return True", "weight": 1},
+                              {"name": None, "harnessCode": "return True", "weight": 1},
+                              {"name": "garde", "harnessCode": "return True", "weight": 1}]}
+        sent = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"[]"
+
+        def urlopen(request, timeout):
+            sent["body"] = request.data
+            return Response()
+
+        with mock.patch.object(chk.urllib.request, "urlopen", urlopen):
+            chk.evaluate("http://x", "t", question)
+        body = __import__("json").loads(sent["body"].decode("utf-8"))
+        self.assertEqual(["cas 1", "cas 2", "cas 3", "garde"],
+                         [case["name"] for case in body["testCases"]])
+
+
 if __name__ == "__main__":
     unittest.main()

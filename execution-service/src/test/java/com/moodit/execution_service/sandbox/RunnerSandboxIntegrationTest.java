@@ -198,9 +198,11 @@ class RunnerSandboxIntegrationTest {
         // de fichiers VIDES consommaient la mémoire noyau du cgroup jusqu'à faire tuer le
         // superviseur (conteneur mort sans JSON → SandboxException ici, 502 en prod). La sonde
         // tente 400 000 créations sur /tmp et sur /dev/shm, les deux tmpfs monde-inscriptibles.
-        // Le troisième, /box, où l'UID étudiant n'écrit que dans son dossier work/ (HOME et
-        // TMPDIR), porte son propre plafond (BOX_INODES) : il n'est pas sondé ici, le remplir
-        // jusqu'à 32 768 inodes allongerait le test sans rien vérifier de plus du mécanisme.
+        // Le troisième, /box, n'est inscriptible par l'UID étudiant que dans les dossiers que le
+        // superviseur lui attribue (work/ à l'exécution, etu_build/ pour la compilation de son
+        // code, gocache_etu/ et gopath_etu/ en Go) ; il porte son propre plafond (BOX_INODES) :
+        // il n'est pas sondé ici, le remplir jusqu'à 32 768 inodes allongerait le test sans rien
+        // vérifier de plus du mécanisme.
         DockerEvaluator small = new DockerEvaluator(
                 new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
                 System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));

@@ -49,8 +49,12 @@ import org.springframework.transaction.TransactionDefinition;
  * Soumission ASYNCHRONE d'une tentative ({@link QuizService#submitQuiz}) et correction en tâche de
  * fond ({@link QuizService#gradeAttempt}) : tentative unique (409), numérotation des reprises,
  * persistance des réponses brutes, évènement de correction, exécution des harnais, finalisation
- * « done » + push WS, et suppression du pending (jamais coincé) en cas d'échec. Couvre aussi les
- * lectures dérivées : historique (getMyAttempts) et agrégat MCP (getCourseQuizStats).
+ * « done » + push WS, et suppression du pending (jamais coincé) en cas d'échec — sauf deux cas :
+ * une correction INTERROMPUE par l'arrêt de core laisse la tentative pending (reprise au
+ * démarrage), et le plafond d'échecs sans verdict la GARDE « à revoir » (#116, S4 : compte par
+ * étudiant et par quiz, relance par l'enseignant, retour à revoir si la relance échoue). Couvre
+ * aussi les lectures dérivées : historique (getMyAttempts, tentatives à revoir comprises), liste
+ * des tentatives à revoir et agrégat MCP (getCourseQuizStats).
  */
 class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
@@ -119,7 +123,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Code soumis au-delà de la borne d'execution-service → refusé (400), tentative non consommée")
-        void codeTropLong_refuse() {
+        void codeTooLong_rejected() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             SubmittedAnswerDTO tooLong = SubmittedAnswerDTO.builder().questionId(11)
@@ -134,7 +138,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Code soumis pile à la borne (100 000 caractères) → accepté")
-        void codeALaBorne_accepte() {
+        void codeAtLimit_accepted() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             when(attemptRepository.saveAndFlush(any(Attempt.class))).thenAnswer(inv -> {
@@ -250,7 +254,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Question Code avec harnais → évènement marqué needsSandbox (pool du code)")
-        void questionCodeAvecHarnais_needsSandbox() {
+        void codeQuestionWithHarness_needsSandbox() {
             testCase(codeQ, 90, "cas", 1);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
@@ -269,7 +273,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Harnais sur une question qui n'est pas de type Code → pas de sandbox")
-        void harnaisHorsQuestionCode_pasDeSandbox() {
+        void harnessOnNonCodeQuestion_noSandbox() {
             testCase(choiceQ, 91, "cas", 1);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
@@ -411,7 +415,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Correction interrompue par l'arrêt de core → tentative LAISSÉE pending (reprise au démarrage)")
-        void correctionInterrompue_laissePending() {
+        void interruptedGrading_leavesPending() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any()))
                     .thenThrow(new com.moodit.core_service.exception.GradingInterruptedException());
@@ -445,7 +449,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Relance qui échoue sur un quiz avec reprise, compte remis à zéro → REMISE à revoir, pas supprimée")
-        void relanceEchouee_revientARevoir() {
+        void failedRegrade_backToReview() {
             // Une autre tentative corrigée entre-temps a effacé le compte (aucun GradingFailure) :
             // seul le marqueur de relance garde la tentative.
             attempt.setRegrade(true);
@@ -463,7 +467,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Relance qui aboutit → tentative 'done' et marqueur de relance retiré")
-        void relanceReussie_retireLeMarqueur() {
+        void successfulRegrade_clearsRegradeFlag() {
             attempt.setRegrade(true);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, false));
@@ -476,7 +480,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Démarrage → chaque pending revient avec son pool (harnais ou non)")
-        void pendingGradings_aiguilleSelonLesHarnais() {
+        void pendingGradings_routedByHarness() {
             Question choiceOnly = question(40, SINGLE, 1.0, 0);
             Quiz choiceQuiz = quiz(5, course(1), choiceOnly);
             Attempt choiceAttempt = attempt(71, choiceQuiz, eva, 1, "pending");
@@ -492,7 +496,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Démarrage sans pending → liste vide")
-        void pendingGradings_aucun() {
+        void pendingGradings_none() {
             when(attemptRepository.findByStatusOrderByIdAsc("pending")).thenReturn(List.of());
 
             assertThat(service.pendingGradings()).isEmpty();
@@ -500,7 +504,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Correction refusée par l'executor → pending supprimé dans une NOUVELLE transaction, push failed")
-        void abandon_supprimeDansUneNouvelleTransaction() {
+        void abandon_deletesInNewTransaction() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
@@ -559,7 +563,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Tentative supprimée avant la finalisation → échec : suppression, pas de push")
+        @DisplayName("Tentative supprimée avant la finalisation → échec sans suppression (déjà disparue), pas de push")
         void disparueAvantFinalisation_echec() {
             when(attemptRepository.findById(ATTEMPT_ID))
                     .thenReturn(Optional.of(attempt))   // contexte
@@ -576,7 +580,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Tentative déjà corrigée (reprise au démarrage) → rien n'est exécuté, ni supprimé, ni poussé")
-        void dejaCorrigee_rienAFaire() {
+        void alreadyGraded_nothingToDo() {
             attempt.setStatus("done");
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
 
@@ -589,7 +593,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Finalisée par une autre passe pendant l'exécution → aucune écriture, aucun push, pas de suppression")
-        void finaliseeParUneAutrePasse_ignoree() {
+        void finalizedByOtherPass_ignored() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenAnswer(inv -> {
                 attempt.setStatus("done"); // l'autre passe a committé pendant le sandbox
@@ -605,7 +609,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Échec d'une passe alors que l'autre a finalisé → la tentative done n'est PAS supprimée, aucun push failed")
-        void echecApresFinalisationParLAutre_rienNestSupprime() {
+        void failureAfterOtherPassFinalized_nothingDeleted() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             // Clé (submission, test_case) déjà écrite par l'autre passe.
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(List.of(true, true));
@@ -671,7 +675,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Sans verdict sous le plafond → pending supprimé, échec compté, raison générique")
-        void sansVerdict_sousLePlafond_supprimeEtCompte() {
+        void noVerdict_belowCap_deletesAndCounts() {
             failsWithoutVerdict();
 
             service.gradeAttempt(ATTEMPT_ID);
@@ -688,7 +692,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Sans verdict au plafond → tentative GARDÉE à revoir, raison « review »")
-        void sansVerdict_auPlafond_garde() {
+        void noVerdict_atCap_keeps() {
             failsWithoutVerdict();
             when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
                     .thenReturn(Optional.of(failures(2)));
@@ -707,7 +711,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Plafond configurable : à 1, le premier échec sans verdict garde la tentative")
-        void sansVerdict_plafondConfigurable() {
+        void noVerdict_configurableCap() {
             service.setMaxNoVerdictFailures(1);
             failsWithoutVerdict();
 
@@ -719,7 +723,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Sandbox INDISPONIBLE sous le plafond → supprimée, rien n'est compté")
-        void indisponible_neComptePas() {
+        void unavailable_notCounted() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
@@ -735,7 +739,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Plafond déjà atteint (relance de l'enseignant) : même une panne garde la tentative")
-        void plafondAtteint_toutEchecGarde() {
+        void capReached_anyFailureKeeps() {
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
             when(attemptRepository.findByIdForUpdate(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
@@ -752,7 +756,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Quiz AVEC reprise, plafond atteint : une panne supprime (l'étudiant resoumet)")
-        void plafondAtteint_avecReprise_pannesSupprime() {
+        void capReached_withRetry_outageDeletes() {
             quiz.setAllowRetry(true);
             when(attemptRepository.findById(ATTEMPT_ID)).thenReturn(Optional.of(attempt));
             when(executionClient.evaluate(any(), any(), any(), any(), any())).thenReturn(null);
@@ -768,7 +772,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Quiz AVEC reprise : un échec SANS VERDICT au plafond garde quand même")
-        void plafondAtteint_avecReprise_sansVerdictGarde() {
+        void capReached_withRetry_noVerdictKeeps() {
             quiz.setAllowRetry(true);
             failsWithoutVerdict();
             when(gradingFailureRepository.findById(new GradingFailure.Key(4, 3)))
@@ -782,7 +786,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
     }
 
     @Test
-    void plafond_inferieur_a_un_refuse_au_demarrage() {
+    @DisplayName("Plafond d'échecs sans verdict inférieur à 1 → refusé au démarrage")
+    void capBelowOne_rejectedAtStartup() {
         // 0 ne désactive pas le plafond : il le rend toujours atteint (revue #246).
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMaxNoVerdictFailures(0))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -822,7 +827,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
     @Test
     @DisplayName("Historique : une tentative à revoir y figure, sans note, avec son statut")
-    void getMyAttempts_tentativeARevoir() {
+    void getMyAttempts_attemptToReview() {
         Question q = question(10, SINGLE, 2.0, 0);
         answer(q, 1, "ok", true);
         Quiz quiz = quiz(4, course(1), q);
@@ -853,15 +858,21 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @BeforeEach
         void setUp() {
+            // Comme en vrai : une tentative n'est « à revoir » qu'après des échecs de harnais,
+            // donc le quiz porte une question Code avec harnais (needsSandbox vrai).
             Question q = question(10, SINGLE, 2.0, 0);
-            quiz = quiz(4, course(1), q);
-            review = attempt(81, quiz, eva, 2, QuizService.REVIEW, submission(q, choice(10, 1)));
+            Question codeQ = question(11, CODE, 3.0, 1);
+            codeQ.setLanguage(language(2, "python"));
+            testCase(codeQ, 90, "cas", 1);
+            quiz = quiz(4, course(1), q, codeQ);
+            review = attempt(81, quiz, eva, 2, QuizService.REVIEW, submission(q, choice(10, 1)),
+                    submission(codeQ, SubmittedAnswerDTO.builder().questionId(11).code("print(1)").build()));
             review.setSubmittedAt(LocalDateTime.of(2026, 9, 2, 8, 30));
         }
 
         @Test
         @DisplayName("Liste : nom de l'étudiant, date en UTC, nombre d'échecs sans verdict")
-        void liste() {
+        void listsAttemptsToReview() {
             Attempt undated = attempt(82, quiz, user(5, "bob@test.ca"), 1, QuizService.REVIEW);
             when(attemptRepository.findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(4, QuizService.REVIEW))
                     .thenReturn(List.of(review, undated));
@@ -877,7 +888,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Relance : la tentative repasse en pending, part en correction, est journalisée")
-        void relance() {
+        void regrade_backToPendingAndAudited() {
             when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
 
             service.regradeAttempt(4, 81);
@@ -886,7 +897,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             // Marqueur de relance : un nouvel échec la remettra à revoir (cf. failGrading).
             assertThat(review.isRegrade()).isTrue();
             verify(attemptRepository).saveAndFlush(review);
-            verify(eventPublisher).publishEvent(new AttemptSubmittedEvent(81, false));
+            // Repart sur le pool du CODE : la question Code a des harnais à exécuter.
+            verify(eventPublisher).publishEvent(new AttemptSubmittedEvent(81, true));
             ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
             verify(auditLogService).record(eq("QUIZ_REGRADE"), eq("QUIZ"), eq(4), summary.capture(), any());
             assertThat(summary.getValue()).contains("tentative 2").contains("Éva Test").contains("Quiz 4");
@@ -894,7 +906,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Historique pendant une relance : la tentative reste « à revoir », une correction ordinaire en cours n'y est pas")
-        void historique_pendantUneRelance() {
+        void history_duringRegrade() {
             review.setStatus("pending");
             review.setRegrade(true);
             Attempt ordinaryPending = attempt(83, quiz, eva, 3, "pending");
@@ -913,7 +925,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Relance d'une tentative d'un AUTRE quiz ou inconnue → 404, rien ne change")
-        void relance_autreQuiz() {
+        void regrade_otherQuiz() {
             when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
 
             assertThatThrownBy(() -> service.regradeAttempt(5, 81))
@@ -926,7 +938,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Relance d'une tentative pas à revoir, ou correction déjà en cours → 409")
-        void relance_refusee() {
+        void regrade_rejected() {
             review.setStatus("done");
             when(attemptRepository.findByIdForUpdate(81)).thenReturn(Optional.of(review));
             assertThatThrownBy(() -> service.regradeAttempt(4, 81))

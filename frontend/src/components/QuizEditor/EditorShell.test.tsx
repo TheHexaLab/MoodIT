@@ -217,4 +217,19 @@ describe('EditorShell — en-tête et navigation', () => {
     expect(document.activeElement).toBe(other);
     other.remove();
   });
+
+  it('changer de vue sans chevron (vue liste) : focus perdu → titre de la fenêtre', () => {
+    // Retour à la liste des quiz : pas de chevron, le focus reste quand même dans la fenêtre.
+    const view = (key: string, onBack?: () => void) => (
+      <EditorShell title="Éditeur" onClose={() => {}} onBack={onBack} scrollResetKey={key}>
+        <p>Contenu</p>
+      </EditorShell>
+    );
+    const { rerender } = render(view('form', () => {}));
+    screen.getByLabelText('Retour').focus();
+    // Le chevron disparaît avec la vue : le focus qu'il portait est perdu.
+    rerender(view('list'));
+    expect(screen.queryByLabelText('Retour')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Éditeur' }));
+  });
 });

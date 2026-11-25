@@ -38,6 +38,9 @@ echo "→ Image runner Python (questions de code)"
 # En CI (jeton du runtime Actions exposé par crazy-max/ghaction-github-runtime), cache de build
 # gha comme les images de service (docker-compose-ci-cache.yml) : sans lui, chaque job retéléchargeait
 # numpy, pandas, scipy et sympy depuis PyPI, une dépendance réseau sur le chemin critique.
+# `docker build` garde le builder par défaut (driver docker), pas celui de setup-buildx : l'export
+# de cache gha n'y est accepté que parce que les runners utilisent le stockage d'images
+# containerd (Docker 29). Sans lui, la construction serait refusée d'entrée.
 RUNNER_CACHE=""
 if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
   RUNNER_CACHE="--load --cache-from type=gha,scope=moodit-runner-python --cache-to type=gha,scope=moodit-runner-python,mode=max,ignore-error=true"

@@ -10,7 +10,7 @@ class GradingFailureTest {
 
     @Test
     @DisplayName("Clé : égale et même hash pour le même (quiz, étudiant), différente sinon")
-    void cle_egalite() {
+    void key_equality() {
         GradingFailure.Key key = new GradingFailure.Key(4, 3);
         assertThat(key).isEqualTo(new GradingFailure.Key(4, 3))
                 .hasSameHashCodeAs(new GradingFailure.Key(4, 3))

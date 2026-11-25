@@ -100,11 +100,11 @@ public class DockerEvaluator {
 
     /**
      * Marqueur réservé des gabarits runtime (canaris {@code __MOODIT_A__}/{@code __MOODIT_B__})
-     * et du marqueur de harnais {@code __MOODIT_HARNAIS__} : le superviseur les substitue ou les
-     * lit dans TOUS les fichiers
-     * du cas — code étudiant compris (en Rust il partage même le fichier du harnais). Un code
-     * soumis qui contient ce préfixe recevrait donc les vraies valeurs : rejet immédiat, verdict
-     * explicite, sans lancer de conteneur.
+     * et du marqueur de harnais {@code __MOODIT_HARNAIS__}. Le superviseur ne substitue les
+     * gabarits que dans le fichier du harnais, jamais dans le fichier soumis : le refus est une
+     * défense en profondeur. En Java, il évite aussi qu'un fichier soumis portant
+     * {@code __MOODIT_HARNAIS__} soit pris pour le harnais et sauté (« Aucun fichier de code
+     * soumis »). Rejet immédiat, verdict explicite, sans lancer de conteneur.
      */
     private static final String RESERVED_MARKER = "__MOODIT_";
 

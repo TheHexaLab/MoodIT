@@ -129,7 +129,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
     @Test
     @DisplayName("Vue éditeur : compteur des tentatives à revoir par quiz ; vue étudiant : absent")
-    void listQuizzes_compteurARevoir() {
+    void listQuizzes_reviewCount() {
         Quiz withReview = quiz(2, course);
         withReview.setPosition(0);
         Quiz without = quiz(3, course);
@@ -321,7 +321,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Code de départ, harnais trop longs ou trop nombreux → refusés à l'écriture (execution-service les refuserait à chaque correction)")
-        void tailles_executables_bornees() {
+        void executableSizes_bounded() {
             java.util.function.BiFunction<String, List<TestCaseDTO>, QuizDetailDTO> quizWith =
                     (start, cases) -> QuizDetailDTO.builder().title("T").questions(List.of(
                             QuestionDTO.builder().qType("multiple_choice").startCode(start).testCases(cases)
@@ -694,7 +694,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
 
         @Test
         @DisplayName("Mise à jour avec un code de départ trop long → refusée, rien n'est enregistré")
-        void codeDeDepartTropLong_refuse() {
+        void startCodeTooLong_rejected() {
             when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
 
             assertThatThrownBy(() -> service.updateQuiz(5, QuizDetailDTO.builder().title("T")

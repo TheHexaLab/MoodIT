@@ -29,11 +29,6 @@ class HarnessProjectsTest {
             "C", "MOODIT_TEST(t) { }",
             "C++", "MOODIT_TEST(t) { }");
 
-    /** Harnais au format framework du langage visé. */
-    private static String harnessCode(String language) {
-        return FRAMEWORK_HARNESS.getOrDefault(language, "MOODIT_TEST(t) { }");
-    }
-
     /** Un cas dont le harnais est au format FRAMEWORK du langage visé (ancienne disposition). */
     private static List<TestCaseInput> oneCase(String language) {
         return List.of(new TestCaseInput("aire du rectangle",
@@ -152,22 +147,22 @@ class HarnessProjectsTest {
                                     + "ancrer ce test autrement"));
             java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\w+)\\s*\\(")
                     .matcher(expression.substring(0, expression.indexOf("== ATTENDU")));
-            String entry_ = null;
+            String calledEntry = null;
             while (m.find()) {
-                entry_ = m.group(1);
+                calledEntry = m.group(1);
             }
-            assertThat(entry_).as("appel lisible dans le gabarit de " + languageName).isNotNull();
+            assertThat(calledEntry).as("appel lisible dans le gabarit de " + languageName).isNotNull();
 
-            String lineBegin = effectiveValue(migrations, "('" + languageName + "',", "$sc$");
-            assertThat(lineBegin).as("code de départ de " + languageName).isNotEmpty();
+            String startCode = effectiveValue(migrations, "('" + languageName + "',", "$sc$");
+            assertThat(startCode).as("code de départ de " + languageName).isNotEmpty();
             // Hors commentaires : un commentaire qui contiendrait le mot ne vaut pas déclaration.
-            String code = lineBegin.lines()
+            String code = startCode.lines()
                     .filter(l -> !l.strip().startsWith("//") && !l.strip().startsWith("#"))
                     .reduce("", (a, b) -> a + "\n" + b);
             assertThat(code)
-                    .as("le gabarit de " + languageName + " appelle " + entry_
+                    .as("le gabarit de " + languageName + " appelle " + calledEntry
                             + "(), que le code de départ doit déclarer")
-                    .contains(entry_);
+                    .contains(calledEntry);
         }
     }
 
@@ -177,10 +172,10 @@ class HarnessProjectsTest {
         try (var fileList = java.nio.file.Files.list(
                 java.nio.file.Path.of("..", "db", "migration"))) {
             for (java.nio.file.Path p : fileList.toList()) {
-                String caseName = p.getFileName().toString();
+                String fileName = p.getFileName().toString();
                 java.util.regex.Matcher v = java.util.regex.Pattern.compile("^V(\\d+)__")
-                        .matcher(caseName);
-                if (caseName.endsWith(".sql") && v.find()) {
+                        .matcher(fileName);
+                if (fileName.endsWith(".sql") && v.find()) {
                     byVersion.put(Integer.parseInt(v.group(1)),
                             java.nio.file.Files.readString(p));
                 }

@@ -210,6 +210,22 @@ describe('QuestionFormBody', () => {
     expect(onRequestLanguages).toHaveBeenCalled();
   });
 
+  it('changer de type vide le temps limite : Code 8 s → Choix unique → Code affiche un champ vide', () => {
+    // Le champ est piloté par un tampon texte : sans remise à vide, il réaffichait « 8 » alors
+    // que le brouillon vierge du type n'a plus de temps limite (rien ne serait enregistré).
+    const draft: QuestionDraft = { ...emptyQuestionDraft('coding'), prompt: 'Q', execTimeoutMs: 8000 };
+    renderForm(draft, { isNew: true });
+    expect((screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement).value).toBe('8');
+
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
+    fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.single_choice }));
+    expect(screen.queryByLabelText(t.execTimeoutLabel)).toBeNull();
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
+    fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.coding }));
+
+    expect((screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement).value).toBe('');
+  });
+
   // ── Points ──
 
   it('barème : arrondi au dixième borné ≥ 0.1 au blur', () => {

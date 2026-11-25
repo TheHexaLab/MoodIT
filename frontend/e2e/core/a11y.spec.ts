@@ -38,6 +38,9 @@ import {
 // Chaque écran est audité par une assertion douce : un écran fautif n'empêche pas l'audit des
 // suivants, et toutes les violations sont tracées (`A11Y|…`) pour l'inventaire. Toute violation
 // « serious » ou « critical » fait échouer le test (garde-fou depuis #109 : aucune n'est tolérée).
+// Les écrans des tentatives « à revoir » (#116 : pastille, vue de relance, message de l'étudiant)
+// sont audités avec le même `auditScreen` dans quiz-review.spec.ts, sur des réponses simulées :
+// aucune tentative réelle ne peut y être amenée par les tests.
 
 const CHANNEL_NAME = 'Discussion — Mathématiques pour ingénieurs I';
 

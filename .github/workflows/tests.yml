@@ -485,7 +485,7 @@ jobs:
           docker rm "$cid"
 
       # Les 10 images du RUNNER (#116) : notation des compilés (java, csharp, go, rust, c) et
-      # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les deux filets
+      # mode exec ex-Piston (python, node, php, bash, sqlite). Exigées par les trois filets
       # d'intégration : interprétés/SQL/vues (ExecutionIntegrationTest), notation NON
       # FALSIFIABLE des compilés (RpcGradingIntegrationTest) et isolation du conteneur
       # (RunnerSandboxIntegrationTest — réseau coupé, /tmp noexec, budgets).

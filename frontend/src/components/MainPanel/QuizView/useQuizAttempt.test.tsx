@@ -573,16 +573,22 @@ describe('tentative à revoir par l\'enseignant', () => {
       .mockResolvedValueOnce([review(56), summary(57, 2)])
       .mockResolvedValue([summary(56), summary(57, 2)]);
     const onFetchAttemptResult = vi.fn(async (_q: number, id: number) => makeResult(id));
+    // Espion STABLE (un `vi.fn` en ligne serait recréé à chaque rendu et ne compterait rien).
+    const onFetchQuiz = vi.fn(async () => makeQuiz({ allowRetry: true }));
     let outcome: AttemptOutcome | null = null;
-    const { result, rerender } = renderHook(() =>
-      useQuizAttempt({
-        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })), onFetchAttempts,
-        onFetchAttemptResult, attemptOutcome: outcome,
-      })
-    );
+    // `loading` relevé à CHAQUE rendu : sa valeur finale (faux) ne dit pas s'il est passé à vrai.
+    const loadingSeen: boolean[] = [];
+    const { result, rerender } = renderHook(() => {
+      const api = useQuizAttempt({
+        initialQuiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, attemptOutcome: outcome,
+      });
+      loadingSeen.push(api.loading);
+      return api;
+    });
     await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
     act(() => result.current.selectAttempt(56));
     expect(result.current.awaitingReview).toBe(true);
+    loadingSeen.length = 0;
 
     outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
     rerender();
@@ -591,8 +597,10 @@ describe('tentative à revoir par l\'enseignant', () => {
     expect(result.current.awaitingReview).toBe(false);
     expect(result.current.phase).toBe('summary');
     expect(result.current.attempts.find((a) => a.id === 56)?.status).not.toBe('review');
-    // Sans écran de chargement (la barre et le focus restent en place).
-    expect(result.current.loading).toBe(false);
+    // Sans écran de chargement (la barre et le focus restent en place) ni rechargement du quiz.
+    expect(loadingSeen.length).toBeGreaterThan(0);
+    expect(loadingSeen).not.toContain(true);
+    expect(onFetchQuiz).toHaveBeenCalledTimes(1);
   });
 
   it('relance réussie pendant laquelle l’étudiant change de vue : son choix n’est pas écrasé', async () => {
@@ -659,24 +667,35 @@ describe('tentative à revoir par l\'enseignant', () => {
       .mockResolvedValueOnce([review(56), summary(57, 2)])
       .mockResolvedValue([summary(56), summary(57, 2)]);
     const onFetchAttemptResult = vi.fn(async (_q: number, id: number) => makeResult(id));
+    // Espion STABLE (un `vi.fn` en ligne serait recréé à chaque rendu et ne compterait rien).
+    const onFetchQuiz = vi.fn(async () => makeQuiz({ allowRetry: true }));
     let outcome: AttemptOutcome | null = null;
-    const { result, rerender } = renderHook(() =>
-      useQuizAttempt({
-        initialQuiz, onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })), onFetchAttempts,
-        onFetchAttemptResult, attemptOutcome: outcome,
-      })
-    );
+    // `loading` relevé à CHAQUE rendu : sa valeur finale (faux) ne dit pas s'il est passé à vrai.
+    const loadingSeen: boolean[] = [];
+    const { result, rerender } = renderHook(() => {
+      const api = useQuizAttempt({
+        initialQuiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, attemptOutcome: outcome,
+      });
+      loadingSeen.push(api.loading);
+      return api;
+    });
     await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
     expect(result.current.attempts.find((a) => a.id === 56)?.status).toBe('review');
+    loadingSeen.length = 0;
 
     outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
     rerender();
     await waitFor(() =>
       expect(result.current.attempts.find((a) => a.id === 56)?.status).not.toBe('review')
     );
-    // La vue reste sur #57 : pas de rechargement complet.
+    // La vue reste sur #57 : pas de rechargement complet (ni relecture du quiz, ni écran de
+    // chargement, ni relecture du corrigé affiché) ; seule la liste est relue.
     expect(result.current.result?.attemptId).toBe(57);
     expect(onFetchAttempts).toHaveBeenCalledTimes(2);
+    expect(onFetchQuiz).toHaveBeenCalledTimes(1);
+    expect(onFetchAttemptResult).toHaveBeenCalledTimes(1);
+    expect(loadingSeen.length).toBeGreaterThan(0);
+    expect(loadingSeen).not.toContain(true);
   });
 
   it('quiz avec reprise : « refaire » quitte le message d\'attente', async () => {

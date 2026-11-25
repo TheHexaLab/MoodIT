@@ -250,7 +250,8 @@ export interface DragItem {
 
 /**
  * Cas de test d'une question `coding` (table Test_Case) : un TEST exécutable contre la
- * soumission. Tous les langages : un CORPS qui renvoie un booléen ; les compilés sont notés
+ * soumission. Compilés et Python/JS/TS/PHP : un CORPS qui renvoie un booléen ; Bash : un script
+ * dont le code de sortie 0 vaut réussi ; SQL : un dernier SELECT booléen. Les compilés sont notés
  * par le runner isolé, où le harnais est compilé dans un programme séparé sous un UID séparé
  * (#116) — un harnais au format framework (JUnit, NUnit…) est refusé avec un diagnostic.
  * `weight` donne le crédit partiel. Données cachées à l'étudiant.

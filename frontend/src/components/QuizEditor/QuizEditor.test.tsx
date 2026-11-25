@@ -479,21 +479,25 @@ describe('QuizEditor — fetch de la liste', () => {
       .mockImplementationOnce(() => new Promise<Quiz[]>((res) => (resolveList = res)))
       .mockResolvedValue([makeQuiz()]);
     let resolveFull!: (q: Quiz) => void;
-    const onFetchQuiz = vi.fn(() => new Promise<Quiz>((res) => (resolveFull = res)));
+    const detail = new Promise<Quiz>((res) => (resolveFull = res));
+    const onFetchQuiz = vi.fn(() => detail);
     const { rerender } = renderEditor({ handlers: { onFetchQuizzes, onFetchQuiz } });
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(1));
-    // Seconde lecture de la liste (nouveau cours rendu puis revenu) laissée en vol.
+    // Seconde lecture de la liste (passage au cours 43), laissée en vol.
     rerender(<QuizEditor courseId={43} quizzes={[makeQuiz()]} onClose={vi.fn()}
       handlers={{ onFetchQuizzes, onFetchQuiz }} />);
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(2));
     fireEvent.click(await screen.findByLabelText(listT.editAria('Quiz A')));
+    expect(onFetchQuiz).toHaveBeenCalledTimes(1);
+    // openEdit attend `detail` depuis le clic : cette réaction, enregistrée APRÈS la sienne sur la
+    // même promesse, court juste après sa suite (invalidation, détail inséré, formulaire demandé).
+    // Dans `act`, aucun rendu entre les deux : l'effet n'a pas encore pu annuler la lecture.
+    const listAnswered = detail.then(() => resolveList([makeQuiz()]));
     await act(async () => {
       resolveFull(makeQuiz({
         questions: [{ id: 7, qType: 'true_false', prompt: 'Question gardée', totalScore: 1 }],
       } as Partial<Quiz>));
-      // Laisse la suite d'openEdit s'exécuter AVANT la réponse de liste, sans rendu entre les deux.
-      for (let i = 0; i < 5; i++) await Promise.resolve();
-      resolveList([makeQuiz()]);
+      await listAnswered;
     });
     expect(await screen.findByText('Question gardée')).toBeTruthy();
   });

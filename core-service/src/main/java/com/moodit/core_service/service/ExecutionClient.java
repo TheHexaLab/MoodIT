@@ -302,16 +302,18 @@ public class ExecutionClient {
     /** Verdict renvoyé par execution-service (on n'exploite que {@code passed} + l'ordre). */
     private record Verdict(String name, int weight, boolean passed, String detail) {}
 
-    /**
-     * Exécute {@code code} contre {@code harnesses} dans {@code language} ; renvoie la liste des
-     * verdicts (true = réussi) dans le MÊME ordre que {@code harnesses}, ou {@code null} en cas
-     * d'échec d'appel.
-     */
-    /** Surcharge sans timeout (défaut du sandbox). */
+    /** Surcharge sans temps limite (défaut du sandbox). */
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses) {
         return evaluate(language, code, harnesses, null);
     }
 
+    /**
+     * Exécute {@code code} contre {@code harnesses} dans {@code language} ; renvoie la liste des
+     * verdicts (true = réussi) dans le MÊME ordre que {@code harnesses}, ou {@code null} en cas
+     * d'échec d'appel. Lève {@link CodeVerificationNoVerdictException} sur un 502
+     * {@code sans_verdict}, et {@link GradingInterruptedException} si core s'arrête pendant la pause
+     * entre deux essais d'un service injoignable.
+     */
     public List<Boolean> evaluate(String language, String code, List<Harness> harnesses, Integer timeoutMs) {
         return evaluate(language, code, harnesses, timeoutMs, null);
     }

@@ -494,8 +494,9 @@ public class QuizService {
 
     /**
      * Abandonne une correction qui n'a pas pu être planifiée (executor saturé, cf.
-     * QuizGradingListener) : même traitement qu'une défaillance de correction, la tentative pending
-     * est supprimée et l'auteur prévenu, il peut resoumettre.
+     * QuizGradingListener) : même traitement qu'une défaillance de correction (failGrading) — la
+     * tentative pending est supprimée et l'auteur prévenu, ou gardée « à revoir » (plafond d'échecs
+     * sans verdict atteint, tentative relancée par l'enseignant).
      */
     public void abandonGrading(Integer attemptId, RuntimeException cause) {
         failGrading(attemptId, cause);
@@ -505,10 +506,13 @@ public class QuizService {
      * Corrige une tentative {@code "pending"} : exécute les harnais de code HORS transaction (lent),
      * puis FINALISE en {@code "done"} + pousse {@code quiz:attempt-graded}.
      *
-     * <p><b>TOUTE défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
-     * SUPPRIME la tentative pending et pousse {@code quiz:attempt-failed} : on ne laisse JAMAIS un
-     * {@code "pending"} coincé, sinon l'index {@code uq_attempt_pending} verrouillerait tout renvoi.
-     * La tentative unique n'est donc pas consommée. Appelée après commit sur l'un des executors de
+     * <p><b>Toute défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
+     * passe par failGrading, qui pousse {@code quiz:attempt-failed} et SUPPRIME la tentative pending
+     * (la tentative unique n'est pas consommée) ou la garde {@code "review"} (plafond d'échecs sans
+     * verdict, tentative relancée par l'enseignant) : jamais un {@code "pending"} coincé, sinon
+     * l'index {@code uq_attempt_pending} verrouillerait tout renvoi. Seule exception, l'ARRÊT de core
+     * pendant la correction ({@link GradingInterruptedException}) : la tentative reste
+     * {@code "pending"} et la reprise au démarrage la recorrige. Appelée après commit sur l'un des executors de
      * correction (cf. QuizGradingListener), hors de toute transaction.
      */
     public void gradeAttempt(Integer attemptId) {

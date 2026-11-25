@@ -161,7 +161,7 @@ class ExecuteCaseSaturationTest(unittest.TestCase):
 
     def test_failed_case_becomes_not_imputable_and_states_cause(self):
         issue = self._run_case(supervisor.CaseOutcome(
-            False, "Échec du harnais JUnit", ran=True), lost=True)
+            False, "Échec du harnais", ran=True), lost=True)
         self.assertTrue(issue.skipped)
         self.assertIn("saturé", issue.detail)
 
@@ -195,6 +195,22 @@ class ExecuteCaseSaturationTest(unittest.TestCase):
         self.assertFalse(issue.ran)
         self.assertTrue(issue.harness_build)
         self.assertTrue(supervisor.inconclusive(issue))
+
+    def test_extraction_refusal_becomes_a_refused_case(self):
+        # Une borne de l'extraction franchie par le code soumis (SubmissionRefused) donne un cas
+        # REFUSÉ avec son message, comme les refus que rendent les runners — pas l'exception que
+        # main() compterait en erreur interne (502 sans verdict, provoqué par l'étudiant).
+        def fake_runner(case_dir, env, timeout_s, case_index):
+            raise supervisor.SubmissionRefused("Hiérarchie trop profonde pour la notation")
+
+        supervisor.RUNNERS["Java"] = fake_runner
+        issue = supervisor.execute_case("Java", {"index": 0}, 10)[0]
+        self.assertFalse(issue.passed)
+        self.assertFalse(issue.ran)
+        self.assertEqual("Hiérarchie trop profonde pour la notation", issue.detail)
+        self.assertFalse(issue.harness_build)
+        self.assertFalse(issue.skipped)
+        self.assertIsNone(issue.cause)
 
     def test_student_build_failure_stays_conclusive(self):
         # Le message du compilateur vient APRÈS notre préfixe : un code soumis qui ne compile
@@ -277,15 +293,15 @@ class InternalErrorTest(unittest.TestCase):
         # Etat GLOBAL vide avant chaque test : ces classes affirment sur supervisor.EVENTS,
         # et un test d'une autre classe (canary_verdict emet sans nettoyer) laissait un
         # evenement derriere lui. Sous unittest l'ordre alphabetique des classes masquait le
-        # conflit ; sous pytest (ordre du fichier), test_cas_saute_pour_saturation rougissait
+        # conflit ; sous pytest (ordre du fichier), test_case_skipped_for_saturation_does_not_accuse rougissait
         # — et un simple renommage de classe aurait inverse la CI. On ne fait pas confiance a
         # un etat global qu'on n'a pas pose.
         supervisor.EVENTS.clear()
 
     def test_signal_death_at_load_does_not_accuse(self):
         # Un code qui PLANTE ou sature la memoire au CHARGEMENT fait echouer les canaris sans
-        # les faire expirer : en Go et C/C++ le code etudiant partage leur unite de
-        # compilation, donc son init()/constructeur global y tourne aussi. L'ancien garde-fou
+        # les faire expirer : le code soumis tourne dans le serveur de CHAQUE cas, canaris
+        # compris, donc son init()/constructeur global y tourne aussi. L'ancien garde-fou
         # n'acceptait que l'expiration, et accusait donc de triche.
         cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
                  {"index": 2}]
@@ -391,7 +407,8 @@ class InternalErrorTest(unittest.TestCase):
     def test_panic_at_load_does_not_accuse(self):
         # Une panique Go au chargement sort avec le STATUT 2 : ni expiration, ni signal, donc
         # l'ancienne forme y voyait une cause « concluante » et accusait — alors que le code
-        # etudiant partage le package du canari, si bien que TOUS les cas plantent pareil. Le
+        # soumis tourne dans le serveur de chaque cas, canaris compris, si bien que TOUS les cas
+        # plantent pareil. Le
         # critere est desormais unique : sans cas reel VERT, l'etudiant n'y gagne rien.
         cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"},
                  {"index": 2}]
@@ -562,7 +579,7 @@ class BoxExhaustedTest(unittest.TestCase):
         # Etat GLOBAL vide avant chaque test : ces classes affirment sur supervisor.EVENTS,
         # et un test d'une autre classe (canary_verdict emet sans nettoyer) laissait un
         # evenement derriere lui. Sous unittest l'ordre alphabetique des classes masquait le
-        # conflit ; sous pytest (ordre du fichier), test_cas_saute_pour_saturation rougissait
+        # conflit ; sous pytest (ordre du fichier), test_case_skipped_for_saturation_does_not_accuse rougissait
         # — et un simple renommage de classe aurait inverse la CI. On ne fait pas confiance a
         # un etat global qu'on n'a pas pose.
         supervisor.EVENTS.clear()
@@ -981,6 +998,11 @@ class IsolationInvariantsTest(unittest.TestCase):
         import inspect
         source = inspect.getsource(supervisor.main)
         lock = source.index('lock_src_dir(os.path.join(BOX, "cases", str(case["index"])))')
+        # Avant le MÉLANGE et la boucle des cas, pas seulement avant execute_case : déplacé dans
+        # `for case in order:`, juste avant execute_case, un cas en cours lisait le harnais des
+        # cas suivants (cas cachés compris).
+        self.assertLess(lock, source.index("rng.shuffle(order)"))
+        self.assertLess(lock, source.index("for case in order:"))
         self.assertLess(lock, source.index("execute_case("))
 
 
@@ -2079,8 +2101,13 @@ class Review25Test(unittest.TestCase):
             link = os.path.join(d, "lien")
             os.symlink(target_file, link)
             supervisor.lock_sources(link)
-            supervisor.chown_tree(link, os.getuid(), os.getgid())
             self.assertEqual(os.stat(file_path).st_mode & 0o777, 0o644)
+            # chown_tree : un chown vers son propre UID ne laisse aucune trace, on relève donc les
+            # appels. Ni la cible ni rien dessous ne doit être visé (root y donnait la cible —
+            # `/` pour un lien posé par l'étudiant — à l'étudiant).
+            with unittest.mock.patch.object(supervisor.os, "chown") as chown:
+                supervisor.chown_tree(link, 4242, 4242)
+            self.assertEqual([], chown.call_args_list)
 
 
 class Review26Test(unittest.TestCase):
@@ -4231,6 +4258,227 @@ class SubmittedCodeStageTest(unittest.TestCase):
     def test_exec_mode_announces_after_setup_and_before_running_anything(self):
         self.assert_announced_between(supervisor.exec_main, "runtime non pris en charge",
                                       "exec_env(")
+
+
+def best_cost(function, *args):
+    """Meilleur de trois temps d'exécution (moins sensible à la charge de la machine)."""
+    best = float("inf")
+    for _ in range(3):
+        started = time.perf_counter()
+        function(*args)
+        best = min(best, time.perf_counter() - started)
+    return best
+
+
+class ExtractionBoundsTest(unittest.TestCase):
+    """Revue #246 : l'extraction et la génération tournent dans le superviseur, à chaque cas,
+    avant toute compilation et hors de tout délai — conteneur à 1 Go, superviseur à
+    oom_score_adj -1000. Une forme du code soumis (≤ 100 000 caractères) qui y explose en temps
+    ou en mémoire donnait un 502 « sans verdict » provoqué par l'étudiant. Les coûts sont mesurés
+    par RAPPORT (quatre fois plus de texte : environ quatre fois plus de temps en linéaire, seize
+    en quadratique), indépendamment de la vitesse de la machine ; les expansions sont bornées et
+    refusées avec un message (SubmissionRefused), jamais un faux verdict."""
+
+    def test_cpp_declared_name_search_is_linear(self):
+        # Non ancrée, la recherche du nom déclaré repartait de chaque caractère d'un long mot
+        # sans `(` : 115 s par cas pour 99 000 caractères.
+        def cost(size):
+            src = "struct S {\n int " + "a" * size + ";\n int m() { return 0; } };\n"
+            return best_cost(supervisor.cpp_object_api, supervisor.blank_code(src))
+        # Neuf fois plus de texte : environ 9 en linéaire, 81 en quadratique. Un écart de 4 avec un
+        # seuil de 8 laissait trop peu de marge au bruit de mesure (CI chargée).
+        ratio = cost(45_000) / cost(5_000)
+        self.assertLess(ratio, 30, "recherche du nom déclaré quadratique (rapport %.1f)" % ratio)
+        # Même résultat que la recherche non ancrée : le mot de tête, `~` compris.
+        found = supervisor.CPP_DECLARED_NAME.search
+        self.assertEqual("aire", found("int aire(int a)").group(1))
+        self.assertEqual("~Forme", found("virtual ~Forme()").group(1))
+        self.assertEqual("~Foo", found("a~Foo(").group(1))
+        self.assertEqual("g", found("int ab cd g (").group(1))
+        self.assertIsNone(found("int " + "a" * 1000))
+        api = supervisor.cpp_object_api(supervisor.blank_code(
+            "struct S {\n int " + "a" * 5_000 + ";\n int m() { return 0; } };\n"))
+        self.assertEqual([("S", [[]], [("int", "m", [])])], api)
+
+    def test_member_pieces_is_linear(self):
+        # Une ligne qui n'est qu'une tête de déclaration ne coupe pas : le morceau en cours était
+        # relu à chaque fin de ligne (une seconde par cas pour 49 000 lignes `a`).
+        def cost(lines):
+            body = "a\n" * lines
+            depths = supervisor.code_depths(body)
+            return best_cost(supervisor._member_pieces, body, 0, depths, 0)
+        ratio = cost(90_000) / cost(10_000)   # ~9 en linéaire, ~81 en quadratique
+        self.assertLess(ratio, 30, "_member_pieces quadratique (rapport %.1f)" % ratio)
+        body = "a\n" * 1_000
+        self.assertEqual([body], supervisor._member_pieces(body, 0, supervisor.code_depths(body), 0))
+        body = "int\n aire() { return 1; }\n#define X\nint b;\n"
+        self.assertEqual(["int\n aire() { return 1; }", "\n", "#define X\n", "int b;", "\n"],
+                         supervisor._member_pieces(body, 0, supervisor.code_depths(body), 0))
+
+    def test_cs_strip_comments_is_linear(self):
+        # Chaque `#` relisait sa ligne depuis le début pour savoir s'il ouvre une directive :
+        # 3 s par cas pour `a` suivi de 99 999 `#`.
+        ratio = (best_cost(supervisor.cs_strip_comments, "a" + "#" * 99_000)
+                 / best_cost(supervisor.cs_strip_comments, "a" + "#" * 11_000))   # ~9 / ~81
+        self.assertLess(ratio, 30, "cs_strip_comments quadratique (rapport %.1f)" % ratio)
+        # Directive seulement en tête de ligne (blancs admis), lue dans le texte ORIGINAL : un
+        # `#` après du code, ou après un commentaire sur la même ligne, n'en ouvre pas.
+        self.assertEqual("a #b\n" + " " * 16 + "\nint x;",
+                         supervisor.cs_strip_comments("a #b\n  #region l'aide\nint x;"))
+        self.assertEqual("        #x; \nint y;",
+                         supervisor.cs_strip_comments("/* c */ #x; \nint y;"))
+        self.assertEqual("  \n   #x\n" + " " * 7 + "\nint w;",
+                         supervisor.cs_strip_comments("/*\n*/ #x\n  #if A\nint w;"))
+
+    def test_default_parameters_are_bounded(self):
+        bound = supervisor.MAX_DEFAULT_PARAMS
+        entry = ("int", "f", ["int"] * (bound + 2), bound)
+        self.assertEqual(bound + 1, len(supervisor.with_default_arities([entry])))
+        refused = ("int", "f", ["int"] * (bound + 2), bound + 1)
+        with self.assertRaises(supervisor.SubmissionRefused) as raised:
+            supervisor.with_default_arities([refused])
+        self.assertIn("« f »", str(raised.exception))
+        self.assertIn(str(bound), str(raised.exception))
+        defaults = ", ".join("int a%d = 0" % i for i in range(bound + 1))
+        cpp = "int f(int x, %s) { return x; }\n" % defaults
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.c_signatures(supervisor.blank_code(cpp), cpp=True)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.cpp_object_api(supervisor.blank_code(
+                "struct R { R(%s) {} int m() { return 0; } };\n" % defaults))
+        cs = "class Solution { static int F(int x, %s) { return x; } }" % defaults
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.cs_signatures(supervisor.cs_strip_comments(cs))
+        # Constructeur d'une AUTRE classe que celle que vise le harnais : refusé quand même,
+        # pour que canaris (harnais muet) et cas réels soient refusés ensemble.
+        cs = ("class Solution { static int F(int x) { return x; } }\n"
+              "class Rect { public Rect(%s) {} public int Aire() { return 1; } }" % defaults)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.cs_object_api(supervisor.cs_strip_comments(cs), "Solution")
+        # 4 000 paramètres par défaut : refusés d'emblée, sans construire les arités réduites.
+        many = ", ".join("int a%d=0" % i for i in range(4_000))
+        started = time.perf_counter()
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.c_signatures(supervisor.blank_code("int f(%s) { return 0; }" % many), cpp=True)
+        self.assertLess(time.perf_counter() - started, 5.0)
+
+    def test_inheritance_is_bounded(self):
+        depth = supervisor.MAX_ANCESTORS
+        def chain(length):
+            apis = {"A%d" % k: ([[]], [("int", "m%d" % k, [])]) for k in range(length)}
+            parents = {"A%d" % k: "A%d" % (k - 1) for k in range(1, length)}
+            return apis, parents
+        merged = supervisor.inherit_instance_methods(*chain(depth + 1))
+        self.assertEqual(depth + 1, len(merged["A%d" % depth]))
+        with self.assertRaises(supervisor.SubmissionRefused) as raised:
+            supervisor.inherit_instance_methods(*chain(depth + 2))
+        self.assertIn("« A%d »" % (depth + 1), str(raised.exception))
+        # Large plutôt que profond : une base et beaucoup de dérivées.
+        width = supervisor.MAX_INHERITED_METHODS // 100 + 1
+        apis = {"B": ([[]], [("int", "m%d" % k, []) for k in range(100)])}
+        apis.update({"D%d" % k: ([[]], []) for k in range(width)})
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.inherit_instance_methods(apis, {"D%d" % k: "B" for k in range(width)})
+        # Par langage, sur une chaîne de 2 000 classes (près de 100 Ko) : refus rapide.
+        cpp = "struct A0 { int m0() { return 0; } };\n" + "".join(
+            "struct A%d : A%d { int m%d() { return 0; } };\n" % (k, k - 1, k) for k in range(1, 2_000))
+        go = "package main\ntype A0 struct{}\nfunc (a A0) M0() int { return 0 }\n" + "".join(
+            "type A%d struct{ A%d }\nfunc (a A%d) M%d() int { return 0 }\n" % (k, k - 1, k, k)
+            for k in range(1, 2_000))
+        cs = "class A0 { public int M0() { return 0; } }\n" + "".join(
+            "class A%d : A%d { public int M%d() { return 0; } }\n" % (k, k - 1, k) for k in range(1, 2_000))
+        rust = "trait T {\n" + "".join("fn d%d(&self) -> i32 { 0 }\n" % k for k in range(2_000)) + "}\n" + "".join(
+            "struct U%d;\nimpl T for U%d {}\n" % (k, k) for k in range(2_000))
+        for extract in (lambda: supervisor.cpp_object_api(supervisor.blank_code(cpp)),
+                        lambda: supervisor.go_object_api(supervisor.blank_code(go, backticks=True)),
+                        lambda: supervisor.cs_object_api(supervisor.cs_strip_comments(cs), "A5"),
+                        lambda: supervisor.rust_object_api(supervisor.blank_code(rust, rust=True))):
+            started = time.perf_counter()
+            with self.assertRaises(supervisor.SubmissionRefused):
+                extract()
+            self.assertLess(time.perf_counter() - started, 5.0)
+
+    def test_cpp_inherited_constructors_linear_and_bounded(self):
+        # Dérivées AVANT leur base dans le texte : la boucle « jusqu'à stabilité » faisait un
+        # tour de toutes les classes par niveau (quadratique).
+        def chain(length):
+            apis = {"A%d" % k: ([], []) for k in range(length - 1, 0, -1)}
+            apis["A0"] = ([["int"]], [])
+            bases = {"A%d" % k: "A%d" % (k - 1) for k in range(1, length)}
+            return apis, bases, set(bases)
+        def cost(length):
+            return best_cost(lambda: supervisor.cpp_inherit_constructors(*chain(length)))
+        ratio = cost(9_000) / cost(1_000)   # ~9 en linéaire, ~81 en quadratique
+        self.assertLess(ratio, 30, "constructeurs repris quadratiques (rapport %.1f)" % ratio)
+        apis, bases, inheriting = chain(50)
+        supervisor.cpp_inherit_constructors(apis, bases, inheriting)
+        self.assertEqual([["int"]], apis["A49"][0])
+        # Ordre : la liste propre de la classe, puis celles de sa base.
+        apis = {"C": ([["long"]], []), "B": ([["double"], []], []), "A": ([["int"]], [])}
+        supervisor.cpp_inherit_constructors(apis, {"C": "B", "B": "A"}, {"C", "B"})
+        self.assertEqual([["long"], ["double"], ["int"]], apis["C"][0])
+        self.assertEqual([["double"], [], ["int"]], apis["B"][0])
+        api = supervisor.cpp_object_api(supervisor.blank_code(
+            "struct C : B { using B::B; int m() { return 0; } };\n"
+            "struct B : A { using A::A; };\n"
+            "struct A { A(int a) {} };\n"))
+        # (Sans constructeur déclaré, C garde aussi son constructeur par défaut implicite.)
+        self.assertEqual([("C", [[], ["int"]], [("int", "m", [])])], api)
+        # Une base à 200 constructeurs reprise par 60 dérivées : 12 000 > la borne.
+        base = "struct B {\n%s int m() { return 0; } };\n" % "".join(
+            "B(%s) {}\n" % ", ".join(["int"] * k) for k in range(1, 201))
+        derived = "".join("struct D%d : B { using B::B; };\n" % k for k in range(60))
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.cpp_object_api(supervisor.blank_code(base + derived))
+
+    def test_cpp_object_api_compiles_no_pattern_per_class(self):
+        # Une expression construite sur le nom de CHAQUE classe était recompilée à chaque
+        # classe (le cache de `re` en garde 512) : une seconde par cas pour 3 300 classes.
+        patterns = []
+        real_match = re.match
+        def spy(pattern, *args, **kwargs):
+            patterns.append(getattr(pattern, "pattern", pattern))
+            return real_match(pattern, *args, **kwargs)
+        src = "".join("struct Classe%d { Classe%d(int a) {} int m() { return a; } };\n" % (k, k)
+                      for k in range(20))
+        with unittest.mock.patch.object(supervisor.re, "match", spy):
+            api = supervisor.cpp_object_api(supervisor.blank_code(src))
+        self.assertEqual(20, len(api))
+        self.assertEqual([["int"]], api[0][1])
+        self.assertEqual([], [p for p in patterns if "Classe" in p])
+
+    def test_field_copies_are_bounded(self):
+        # Chaque méthode et chaque constructeur relayés recopient tous les champs : 7 000 champs
+        # et 1 200 méthodes dépassaient 1,7 Go en Go, 3,7 Go en Rust.
+        def go(fields, methods):
+            return ("package main\ntype S struct {\n%s}\n%s" % (
+                "".join("\tf%d int\n" % k for k in range(fields)),
+                "".join("func (o S) M%d() int { return 0 }\n" % k for k in range(methods))))
+        def rust(fields, methods):
+            return "struct S { %s }\nimpl S {\n%s}\n" % (
+                " ".join("f%d: i32," % k for k in range(fields)),
+                "".join("fn m%d(&self) -> i32 { 0 }\n" % k for k in range(methods)))
+        bound = supervisor.MAX_FIELD_COPIES
+        fields = 100
+        fits = bound // fields - 1           # méthodes + 1 (le littéral) : juste sous la borne
+        self.assertEqual(1, len(supervisor.go_object_api(supervisor.blank_code(go(fields, fits - 1)))))
+        self.assertEqual(1, len(supervisor.rust_object_api(supervisor.blank_code(rust(fields, fits - 1), rust=True))))
+        with self.assertRaises(supervisor.SubmissionRefused) as raised:
+            supervisor.go_object_api(supervisor.blank_code(go(fields, fits + 1)))
+        self.assertIn("« S »", str(raised.exception))
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.rust_object_api(supervisor.blank_code(rust(fields, fits + 1), rust=True))
+        # Un type à poignée (sans capture de champs) ne recopie rien.
+        supervisor.check_field_copies([("S", [], [("int", "m", [])] * 1_000)], {})
+
+    def test_c_segment_bounded_in_characters(self):
+        # Le budget en octets laissait un segment ASCII jusqu'à quatre fois plus long que le
+        # code soumis s'il était rempli de caractères de quatre octets.
+        pre = '# 1 "pp.c"\n' + "int a;\n" * 100
+        self.assertIsNotNone(supervisor.c_student_segment(pre, "pp.c", budget=10_000))
+        self.assertIsNone(supervisor.c_student_segment(pre, "pp.c", budget=10_000, char_budget=100))
+        self.assertEqual(("int a;\n" * 100).rstrip("\n"), supervisor.c_student_segment(
+            pre, "pp.c", budget=10_000, char_budget=700))
 
 
 if __name__ == "__main__":

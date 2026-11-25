@@ -189,7 +189,7 @@ class QuizControllerTest {
 
     @Test
     @DisplayName("GET /quizzes/{id}/review-attempts → tentatives à revoir du quiz")
-    void aRevoir_liste() throws Exception {
+    void review_list() throws Exception {
         when(quizService.getAttemptsToReview(4)).thenReturn(List.of(new ReviewAttemptDTO(
                 81, 2, "Éva Test", Instant.parse("2026-09-02T08:30:00Z"), 3)));
 
@@ -203,7 +203,7 @@ class QuizControllerTest {
 
     @Test
     @DisplayName("POST /quizzes/{id}/attempts/{attemptId}/regrade → 202, 404 hors du quiz, 409 pas à revoir")
-    void aRevoir_relance() throws Exception {
+    void review_regrade() throws Exception {
         mockMvc.perform(post("/api/quizzes/4/attempts/81/regrade"))
                 .andExpect(status().isAccepted());
         verify(quizService).regradeAttempt(4, 81);
@@ -219,7 +219,7 @@ class QuizControllerTest {
 
     @Test
     @DisplayName("Historique : le statut d'une tentative à revoir est sérialisé, sa note est nulle")
-    void historique_statutARevoir() throws Exception {
+    void history_reviewStatus() throws Exception {
         when(quizService.getMyAttempts(4, EMAIL)).thenReturn(List.of(
                 AttemptSummaryDTO.builder().id(81).attemptNo(1).earned(null).max(5.0)
                         .status("review").build()));

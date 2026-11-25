@@ -384,6 +384,21 @@ class DockerEvaluatorTest {
         verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(walls.wallMs()));
     }
 
+    @Test
+    void csharp_short_time_limit_raised_to_the_vm_floor_in_the_job() {
+        supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
+        // Même plancher VM qu'en Java : mono froid met plusieurs secondes à démarrer, et le
+        // superviseur relève aussi son temps limite C# à 10 s. Le job, le mur et le budget
+        // doivent porter cette valeur, pas la seconde demandée par le prof.
+        evaluator.evaluate("C#", "code",
+                List.of(new TestCaseInput("t", "return Solution.Doubler(5) == 10;", 1)), 1_000);
+        JsonNode job = lastJob();
+        assertThat(job.path("timeout_ms").asLong()).isEqualTo(10_000);
+        DockerEvaluator.Walls walls = DockerEvaluator.walls("csharp", 1, 10_000, Long.MAX_VALUE);
+        assertThat(job.path("budget_ms").asLong()).isEqualTo(walls.budgetMs());
+        verify(sandbox).run(eq("moodit-runner-csharp:latest"), anyMap(), eq(walls.wallMs()));
+    }
+
     /** {@code job.json} du DERNIER conteneur demandé au sandbox. */
     private JsonNode lastJob() {
         @SuppressWarnings("unchecked")
@@ -460,14 +475,14 @@ class DockerEvaluatorTest {
         // ne doit jamais le déclencher (refus à tort), un vrai test toujours (notation par un
         // chemin qui n'existe plus).
         record CaseSpec(String lang, String booleanForm, String framework) { }
-        List<CaseSpec> caseInput = List.of(
+        List<CaseSpec> specs = List.of(
                 new CaseSpec("java", "return Solution.doubler(5) == 10;", "@Test void t() {}"),
                 new CaseSpec("csharp", "return Solution.Doubler(5) == 10;", "[Test] public void T() {}"),
                 new CaseSpec("go", "return doubler(5) == 10", "func TestT(t *testing.T) {}"),
                 new CaseSpec("rust", "doubler(5) == 10", "#[test] fn t() {}"),
                 new CaseSpec("c", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"),
                 new CaseSpec("cpp", "return doubler(5) == 10;", "MOODIT_TEST(t) { }"));
-        for (CaseSpec c : caseInput) {
+        for (CaseSpec c : specs) {
             assertThat(DockerEvaluator.frameworkMarkerFound(c.lang(), c.booleanForm()))
                     .as("harnais booléen en " + c.lang() + " → chemin non falsifiable")
                     .isFalse();
@@ -591,18 +606,18 @@ class DockerEvaluatorTest {
                     continue;
                 }
                 readFiles++;
-                java.util.List<String> lineList = java.nio.file.Files.readAllLines(df);
-                for (int i = 0; i < lineList.size(); i++) {
-                    if (!lineList.get(i).stripTrailing().endsWith("\\")) {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(df);
+                for (int i = 0; i < lines.size(); i++) {
+                    if (!lines.get(i).stripTrailing().endsWith("\\")) {
                         continue;
                     }
-                    if (i == lineList.size() - 1) {
+                    if (i == lines.size() - 1) {
                         offending.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (fin de fichier)");
                         continue;
                     }
-                    String nextOne = lineList.get(i + 1).strip();
-                    String keyword = nextOne.split("\\s+", 2)[0].toUpperCase(java.util.Locale.ROOT);
-                    if (nextOne.isEmpty()) {
+                    String nextLine = lines.get(i + 1).strip();
+                    String keyword = nextLine.split("\\s+", 2)[0].toUpperCase(java.util.Locale.ROOT);
+                    if (nextLine.isEmpty()) {
                         offending.add(d.getFileName() + "/Dockerfile:" + (i + 1) + " (ligne vide)");
                     } else if (instructions.contains(keyword)) {
                         offending.add(d.getFileName() + "/Dockerfile:" + (i + 1)

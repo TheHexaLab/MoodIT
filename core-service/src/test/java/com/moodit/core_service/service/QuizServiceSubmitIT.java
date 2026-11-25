@@ -41,7 +41,15 @@ import org.springframework.test.context.transaction.TestTransaction;
  * n'est pas chargé dans ce slice) — corrige le code :
  *   1. exécution indisponible → la tentative pending est SUPPRIMÉE (rien ne subsiste, l'étudiant
  *      peut renvoyer sans consommer sa tentative) ;
- *   2. exécution réussie → verdicts persistés, tentative {@code "done"}, question Code notée.
+ *   2. exécution réussie → verdicts persistés, tentative {@code "done"}, question Code notée ;
+ *   3. plafond des échecs sans verdict (#116, S4) → au troisième, la tentative est GARDÉE « à
+ *      revoir » (historique, tentative unique consommée, liste de l'enseignant), puis la relance
+ *      de l'enseignant la note et remet le compte à zéro ;
+ *   4. relance qui échoue sur un quiz avec reprise → la tentative reste « à revoir » pendant la
+ *      relance et y revient après l'échec, même si une autre tentative corrigée a remis le
+ *      compte à zéro ; une seconde relance qui aboutit la note et retire le marqueur.
+ * Les scénarios 3 et 4 committent leurs données (chaque correction tourne dans ses propres
+ * transactions, comme en prod) ; {@link #purgeCommitted} les efface.
  * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
  */
 @DataJpaTest

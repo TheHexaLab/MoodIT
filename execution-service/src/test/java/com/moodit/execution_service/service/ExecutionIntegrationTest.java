@@ -51,6 +51,9 @@ class ExecutionIntegrationTest {
             System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
     private final ExecutionService service = new ExecutionService(assembler, RUNNER);
 
+    /** Détail par défaut d'un harnais qui a tourné et rendu faux, stderr vide (ExecutionService). */
+    private static final String HARNESS_FALSE = "Le harnais a renvoyé faux";
+
     @BeforeEach
     void requireDocker() {
         gate(RUNNER.sandbox().available(), "Démon Docker injoignable");
@@ -110,25 +113,42 @@ class ExecutionIntegrationTest {
         // réponse conforme AVANT d'être appelé, le code noté la faisait consommer comme réponse
         // au premier appel — verdict vert sur une réponse fausse, sans jamais toucher au nonce.
         // Chaque appel porte donc un IDENTIFIANT imprévisible que la réponse doit renvoyer.
-        assertThat(passes("Python",
-                "import sys, json\n"
-                        + "print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
-                        + "def doubler(n):\n"
-                        + "    print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
-                        + "    return 0\n",
-                "return doubler(5) == 10")).isFalse();
+        String forge = "import sys, json\n"
+                + "print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
+                + "def doubler(n):\n"
+                + "    print(json.dumps({'ok': True, 'value': 10}), flush=True)\n"
+                + "    return %s\n";
+        assertEarlyAnswerIgnored("Python", forge.formatted("0"), forge.formatted("n * 2"),
+                "return doubler(5) == 10");
     }
 
     @Test
     void javascript_answering_rpc_early_fails() {
         requireRuntime("javascript");
-        assertThat(passes("JavaScript",
-                // process.stdout.write : console.log est neutralisé avant le code soumis, et la
-                // forge n'aurait jamais rien écrit.
-                "process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');\n"
-                        + "function doubler(n){ process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');"
-                        + " return 0; }",
-                "return doubler(5) === 10;")).isFalse();
+        // process.stdout.write : console.log est neutralisé avant le code soumis, et la forge
+        // n'aurait jamais rien écrit.
+        String forge = "process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');\n"
+                + "function doubler(n){ process.stdout.write(JSON.stringify({ok: true, value: 10}) + '\\n');"
+                + " return %s; }";
+        assertEarlyAnswerIgnored("JavaScript", forge.formatted("0"), forge.formatted("n * 2"),
+                "return doubler(5) === 10;");
+    }
+
+    /**
+     * Réponse devancée : la forme qui rend une valeur FAUSSE échoue parce que le harnais a tourné
+     * et rendu faux (détail par défaut du noteur : stderr vide, donc aucune trace de plantage),
+     * et la MÊME forme qui rend la bonne valeur réussit (témoin). Sans le témoin, un serveur
+     * étudiant que les lignes devancées feraient planter — ou un noteur cassé — laisserait le
+     * test au vert en ayant cessé de mesurer la forge.
+     */
+    private void assertEarlyAnswerIgnored(String language, String forged, String honest, String harness) {
+        TestResult refused = service.evaluate(new EvaluateRequest(language, null, forged,
+                List.of(new TestCaseInput("t", harness, 1)))).get(0);
+        assertThat(refused.passed()).isFalse();
+        assertThat(refused.detail()).as("motif du refus").isEqualTo(HARNESS_FALSE);
+        TestResult witness = service.evaluate(new EvaluateRequest(language, null, honest,
+                List.of(new TestCaseInput("t", harness, 1)))).get(0);
+        assertThat(witness.passed()).as("témoin : %s", witness.detail()).isTrue();
     }
 
     @Test
@@ -601,11 +621,11 @@ class ExecutionIntegrationTest {
         // Jumeau du test JS : une ligne conforme ecrite D'AVANCE sur stdout (au chargement
         // du module) etait consommee comme reponse au premier appel. L'identifiant par
         // appel, desormais exige dans la reponse, la fait ignorer.
-        assertThat(passes("JSX",
-                "process.stdout.write(JSON.stringify({ok:true, value:'<h1>Bonjour</h1>'})"
-                        + " + String.fromCharCode(10));"
-                        + "function Composant(){ return React.createElement('div'); }",
-                "return html.includes('<h1>Bonjour</h1>');")).isFalse();
+        String forge = "process.stdout.write(JSON.stringify({ok:true, value:'<h1>Bonjour</h1>'})"
+                + " + String.fromCharCode(10));"
+                + "function Composant(){ return React.createElement(%s); }";
+        assertEarlyAnswerIgnored("JSX", forge.formatted("'div'"),
+                forge.formatted("'h1', null, 'Bonjour'"), "return html.includes('<h1>Bonjour</h1>');");
     }
 
     @Test

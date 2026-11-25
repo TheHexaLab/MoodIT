@@ -10,6 +10,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.support.StaticApplicationContext;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
@@ -21,7 +23,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 class AsyncConfigTest {
 
   @Test
-  void quizExecutor_executeHorsDuThreadAppelant() throws Exception {
+  void quizExecutor_runsOffTheCallerThread() throws Exception {
     ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) new AsyncConfig().quizExecutor();
     try {
       String threadName =
@@ -34,7 +36,7 @@ class AsyncConfigTest {
   }
 
   @Test
-  void quizCodeExecutor_toutesLesPlacesServentAvantLaFile_puisRefus() throws Exception {
+  void quizCodeExecutor_fillsEveryThreadBeforeQueueing_thenRejects() throws Exception {
     ThreadPoolTaskExecutor executor =
         (ThreadPoolTaskExecutor) new AsyncConfig().quizCodeExecutor(3, 2);
     CountDownLatch started = new CountDownLatch(3);
@@ -72,23 +74,85 @@ class AsyncConfigTest {
     }
   }
 
+  /**
+   * Rejoue sur l'executor le début de la fermeture de SON contexte, dans l'ordre de Spring :
+   * {@link ContextClosedEvent}, puis arrêt coordonné de la phase de cycle de vie
+   * ({@code stop(callback)}, avant la destruction des beans). Rend le signal de fin de cet arrêt.
+   */
+  private static CountDownLatch closeContextOf(ThreadPoolTaskExecutor executor) {
+    StaticApplicationContext context = new StaticApplicationContext();
+    executor.setApplicationContext(context);
+    executor.onApplicationEvent(new ContextClosedEvent(context));
+    CountDownLatch stopped = new CountDownLatch(1);
+    executor.stop(stopped::countDown);
+    return stopped;
+  }
+
+  /** Occupe un fil de l'executor jusqu'à {@code release} ; rend quand la tâche a démarré. */
+  private static void occupyOneThread(ThreadPoolTaskExecutor executor, CountDownLatch release)
+      throws InterruptedException {
+    CountDownLatch started = new CountDownLatch(1);
+    executor.execute(
+        () -> {
+          started.countDown();
+          try {
+            release.await(10, TimeUnit.SECONDS);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+  }
+
   @Test
-  void lesExecutorsAcceptentLesTachesJusquaLeurDestruction() {
-    // Arrêtés dès la fermeture du contexte (défaut Spring), ils refusaient une soumission qui
-    // commit pendant l'arrêt gracieux du serveur web : tentative supprimée au lieu d'être reprise.
-    for (Executor e : List.of(new AsyncConfig().quizExecutor(), new AsyncConfig().quizCodeExecutor(1, 0))) {
+  void executors_keepRunningUntilDestroyed() throws Exception {
+    // Fermeture du contexte pendant une correction : l'arrêt coordonné du cycle de vie n'attend
+    // pas la fin de la correction (jusqu'à 15 min), l'executor reste actif et accepte puis
+    // exécute encore une soumission (ou une relance) qui commit pendant l'arrêt gracieux du
+    // serveur web. La correction en cours sera interrompue à la destruction et restera pending
+    // pour la reprise au démarrage.
+    for (Executor e : List.of(new AsyncConfig().quizExecutor(), new AsyncConfig().quizCodeExecutor(1, 1))) {
       ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) e;
+      CountDownLatch release = new CountDownLatch(1);
       try {
-        assertThat(org.springframework.test.util.ReflectionTestUtils.getField(
-            executor, "acceptTasksAfterContextClose")).isEqualTo(true);
+        occupyOneThread(executor, release);
+        CountDownLatch stopped = closeContextOf(executor);
+        assertThat(stopped.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(executor.isRunning()).isTrue();
+
+        CountDownLatch ran = new CountDownLatch(1);
+        executor.execute(ran::countDown);
+        release.countDown();
+        assertThat(ran.await(5, TimeUnit.SECONDS)).isTrue();
       } finally {
+        release.countDown();
         executor.shutdown();
       }
     }
   }
 
   @Test
-  void quizCodeExecutor_reglageInvalide_refuseAuDemarrage() {
+  void defaultExecutor_stopWaitsForRunningTasks() throws Exception {
+    // Témoin, qui rend le test précédent discriminant : sans acceptUntilDestroyed, l'executor
+    // se met en pause à l'arrêt du cycle de vie et cet arrêt attend la fin des tâches en cours.
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.initialize();
+    CountDownLatch release = new CountDownLatch(1);
+    try {
+      occupyOneThread(executor, release);
+      CountDownLatch stopped = closeContextOf(executor);
+      assertThat(stopped.await(300, TimeUnit.MILLISECONDS)).isFalse();
+      assertThat(executor.isRunning()).isFalse();
+      release.countDown();
+      assertThat(stopped.await(5, TimeUnit.SECONDS)).isTrue();
+    } finally {
+      release.countDown();
+      executor.shutdown();
+    }
+  }
+
+  @Test
+  void quizCodeExecutor_invalidSetting_failsAtStartup() {
     assertThatThrownBy(() -> new AsyncConfig().quizCodeExecutor(0, 10))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new AsyncConfig().quizCodeExecutor(2, -1))

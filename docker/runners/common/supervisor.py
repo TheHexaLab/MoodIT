@@ -1459,6 +1459,23 @@ class CaseOutcome:
         self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
 
 
+class SubmissionRefused(Exception):
+    """Refus du code soumis décidé pendant l'EXTRACTION, avant toute compilation.
+
+    Les fonctions pures d'extraction et de génération (signatures, héritage, arités réduites)
+    tournent dans le superviseur, à chaque cas, hors de tout délai : une forme du code soumis
+    qui y fait exploser la mémoire ou le temps (milliers de paramètres par défaut, chaîne
+    d'héritage de milliers de classes) tuait le conteneur — un 502 « sans verdict » provoqué par
+    l'étudiant. Une borne dépassée lève ceci depuis le fond de ces fonctions, et execute_case en
+    fait le refus du cas, exactement comme les refus que rendent les runners (« Aucune fonction
+    exploitable… ») : un échec noté avec ce message, jamais une erreur interne ni un faux
+    verdict. Le message s'adresse à l'étudiant et au prof.
+
+    Une borne qui lève ceci ne dépend que du CODE SOUMIS, jamais du harnais : canaris et cas
+    réels sont alors refusés ensemble, et un refus des seuls canaris, à côté d'un cas réel vert,
+    ne peut pas passer pour une falsification (cf. canary_verdict)."""
+
+
 def exception_cause(e):
     """Cause d'une exception attrapee pendant un cas : "environnement" ou "erreur". PURE (testee).
 
@@ -1815,6 +1832,12 @@ def java_superclass(javap_output):
     return found.group(2).replace("$", ".") if found else None
 
 
+# Bornes de l'héritage (cf. inherit_instance_methods). Un code réel n'a que quelques niveaux et
+# au plus quelques centaines de méthodes héritées ; sans héritage, la borne n'est jamais en jeu.
+MAX_ANCESTORS = 64
+MAX_INHERITED_METHODS = 10_000
+
+
 def inherit_instance_methods(apis, parents, hiding=None):
     """Ajoute à chaque classe les méthodes d'instance HÉRITÉES d'une classe du code soumis.
     FONCTION PURE (testée).
@@ -1832,7 +1855,15 @@ def inherit_instance_methods(apis, parents, hiding=None):
     confondus. En C++, déclarer `aire(int)` dans `Carre` masque TOUTES les surcharges `aire` de
     `Forme` : hériter `aire()` quand même faisait générer au serveur un appel qui ne compile pas
     (« Échec de compilation » sur une réponse juste). Java et C# résolvent les surcharges en
-    remontant la hiérarchie : pas de masquage par nom (None)."""
+    remontant la hiérarchie : pas de masquage par nom (None).
+
+    Bornes (SubmissionRefused) : au plus MAX_ANCESTORS ancêtres du code soumis par classe, et
+    au plus MAX_INHERITED_METHODS méthodes héritées en tout. Chaque classe recopie celles de
+    tous ses ancêtres : une chaîne de K classes en donnait ~K²/2 — 2 007 classes C++ (101 Ko)
+    faisaient 2 millions de méthodes et un serveur de près d'un Go, construits dans le
+    superviseur avant toute compilation (502 sans verdict). Le parcours s'arrête dès qu'une
+    borne est franchie, avant d'avoir construit le reste. Elles ne dépendent que des classes
+    soumises : canaris et cas réels sont refusés ensemble."""
     def parents_of(name):
         found = parents.get(name)
         if found is None:
@@ -1840,22 +1871,35 @@ def inherit_instance_methods(apis, parents, hiding=None):
         return [found] if isinstance(found, str) else list(found)
 
     merged = {}
+    inherited = 0
     for name, (_ctors, own) in apis.items():
         methods = list(own)
         seen = {(m[1], tuple(m[2])) for m in methods}
         hidden = set(hiding.get(name, ())) if hiding is not None else set()
         visited = {name}
-        queue = parents_of(name)
+        queue = collections.deque(parents_of(name))
         while queue:
-            ancestor = queue.pop(0)
+            ancestor = queue.popleft()
             if ancestor not in apis or ancestor in visited:
                 continue
             visited.add(ancestor)
+            if len(visited) - 1 > MAX_ANCESTORS:
+                raise SubmissionRefused(
+                    "Hiérarchie trop profonde pour la notation : « %s » hérite de plus de %d "
+                    "classes, structures ou interfaces du code soumis. Réduisez la profondeur "
+                    "d'héritage." % (name, MAX_ANCESTORS))
             for method in apis[ancestor][1]:
                 key = (method[1], tuple(method[2]))
                 if key not in seen and method[1] not in hidden:
                     seen.add(key)
                     methods.append(method)
+                    inherited += 1
+                    if inherited > MAX_INHERITED_METHODS:
+                        raise SubmissionRefused(
+                            "Hiérarchie trop étendue pour la notation : l'héritage donne plus de "
+                            "%d méthodes héritées à relayer, toutes classes confondues. Réduisez "
+                            "la profondeur d'héritage ou le nombre de méthodes des classes de "
+                            "base." % MAX_INHERITED_METHODS)
             if hiding is not None:
                 hidden |= set(hiding.get(ancestor, ()))
             queue.extend(parents_of(ancestor))
@@ -1928,6 +1972,22 @@ def trailing_defaults(params):
     return count
 
 
+# Paramètres à valeur par défaut admis par fonction (cf. with_default_arities) : un code réel en
+# porte rarement plus de trois ou quatre. Avec cette borne, les arités réduites coûtent au plus
+# huit fois les paramètres écrits, quelle que soit la forme du code soumis.
+MAX_DEFAULT_PARAMS = 8
+
+
+def check_default_count(name, defaults):
+    """Refuse (SubmissionRefused) une signature à plus de MAX_DEFAULT_PARAMS paramètres par
+    défaut. FONCTION PURE (testée)."""
+    if defaults > MAX_DEFAULT_PARAMS:
+        raise SubmissionRefused(
+            "« %s » a %d paramètres à valeur par défaut : la notation en accepte au plus %d "
+            "par fonction, méthode ou constructeur. Réduisez-en le nombre (par exemple avec "
+            "des surcharges)." % (name, defaults, MAX_DEFAULT_PARAMS))
+
+
 def with_default_arities(entries):
     """[(retour, nom, types, nb de défauts)] → [(retour, nom, types)], avec pour chaque entrée
     ses arités RÉDUITES (`somme(int, int = 0)` donne aussi `somme(int)`). FONCTION PURE (testée).
@@ -1937,7 +1997,14 @@ def with_default_arities(entries):
     Le serveur appelle avec moins d'arguments, et la valeur par défaut s'applique chez
     l'étudiant (aucun texte soumis n'entre dans le noteur). Une arité réduite qui heurterait une
     déclaration explicite, ou celle d'une autre entrée, n'est pas ajoutée : l'appel serait
-    ambigu pour le compilateur du serveur."""
+    ambigu pour le compilateur du serveur.
+
+    Au plus MAX_DEFAULT_PARAMS paramètres par défaut par entrée, sinon SubmissionRefused :
+    chaque arité réduite recopie les paramètres qui la précèdent, et N défauts en donnaient
+    ~N²/2 — 4 000 paramètres C++ faisaient un serveur de 609 Mo, construit dans le superviseur
+    avant toute compilation (502 sans verdict). Le contrôle précède toute construction."""
+    for _r, name, _types, defaults in entries:
+        check_default_count(name, defaults)
     explicit = {(name, tuple(types)) for _r, name, types, _d in entries}
     produced = collections.Counter(
         (name, tuple(types[:len(types) - k]))
@@ -2795,7 +2862,40 @@ def go_object_api(source):
     merged = inherit_instance_methods(by_type, parents, hiding)
     for t in by_type:
         by_type[t][1][:] = merged[t]
-    return [(t, c, m) for t, (c, m) in sorted(by_type.items()) if m and (c or t in field_list)]
+    result = [(t, c, m) for t, (c, m) in sorted(by_type.items()) if m and (c or t in field_list)]
+    check_field_copies(result, field_list)
+    return result
+
+
+# Copies de champs admises dans le code généré (cf. check_field_copies) : une structure réelle
+# de dix champs et vingt méthodes en demande 200.
+MAX_FIELD_COPIES = 20_000
+
+
+def check_field_copies(obj_list, field_list):
+    """Refuse (SubmissionRefused) une API objet dont le code généré recopierait trop de champs.
+    FONCTION PURE (testée). Go et Rust.
+
+    En capture de champs, chaque méthode et chaque constructeur relayés recopient TOUS les
+    champs de leur structure (bouchon du noteur, aiguillage du serveur) : F champs et M méthodes
+    donnaient F × M lignes générées dans le superviseur, avant toute compilation — une structure
+    de 7 000 champs et 1 200 méthodes (100 Ko) dépassait 1,7 Go en Go, 3,7 Go en Rust (502 sans
+    verdict). Compté sur toute l'API, sans regarder le harnais : canaris et cas réels sont
+    refusés ensemble."""
+    total, worst, worst_copies = 0, None, -1
+    for typ, ctors, method_list in obj_list:
+        if typ not in field_list:
+            continue
+        copies = len(field_list[typ]) * (len(method_list) + len(ctors) + 1)
+        total += copies
+        if copies > worst_copies:
+            worst, worst_copies = typ, copies
+    if total > MAX_FIELD_COPIES:
+        raise SubmissionRefused(
+            "Structures trop grandes pour la notation : chaque méthode et chaque constructeur "
+            "relayés recopient tous les champs de leur structure, soit %d copies (au plus %d), "
+            "dont %d pour « %s ». Réduisez le nombre de champs ou de méthodes."
+            % (total, MAX_FIELD_COPIES, worst_copies, worst))
 
 
 def go_embedded_types(source):
@@ -3699,6 +3799,20 @@ def cpp_follows_template(src_text, position, heads, bounds):
     last_bound = bounds[k - 1] if k else -1
     h = bisect.bisect_left(heads, position)
     return h > 0 and heads[h - 1] > last_bound
+# Nom DÉCLARÉ par une tête de membre (`int aire(`, `~Forme(`) : le premier mot suivi d'une
+# parenthèse. Essayé seulement en DÉBUT de mot (ou sur un `~`) : non ancré, le moteur repartait
+# de chaque caractère d'un long mot sans `(` et le reparcourait jusqu'au bout — quadratique,
+# 115 s par cas pour `struct S { int aaaa…a; };` de 99 000 caractères, dans le superviseur et
+# hors de tout délai. Même résultat : une correspondance qui commence au milieu d'un mot existe
+# aussi depuis le début de ce mot, plus à gauche, et c'est elle que rendait la recherche.
+CPP_DECLARED_NAME = re.compile(r"(?:(?<!\w)|(?=~))(~?\w+)\s*\(")
+# Constructeur en tête de membre : un mot, puis sa parenthèse (et ses paramètres), comparé
+# ensuite au nom de la classe. Mêmes correspondances que l'ancien motif construit sur le nom de
+# chaque classe (`re.escape(nom) + r"\s*\("`) — le mot de tête est maximal dans les deux cas —,
+# mais compilé UNE fois : recompilé à chaque classe (le cache de `re` en garde 512), 3 300
+# classes coûtaient une seconde par cas en compilation d'expressions.
+CPP_LEADING_CALL = re.compile(r"(\w+)\s*\(")
+CPP_LEADING_CTOR = re.compile(r"(\w+)\s*\(([^()]*)\)")
 # Methode virtuelle PURE : `= 0;` apres la parenthese fermante (et ses qualificatifs).
 CPP_PURE_VIRTUAL = re.compile(r"\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?=\s*0\s*;")
 
@@ -3808,22 +3922,25 @@ def cpp_object_api(source):
                 if base and using.group(1) == base.group(2):
                     inheriting_ctors.add(class_ident)
             else:
-                declared = re.search(r"(~?\w+)\s*\(", head)
+                declared = CPP_DECLARED_NAME.search(head)
                 if declared and declared.group(1) not in (class_ident, "~" + class_ident, "operator"):
                     declared_names.add(declared.group(1))
             # Un constructeur DECLARE, meme prive ou non transportable, retire le constructeur
             # par defaut implicite (voir plus bas).
-            if re.match(re.escape(class_ident) + r"\s*\(", CPP_QUALIF.sub("", bare_line)):
+            leading = CPP_LEADING_CALL.match(CPP_QUALIF.sub("", bare_line))
+            if leading and leading.group(1) == class_ident:
                 declares_ctor = True
             if not public or not bare_line:
                 continue
             # Qualificatifs sans effet sur la signature vue de l'appelant.
             bare_line = CPP_QUALIF.sub("", bare_line)
-            ctor = re.match(re.escape(class_ident) + r"\s*\(([^()]*)\)", bare_line)
+            ctor = CPP_LEADING_CTOR.match(bare_line)
+            if ctor and ctor.group(1) != class_ident:
+                ctor = None
             if ctor:
-                types = _c_param_types(ctor.group(1))
+                types = _c_param_types(ctor.group(2))
                 if types is not None:
-                    ctor_entries.append((None, class_ident, types, trailing_defaults(ctor.group(1))))
+                    ctor_entries.append((None, class_ident, types, trailing_defaults(ctor.group(2))))
                 continue
             meth = re.match(r"(" + C_SCALAR_RET + r")\s+(\w+)\s*\(([^()]*)\)", bare_line)
             # `int operator()(int)` : un opérateur n'est pas une méthode nommée `operator` — le
@@ -3860,21 +3977,54 @@ def cpp_object_api(source):
     # was not declared »). 0 sur une reponse juste qui herite au lieu de redefinir.
     merged = inherit_instance_methods(apis, parents, hiding)
     # Constructeurs qu'une DÉRIVÉE reprend de sa base du code soumis par `using Base::Base;`
-    # (ceux, publics, que la base déclare). Jusqu'à stabilité, pour les chaînes de dérivation.
+    # (ceux, publics, que la base déclare), le long des chaînes de dérivation.
     # 0 sur une réponse juste sinon : « 'Carre' was not declared ».
-    changed = True
-    while changed:
-        changed = False
-        for name, (ctors, _methods) in apis.items():
-            base_api = apis.get(bases.get(name))
-            if base_api is None or name not in inheriting_ctors:
-                continue
-            for types in [t for t in base_api[0] if t]:
-                if types not in ctors:
-                    ctors.append(types)
-                    changed = True
+    cpp_inherit_constructors(apis, bases, inheriting_ctors)
     return [(name, ctors, merged[name]) for name, ctors, concrete in found
             if concrete and ctors and merged[name]]
+
+
+def cpp_inherit_constructors(apis, bases, inheriting_ctors):
+    """Ajoute (EN PLACE) aux constructeurs de chaque dérivée qui déclare `using Base::Base;` les
+    constructeurs non vides de sa base, transitivement. FONCTION PURE quant au reste (testée).
+
+    `apis` : classe → (constructeurs, méthodes) ; `bases` : classe → sa première base (tout
+    accès). Chaque base est résolue AVANT ses dérivées, en remontant la chaîne une seule fois :
+    l'ancienne boucle « jusqu'à stabilité » refaisait un tour de toutes les classes par niveau,
+    quadratique quand les dérivées précèdent leur base dans le texte (l'extraction lit le code
+    avant que le compilateur ne le refuse) — une seconde par cas pour 1 400 classes. Même
+    résultat : la liste propre de la classe, puis celles de sa base dans leur ordre.
+
+    Au plus MAX_INHERITED_METHODS constructeurs repris en tout (SubmissionRefused) : une base à
+    mille constructeurs reprise par mille dérivées en donnait un million, et autant de branches
+    dans le serveur généré, avant toute compilation."""
+    done = set()
+    inherited = 0
+    for name in apis:
+        path, on_path = [], set()
+        current = name
+        while current in apis and current not in done and current not in on_path:
+            path.append(current)
+            on_path.add(current)
+            current = bases.get(current) if current in inheriting_ctors else None
+        for klass in reversed(path):
+            done.add(klass)
+            base_api = apis.get(bases.get(klass))
+            if base_api is None or klass not in inheriting_ctors:
+                continue
+            ctors = apis[klass][0]
+            present = {tuple(t) for t in ctors}
+            for types in base_api[0]:
+                if types and tuple(types) not in present:
+                    present.add(tuple(types))
+                    ctors.append(types)
+                    inherited += 1
+                    if inherited > MAX_INHERITED_METHODS:
+                        raise SubmissionRefused(
+                            "Hiérarchie trop étendue pour la notation : les constructeurs repris "
+                            "par `using Base::Base;` dépassent %d, toutes classes confondues. "
+                            "Réduisez le nombre de constructeurs ou de classes dérivées."
+                            % MAX_INHERITED_METHODS)
 
 
 def _member_pieces(body, offset, depths, level):
@@ -3896,20 +4046,31 @@ def _member_pieces(body, offset, depths, level):
     pieces = []
     start = 0
     parens = 0
+    # Ce qu'il faut savoir du morceau en cours (body[start:i]) pour reconnaître une tête seule,
+    # tenu à jour caractère par caractère : son premier caractère non blanc, et s'il contient
+    # l'un de `();{}=:`. Le relire à chaque fin de ligne était quadratique (une seconde par cas
+    # pour 49 000 lignes `a` dans une structure, refaite à chaque cas hors de tout délai).
+    first = None
+    special = False
     for i, c in enumerate(body):
         if c == "(":
             parens += 1
         elif c == ")" and parens > 0:
             parens -= 1
-        head = body[start:i].strip() if c == chr(10) and parens == 0 else ""
-        only_head = (bool(head) and not head.startswith("#")
-                     and not any(ch in head for ch in "();{}=:"))
+        only_head = (c == chr(10) and parens == 0 and first is not None and first != "#"
+                     and not special)
         cut = ((c == chr(10) and parens == 0 and not only_head)
                or (c in ";}" and depths[offset + i] == level))
         if cut:
             pieces.append(body[start:i + 1])
             start = i + 1
             parens = 0
+            first, special = None, False
+        else:
+            if first is None and not c.isspace():
+                first = c
+            if c in "();{}=:":
+                special = True
     if start < len(body):
         pieces.append(body[start:])
     return pieces
@@ -4521,10 +4682,22 @@ def rust_impl_blocks(source):
                      if src_text[h.end():].lstrip().startswith("{")]
         defaults[trait.group(1)] = [(h.group(1), h.group(2), h.group(3)) for h in with_body]
     blocks = []
+    # Méthodes par défaut REPORTÉES sur les `impl` : comme l'héritage, chaque `impl Trait for
+    # Type` recopie celles du trait, et un trait de 2 000 méthodes implémenté par 2 000 types
+    # en donnait des millions, avant toute compilation. Même borne que l'héritage (cf.
+    # inherit_instance_methods), comptée sans regarder le harnais.
+    inherited = 0
     for impl in RUST_IMPL.finditer(src_text):
         functions = [(h.group(1), h.group(2), h.group(3)) for h in direct_functions(impl.end() - 1)]
         declared = {f[0] for f in functions}
-        functions += [f for f in defaults.get(impl.group(1), []) if f[0] not in declared]
+        added = [f for f in defaults.get(impl.group(1), []) if f[0] not in declared]
+        inherited += len(added)
+        if inherited > MAX_INHERITED_METHODS:
+            raise SubmissionRefused(
+                "Traits trop étendus pour la notation : les méthodes par défaut reportées sur "
+                "les `impl` dépassent %d, toutes implémentations confondues. Réduisez le nombre "
+                "de méthodes par défaut ou d'implémentations." % MAX_INHERITED_METHODS)
+        functions += added
         blocks.append((impl.group(2), functions))
     return blocks
 
@@ -4603,6 +4776,7 @@ def rust_object_api(source):
     for typ, (ctors, method_list) in by_type.items():
         if method_list and (ctors or typ in captured):
             result.append((typ, ctors, dedupe_signatures(method_list)))
+    check_field_copies(result, captured)
     return result
 
 
@@ -5548,6 +5722,13 @@ def cs_object_api(source, klass):
     hors types marshalables est simplement écartée (le harnais qui l'appelle ne compilera pas)."""
     param_types_of = _cs_param_types   # le MEME lecteur que les statiques
 
+    # Borne des paramètres par défaut (with_default_arities) vérifiée sur les constructeurs de
+    # TOUTES les classes, pas de la seule `klass` : celle-ci dépend du harnais (cs_student_class),
+    # et un refus limité aux cas dont le harnais nomme la classe fautive pouvait tomber sur les
+    # canaris seuls — « falsification probable » à côté d'un cas réel vert.
+    for ident, params in CS_CTOR_ANY.findall(source or ""):
+        if param_types_of(params) is not None:
+            check_default_count(ident, trailing_defaults(params))
     ctors = []
     # re.M est INDISPENSABLE : le gabarit est ancre en debut de LIGNE (sans quoi un
     # `new Rectangle(3, 4)` passerait pour une declaration), et sans ce drapeau `^` ne
@@ -5779,13 +5960,18 @@ def cs_strip_comments(src_text):
     i = 0
     n = len(src_text or "")
     src_text = src_text or ""
+    # Rien que des blancs depuis le début de la ligne (dans le texte ORIGINAL), tenu à jour
+    # morceau par morceau : relire la ligne à chaque `#` était quadratique — 3 s par cas pour
+    # `a` suivi de 99 999 `#`, dans le superviseur et hors de tout délai.
+    line_blank = True
     while i < n:
+        start = i
         two_chars = src_text[i:i + 2]
         # Une directive (`#region Méthodes d'aide`, `#if`, `#pragma`) va jusqu'à la fin de sa
         # ligne et ne porte aucun littéral : son apostrophe ouvrait un littéral de caractère
         # jamais fermé, tout le reste du fichier était blanchi, et une réponse juste rendait
         # « Aucune méthode exploitable ».
-        directive = src_text[i] == "#" and not src_text[src_text.rfind(chr(10), 0, i) + 1:i].strip()
+        directive = src_text[i] == "#" and line_blank
         if two_chars == "//" or directive:
             while i < n and src_text[i] != chr(10):
                 res.append(" ")
@@ -5831,6 +6017,12 @@ def cs_strip_comments(src_text):
         else:
             res.append(src_text[i])
             i += 1
+        consumed = src_text[start:i]
+        cut = consumed.rfind(chr(10))
+        if cut >= 0:
+            line_blank = not consumed[cut + 1:].strip()
+        else:
+            line_blank = line_blank and not consumed.strip()
     return "".join(res)
 
 
@@ -6435,7 +6627,7 @@ C_PREPROCESS_CAP = 16 * 1024 * 1024
 C_PREPROCESSED = {}
 
 
-def c_student_segment(preprocessed, file_name, budget=None):
+def c_student_segment(preprocessed, file_name, budget=None, char_budget=None):
     """Lignes du fichier soumis LUI-MÊME (`file_name` au niveau 0 des inclusions) dans la sortie
     de `gcc -E`, ou None si elles dépassent `budget` octets. FONCTION PURE (testée).
 
@@ -6449,12 +6641,17 @@ def c_student_segment(preprocessed, file_name, budget=None):
     fichier qui s'inclut lui-même (`#if __INCLUDE_LEVEL__ < 150 && __has_include("pp.cpp")`,
     faux à la vraie compilation) était compté à chaque niveau : 97 Ko devenaient 14 Mo, que
     l'extraction en Python lisait jusqu'au mur du conteneur — mort sans verdict (revue #246).
-    Un `#line` soumis peut tromper la pile ; le budget, lui, borne tout."""
+    Un `#line` soumis peut tromper la pile ; le budget, lui, borne tout.
+
+    `char_budget` borne AUSSI le nombre de CARACTÈRES gardés : le budget en octets laissait
+    passer, pour un code soumis rempli de caractères de quatre octets (écartés par une branche
+    `#if 0`), un segment ASCII jusqu'à quatre fois plus long que le code soumis lui-même — et
+    l'extraction, puis les bouchons générés, d'autant (avant toute compilation)."""
     if isinstance(preprocessed, str):
         lines = [line.encode("utf-8") for line in preprocessed.splitlines()]
     else:
         lines = preprocessed or ()
-    keep, stack, kept = [], [], 0
+    keep, stack, kept, kept_chars = [], [], 0, 0
     for raw in lines:
         marker = None
         if raw.startswith(b"#"):
@@ -6476,7 +6673,11 @@ def c_student_segment(preprocessed, file_name, budget=None):
             kept += len(raw)
             if budget is not None and kept > budget:
                 return None
-            keep.append(raw.decode("utf-8", "replace").rstrip(chr(10)))
+            line = raw.decode("utf-8", "replace").rstrip(chr(10))
+            kept_chars += len(line) + 1
+            if char_budget is not None and kept_chars > char_budget:
+                return None
+            keep.append(line)
     return chr(10).join(keep)
 
 
@@ -6516,7 +6717,8 @@ def c_directives_only_source(student_source, compiler, std, case_dir, ext):
                     # texte brut (None), jamais une extraction démultipliée — et la lecture
                     # s'arrête là, en flux, sans charger le reste.
                     segment = c_student_segment(
-                        f, name, budget=len(student_source.encode("utf-8")) + 1024)
+                        f, name, budget=len(student_source.encode("utf-8")) + 1024,
+                        char_budget=len(student_source) + 1024)
     except OSError:
         segment = None
     finally:
@@ -6766,7 +6968,12 @@ def execute_case(language, case, timeout_s):
     os.makedirs(env["HOME"], exist_ok=True)
     os.makedirs(env["TMPDIR"], exist_ok=True)
     start = time.monotonic()
-    outcome, compile_error = runner(case_dir, env, timeout_s, case["index"])
+    try:
+        outcome, compile_error = runner(case_dir, env, timeout_s, case["index"])
+    except SubmissionRefused as refusal:
+        # Borne de l'extraction dépassée par le code soumis : un refus noté, comme ceux que
+        # rendent les runners, et non l'erreur interne (502) que deviendrait l'exception.
+        outcome, compile_error = None, str(refusal)
     elapsed_ms = int((time.monotonic() - start) * 1000)
     if compile_error is not None:
         # Le préfixe est NOTRE texte (le message du compilateur ne vient qu'après) : le code

@@ -411,7 +411,7 @@ class RpcGradingIntegrationTest {
     void java_top_level_class_graded_correctly() {
         // `class Rectangle` A COTE de Solution : le bouchon la rangeait dans Solution, et
         // `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question. La forme imbriquee
-        // (Solution.Rectangle) reste couverte par java_objets_par_poignee.
+        // (Solution.Rectangle) reste couverte par java_objects_by_handle.
         String h = "return new Rectangle(3, 4).aire() == 12;";
         assertThat(note("Java", h, """
                 public class Solution {
@@ -483,9 +483,9 @@ class RpcGradingIntegrationTest {
                     public static double Moitie(int n) { return n / 2.0; }
                 }
                 """;
-        String hs = "return Solution.Moitie(3) == 1.5;";
-        assertThat(note("C#", hs, staticCode).passed()).isTrue();
-        assertThat(note("C#", hs, staticCode.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        String staticHarness = "return Solution.Moitie(3) == 1.5;";
+        assertThat(note("C#", staticHarness, staticCode).passed()).isTrue();
+        assertThat(note("C#", staticHarness, staticCode.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
         String objectCode = """
                 class Rect {
                     int l, h;
@@ -493,9 +493,9 @@ class RpcGradingIntegrationTest {
                     public double Aire() { return l * h / 2.0; }
                 }
                 """;
-        String ho = "return System.Math.Abs(new Rect(3, 4).Aire() - 6.0) < 1e-9;";
-        assertThat(note("C#", ho, objectCode).passed()).isTrue();
-        assertThat(note("C#", ho, objectCode.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
+        String objectHarness = "return System.Math.Abs(new Rect(3, 4).Aire() - 6.0) < 1e-9;";
+        assertThat(note("C#", objectHarness, objectCode).passed()).isTrue();
+        assertThat(note("C#", objectHarness, objectCode.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
     }
 
     @Test
@@ -2134,22 +2134,22 @@ class RpcGradingIntegrationTest {
         assertThat(alias.passed()).isFalse();
         assertThat(alias.detail()).contains("réservé").contains("free");
         // Bloc `extern "C"` :
-        TestResult bloc = note("C++", "return doubler(5) == 10;", """
+        TestResult externCBlock = note("C++", "return doubler(5) == 10;", """
                 extern "C" {
                 void *malloc(unsigned long n) { return 0; }
                 }
                 int doubler(int n) { return n * 2; }
                 """);
-        assertThat(bloc.passed()).isFalse();
-        assertThat(bloc.detail()).contains("réservé").contains("malloc");
+        assertThat(externCBlock.passed()).isFalse();
+        assertThat(externCBlock.detail()).contains("réservé").contains("malloc");
         // Fonction versionnée par directive d'assembleur : `T free@@GLIBC_2.2.5` dans le binaire.
-        TestResult versionnee = note("C", "return doubler(5) == 10;", """
+        TestResult versioned = note("C", "return doubler(5) == 10;", """
                 void mon_free(void *p) { }
                 __asm__(".symver mon_free,free@@GLIBC_2.2.5");
                 int doubler(int n) { return n * 2; }
                 """);
-        assertThat(versionnee.passed()).isFalse();
-        assertThat(versionnee.detail()).contains("réservé").contains("free");
+        assertThat(versioned.passed()).isFalse();
+        assertThat(versioned.detail()).contains("réservé").contains("free");
         // Une VARIABLE n'est jamais décorée, en C comme en C++ :
         for (String language : List.of("C", "C++")) {
             TestResult variable = note(language, "return doubler(5) == 10;", """
@@ -2450,7 +2450,8 @@ class RpcGradingIntegrationTest {
     // du serveur avant et pendant l'appel, SANS toucher au descripteur : la ligne atteint donc
     // bien le noteur, qui ne doit retenir que celle qui porte l'identifiant de SON appel. Jumeaux
     // de go_answering_early_fails pour C#, Rust et C++, où rien ne mesurait ce contrôle de bout en
-    // bout (csharp_dup2_and_reflection_fail coupe son propre canal : sa forge n'arrive jamais).
+    // bout (csharp_dup2_cuts_only_its_own_answer_channel coupe son propre canal : sa forge
+    // n'arrive jamais).
 
     @Test
     void csharp_answering_early_fails() {
@@ -2848,7 +2849,7 @@ class RpcGradingIntegrationTest {
         // alors plus reconnue. Le couple s'attendait, et une réponse JUSTE était notée
         // « Interrompu (temps limite dépassé) » après avoir brûlé tout son temps.
         record CaseSpec(String lang, String harnessCode, String code) { }
-        List<CaseSpec> caseInput = List.of(
+        List<CaseSpec> specs = List.of(
                 new CaseSpec("Java", "return Solution.doubler(5) == 10;", """
                         public class Solution {
                             public static int doubler(int n) {
@@ -2899,7 +2900,7 @@ class RpcGradingIntegrationTest {
                             }
                         }
                         """));
-        for (CaseSpec c : caseInput) {
+        for (CaseSpec c : specs) {
             TestResult r = note(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
                     .as("sortie non terminée en " + c.lang() + " : "
@@ -2914,7 +2915,7 @@ class RpcGradingIntegrationTest {
         // de la base (V5) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
         // le vérifiait, et le gabarit C# y appelait une méthode qui n'existe pas.
         record CaseSpec(String lang, String harnessCode, String code) { }
-        List<CaseSpec> caseInput = List.of(
+        List<CaseSpec> specs = List.of(
                 new CaseSpec("Java", "return Solution.solution() == 42;", """
                         // Sandbox : bibliothèque standard Java (JDK, aucun réseau).
                         public class Solution {
@@ -2987,7 +2988,7 @@ class RpcGradingIntegrationTest {
                             return 0;
                         }
                         """));
-        for (CaseSpec c : caseInput) {
+        for (CaseSpec c : specs) {
             TestResult good = note(c.lang(), c.harnessCode(), c.code());
             assertThat(good.passed())
                     .as("valeurs par défaut en " + c.lang() + " : "
@@ -3031,7 +3032,7 @@ class RpcGradingIntegrationTest {
         // « Ne pas accuser un étudiant honnête » a déjà demandé trois correctifs : la propriété
         // doit être mesurée dans CHAQUE langage, pas seulement en Java.
         record CaseSpec(String lang, String harnessCode, String code) { }
-        List<CaseSpec> caseInput = List.of(
+        List<CaseSpec> specs = List.of(
                 new CaseSpec("Go", "return doubler(5) == 10", """
                         package main
 
@@ -3087,7 +3088,7 @@ class RpcGradingIntegrationTest {
                             public static void Main() { Console.WriteLine(doubler(21)); }
                         }
                         """));
-        for (CaseSpec c : caseInput) {
+        for (CaseSpec c : specs) {
             TestResult r = note(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
                     .as("code honnête mais bavard en " + c.lang() + " : "

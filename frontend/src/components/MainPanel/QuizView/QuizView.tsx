@@ -145,7 +145,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   const busy = attempt.loading || attempt.submitting || attempt.reconciling;
 
   // Changement de tentative par la barre : la puce activée est rendue au même id dans la barre
-  // suivante (cf. AttemptBar.focusRequest), sinon le focus retombait sur <body>.
+  // suivante (cf. AttemptBar, props `focusId` / `onFocused`), sinon le focus retombait sur <body>.
   const [chipFocus, setChipFocus] = useState<number | null>(null);
   const clearChipFocus = () => setChipFocus(null);
   const selectAttempt = (attemptId: number) => {
@@ -161,11 +161,20 @@ const QuizView: React.FC<QuizViewProps> = ({
   const view = { awaiting: awaitingReviewShown, id: attempt.currentAttemptId, phase: attempt.phase };
   const [prevView, setPrevView] = useState(view);
   const [reviewGradedNotice, setReviewGradedNotice] = useState(false);
-  if (prevView.awaiting !== view.awaiting || prevView.id !== view.id || prevView.phase !== view.phase) {
-    // Pas pendant un rechargement : `reload` quitte le message d'attente AVANT d'avoir choisi
-    // la tentative à afficher, et l'annonce partait pour une tentative toujours à revoir.
+  // Pendant un chargement, la vue d'AVANT est retenue telle quelle : `reload` quitte le message
+  // d'attente avant d'avoir choisi la tentative à afficher. Comparer à cet état intermédiaire
+  // annonçait une tentative toujours à revoir (#9 affichée, #10 dernière) ; le retenir comme
+  // nouvelle référence perdait l'annonce et le focus quand le repli du hook (lecture du résultat
+  // échouée → `reload`) rouvrait bien la tentative corrigée. On compare à la vue finale.
+  const viewChanged =
+    prevView.awaiting !== view.awaiting || prevView.id !== view.id || prevView.phase !== view.phase;
+  // Un chargement efface toutefois l'annonce précédente (autre tentative, rechargement…).
+  if (attempt.loading && reviewGradedNotice) setReviewGradedNotice(false);
+  if (!attempt.loading && viewChanged) {
+    // Rechargement en échec après avoir quitté le message d'attente : l'écran montre l'erreur de
+    // chargement, pas une note.
     const graded = prevView.awaiting && !view.awaiting && view.phase === 'summary'
-      && view.id != null && view.id === prevView.id && !attempt.loading;
+      && view.id != null && view.id === prevView.id && !attempt.loadError;
     setPrevView(view);
     setReviewGradedNotice(graded);
     if (graded) setChipFocus(view.id);

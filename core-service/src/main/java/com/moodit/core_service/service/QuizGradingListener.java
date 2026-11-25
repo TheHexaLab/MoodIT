@@ -23,8 +23,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * passe par le proxy Spring.
  *
  * <p>Si l'executor refuse la tâche (file pleine), la tentative est abandonnée tout de suite
- * (supprimée, {@code quiz:attempt-failed} poussé) : sans cela elle resterait {@code "pending"} pour
- * toujours et l'index {@code uq_attempt_pending} bloquerait toute resoumission.
+ * (QuizService#abandonGrading : supprimée, ou gardée « à revoir » au plafond ou après une relance ;
+ * {@code quiz:attempt-failed} poussé) : sans cela elle resterait {@code "pending"} pour toujours et l'index {@code uq_attempt_pending} bloquerait toute resoumission.
  *
  * <p>Les files des executors vivent en mémoire : un arrêt de core perd les corrections en attente
  * ou en cours. Au démarrage, les tentatives restées {@code "pending"} en BD sont donc remises en

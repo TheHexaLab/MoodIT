@@ -1,4 +1,4 @@
-# Runner de notation des langages compilés (#116)
+# Runner d'exécution du code étudiant (#116)
 
 TOUTE exécution de code étudiant passe par un **conteneur jetable** `moodit-runner-*` lancé par
 `execution-service` (Piston a été retiré). Deux modes du superviseur : « evaluate » (notation des
@@ -19,8 +19,10 @@ execution-service (DockerEvaluator)
        │                                 oom_score_adj -1000 (le PID 1 n'est jamais tué par l'OOM)
        └─ supervisor.py (root)           ← processus de CONFIANCE
             pour chaque cas (ordre mélangé, 2 canaris insérés) :
-              1. compile (root)          le HARNAIS + le nonce dans un programme (le noteur),
-                                         le CODE SOUMIS seul dans un autre (le serveur)
+              1. compile                 le HARNAIS + le nonce dans un programme (le noteur,
+                                         compilé par root), le CODE SOUMIS seul dans un autre
+                                         (le serveur, compilé sous l'UID étudiant — sauf le
+                                         serveur Java, compilé par root, cf. plus bas)
               2. verrouille les sources  chown root, chmod 700 → EACCES pour l'étudiant
               3. lance le COUPLE         serveur sous l'UID étudiant (tiré au sort par
                                          conteneur, 1300 dans l'image), noteur sous cet UID + 1,
@@ -90,9 +92,11 @@ ce que le code soumis peut provoquer.
   soumis ne peut plus la redescendre (EACCES dès 999) ; sans elle, il la ramenait à 0, celle du
   PID 1. Il n'a lui-même aucune capacité (`CapEff` 0 mesuré : setuid les efface,
   no-new-privileges l'empêche d'en regagner). La capacité ne lève aucune limite de cgroup ; seuls
-  le superviseur et les processus root qu'il lance par `preexec_compile` la détiennent :
+  le superviseur et les processus root qu'il lance la détiennent : par `preexec_compile`,
   compilations du noteur, sonde des noms réservés C/C++, `javap`, et la compilation du serveur
-  Java, qui a les classes du code soumis sur son classpath — des processus déjà root avec
+  Java, qui a les classes du code soumis sur son classpath ; et, avec toutes les capacités du
+  conteneur, le `rm -rf --one-file-system` de `remove_tree` (binaire de confiance, aucun lien
+  suivi) qui vide les dossiers que le code soumis a pu remplir — des processus déjà root avec
   `DAC_OVERRIDE` et `SETUID`.
   Pourquoi -1000 et non -500 : une victime qui ne rend pas sa mémoire assez vite (tables de pages,
   que le moissonneur de l'OOM ne libère pas) laisse l'OOM passer à la suivante. À -500, le
@@ -177,6 +181,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | `unshare(CLONE_NEWUSER)` puis tmpfs | EPERM (profil seccomp de Docker) | réglage existant |
 | mode exec : le code soumis tue le noteur (`kill(ppid)`, `kill(-1)`, Python/JS/Bash) | échec noté « Interrompu (signal SIGKILL) », jamais un 502 | conception |
 | exceptions du superviseur sur le code soumis | fuzz de la chaîne réelle de chaque langage (2 400 entrées de 100 Ko) : aucune exception ; Rust jusqu'à 12 s par cas (`code_depths` quadratique, 6 s pour 100 000 caractères) → linéaire, 0,07 s pour 200 000 | corrigé |
+| expansions de l'extraction et des bouchons dans le superviseur (100 Ko de code soumis, avant toute compilation, hors délai) | quadratiques : long mot sans `(` dans une classe C++ 115 s, 99 999 `#` en C# 3 s, chaîne d'héritage C++ de 2 000 classes 48 s et 4,9 Go (vides : 43 s), structure Go de 7 000 champs × 1 200 méthodes 54 s et 1,8 Go, Rust 45 s et 3,7 Go, 4 000 paramètres par défaut C++ : serveur de 609 Mo ; après : moins de 1 s et 70 Mo par cas, ou **refus avec message** (un échec noté, jamais un 502 ni un faux verdict ; même décision pour canaris et cas réels, le harnais n'y entre pas) au-delà de **8 paramètres à valeur par défaut** par fonction (`MAX_DEFAULT_PARAMS`), **64 ancêtres** par classe et **10 000 méthodes héritées** ou constructeurs repris (`using Base::Base;`) en tout, méthodes par défaut de traits Rust comprises (`MAX_ANCESTORS`, `MAX_INHERITED_METHODS`), **20 000 copies de champs** en capture de champs Go/Rust (champs × (méthodes + constructeurs + 1), `MAX_FIELD_COPIES`) ; segment C/C++ aux directives traitées borné aussi en caractères | corrigé (borné) |
 | sortie qui casse le JSON (octets nuls, UTF-8 invalide, substituts, U+2028) | JSON rendu dans les deux modes (`read_capped` décode avec remplacement) | conception |
 | 127 processus en boucle, zombies, bombe de fork | notes justes, canaris `ok`, ≤ 2 s par cas | réglage existant |
 | bombes de compilation (3 cas + 2 canaris, 1024 Mo) | compilateur tué par l'OOM ; avant → après : templates C++ 75 → 21 s et préprocesseur C++ 14 → 5 s (le pilote de gcc sort en 1 : rejoué dès le 2e cas), macro Rust 27 → 12 s et `static` géant Rust 5 → 3 s (rustc tué par signal : rejoué une fois constaté deux fois) ; `static char[1 Gio]` C : gcc élimine le tableau (binaire de 15 Ko), réussit, binaire rejoué, canaris `ok` | corrigé (compilation rejouée) |

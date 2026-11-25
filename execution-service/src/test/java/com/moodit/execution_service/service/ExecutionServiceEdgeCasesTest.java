@@ -419,7 +419,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void sql_sentinelle_de_debut_en_double_fait_echouer_le_verdict() {
+    void sql_duplicated_start_sentinel_fails_the_verdict() {
         // #23 : le programme n'imprime qu'un bloc. Un second, avant ou après le vrai, vient d'une
         // sortie forgée : le verdict n'est lu dans aucun des deux.
         runnerRun(f -> stage(sqlFenced(f, "1") + sqlFenced(f, "1"), "", 0, null, null));
@@ -503,7 +503,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void sql_modification_le_nonce_du_dump_n_est_pas_celui_du_verdict() {
+    void sql_modification_dump_nonce_is_not_the_verdict_nonce() {
         // #23 : le code soumis tourne en phase 1 ; rien de ce qui s'y trouve ne vaut en phase 2.
         List<String> nonces = new ArrayList<>();
         runnerRun(f -> {
@@ -542,7 +542,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void sql_modification_schema_reecrit_avec_un_parametre_est_refuse_sans_phase2() {
+    void sql_modification_schema_rewritten_with_a_parameter_is_refused_without_phase2() {
         // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema) ; le `$x(/*)` cachait
         // une vue TEMP qui s'exécutait en phase 2. Dump refusé, la phase 2 ne part pas.
         runnerRun(f -> isPhase1(f)
@@ -558,7 +558,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void sql_modification_dump_tronque_par_le_superviseur_est_refuse() {
+    void sql_modification_dump_truncated_by_the_supervisor_is_refused() {
         // #23 : au-delà de son plafond en octets, le superviseur garde la tête et la queue de la
         // sortie. Les sentinelles survivent, le dump a perdu son milieu (la ligne fautive avec) :
         // la phase 2 ne doit pas noter cet état partiel.

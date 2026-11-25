@@ -81,8 +81,9 @@ function WeightInput({
 /**
  * Corps « Harnais de test » : édition des harnais cachés d'une question Code.
  * Chaque harnais = nom (retour à l'étudiant) + poids (crédit partiel) + code de TEST
- * exécutable. TOUS les langages : un CORPS qui renvoie vrai/faux — le gabarit du langage montre
- * la forme attendue. Les compilés (#116) sont notés par le runner Docker isolé
+ * exécutable : un CORPS qui renvoie vrai/faux (compilés, Python, JS/TS, PHP), un script dont le
+ * code de sortie 0 vaut réussi (Bash), un dernier SELECT booléen (SQL) — le gabarit du langage
+ * montre la forme attendue. Les compilés (#116) sont notés par le runner Docker isolé
  * d'execution-service, qui compile ce corps dans un programme séparé sous un UID séparé ; un
  * harnais au format framework (JUnit, NUnit, go test…) y est refusé avec un diagnostic qui
  * explique la forme attendue. Rendu dans la coquille commune

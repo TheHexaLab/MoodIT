@@ -98,7 +98,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("502 de cause « sans_verdict » → exception dédiée (comptée), autres 502 → null")
-    void evaluate_sansVerdict_exceptionDediee() throws Exception {
+    void evaluate_noVerdict_dedicatedException() throws Exception {
         // #116, S4 : le conteneur a tourné sans verdict. Core compte ces échecs par étudiant et
         // par quiz ; une sandbox indisponible, elle, reste un null qui ne compte pas.
         String url = startStub(502, "{\"status\":502,\"detail\":\"Notation sans verdict\","
@@ -131,9 +131,10 @@ class ExecutionClientTest {
     void readTimeout_runnerWallFloor() {
         // Depuis le runner (#116), chaque unité exec peut légitimement durer jusqu'à son mur
         // (75 s) : des réglages trop bas ne doivent plus pouvoir produire un budget qui
-        // abandonne une correction en cours (#216). Un stub « plus lent que le budget » est
-        // donc devenu inconstructible à l'échelle d'un test unitaire — le chemin « échec
-        // d'appel → null » reste couvert par le test du sandbox injoignable.
+        // abandonne une correction en cours (#216). Un stub plus lent que ce plancher n'est
+        // donc pas réaliste ici ; le chemin « délai de lecture dépassé → null, sans nouvel
+        // essai » est couvert par evaluate_errorAfterConnect_noRetry, qui surcharge
+        // readTimeoutMs pour un budget de 300 ms face à un stub qui répond en 1,5 s.
         ExecutionClient client = client("http://localhost:1", 1, 1, 1);
         assertThat(client.readTimeoutMs("Python", 1, null)).isGreaterThanOrEqualTo(75_000);
         assertThat(client.readTimeoutMs("Java", 4, null))
@@ -181,6 +182,12 @@ class ExecutionClientTest {
         // Plancher VM (10 s) : un temps limite court sur Java ne sous-budgète pas la JVM froide.
         // 30 s + 3 × (10 + 10 + 270 + 5) = 915 s : plafonné de justesse.
         assertThat(client.readTimeoutMs("Java", 4, 1_000))
+                .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
+        // Nom de langage normalisé comme compiled()/vmLanguage() — la casse, par « Java »
+        // ci-dessus, et les espaces ici : « java » entouré d'espaces garde ses TROIS
+        // compilations (915 s → plafonné). Sans le trim, il retomberait à deux :
+        // 30 s + 3 × (10 + 10 + 180 + 5) = 645 s, un miroir plus court que le mur réel (#216).
+        assertThat(client.readTimeoutMs(" java ", 4, 1_000))
                 .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + 35_000);
         // Go : DEUX compilations par cas, et non trois — 795 s, sous le plafond.
         assertThat(client.readTimeoutMs("Go", 4, 60_000))
@@ -245,7 +252,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Service injoignable puis revenu : la connexion est retentée, les verdicts arrivent")
-    void evaluate_injoignablePuisRevenu_verdicts() throws Exception {
+    void evaluate_unreachableThenBack_verdicts() throws Exception {
         // Redémarrage d'execution-service pendant une file de corrections : chaque refus de
         // connexion supprimait une tentative, et la file se vidait en quelques secondes.
         int port = closedPort();
@@ -280,9 +287,16 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Service injoignable au-delà du budget de reprise → null, pauses bornées")
-    void evaluate_injoignableAuDelaDuBudget_null() throws Exception {
-        ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
-                2_000, 5_000, 5_000, 0, 60_000, 300);
+    void evaluate_unreachableBeyondRetryBudget_null() throws Exception {
+        String url = "http://localhost:" + closedPort();
+        // Échauffement sans nouvel essai : l'échéance de reprise part AVANT le premier appel, donc
+        // l'initialisation à froid du client HTTP (près d'une seconde quand ce test passe en
+        // premier dans la JVM) mangeait tout le budget, et aucune pause n'était jamais faite.
+        assertThat(new ExecutionClient(url, TOKEN, 2_000, 5_000, 5_000, 0, 60_000, 0)
+                .evaluate("Python", "x", TWO_HARNESSES)).isNull();
+        long budgetMs = 1_500;
+        ExecutionClient client = new ExecutionClient(url, TOKEN, 2_000, 5_000, 5_000, 0, 60_000,
+                budgetMs);
         List<Long> pauses = new java.util.ArrayList<>();
         client.sleeper = millis -> {
             pauses.add(millis);
@@ -290,13 +304,13 @@ class ExecutionClientTest {
         };
 
         assertThat(client.evaluate("Python", "x", TWO_HARNESSES)).isNull();
-        assertThat(pauses).isNotEmpty().allMatch(p -> p > 0 && p <= 300);
-        assertThat(pauses.stream().mapToLong(Long::longValue).sum()).isLessThanOrEqualTo(300);
+        assertThat(pauses).isNotEmpty().allMatch(p -> p > 0 && p <= budgetMs);
+        assertThat(pauses.stream().mapToLong(Long::longValue).sum()).isLessThanOrEqualTo(budgetMs);
     }
 
     @Test
     @DisplayName("Interruption pendant l'attente (arrêt de core) → exception dédiée, drapeau rétabli")
-    void evaluate_interrompuPendantLAttente_exceptionDediee() throws Exception {
+    void evaluate_interruptedWhileWaiting_dedicatedException() throws Exception {
         ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
                 2_000, 5_000, 5_000, 0, 60_000, 30_000);
         client.sleeper = millis -> {
@@ -317,7 +331,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("Erreur HTTP ou délai de lecture : jamais retenté (la correction a pu tourner)")
-    void evaluate_erreurApresConnexion_pasDeNouvelEssai() throws Exception {
+    void evaluate_errorAfterConnect_noRetry() throws Exception {
         List<Long> pauses = new java.util.ArrayList<>();
         // 502 d'execution-service : une seule requête.
         ExecutionClient failing = new ExecutionClient(startStub(502, "{}", 0), TOKEN, 2_000,
@@ -357,7 +371,7 @@ class ExecutionClientTest {
 
     @Test
     @DisplayName("compiled() et vmLanguage() reconnaissent les familles de langages")
-    void compiled_reconnaitLesLangagesCompiles() {
+    void compiled_recognizesLanguageFamilies() {
         assertThat(ExecutionClient.compiled("Java")).isTrue();
         assertThat(ExecutionClient.compiled(" c++ ")).isTrue();
         assertThat(ExecutionClient.compiled("go")).isTrue();
@@ -426,7 +440,7 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("Un harnais SQL compte pour deux appels (exécution en deux phases), les autres pour un")
+    @DisplayName("Unités de travail : un par harnais interprété, deux en SQL (deux phases), 2N + 2 en compilé (compilation + exécution par cas, deux canaris)")
     void workUnits_sqlInTwoPhases() {
         assertThat(ExecutionClient.workUnits("Python", 3)).isEqualTo(3);
         assertThat(ExecutionClient.workUnits(null, 3)).isEqualTo(3);

@@ -20,6 +20,33 @@ const editorT = defaultQuizEditorLabels;
 const listT = defaultQuizListLabels;
 const reviewT = defaultReviewAttemptsLabels;
 
+/**
+ * Élément focalisé à l'instant PRÉCIS où `isShown()` devient vrai, relevé par un observateur de
+ * mutation : il passe avant le planificateur de React, donc avant tout effet passif (cf.
+ * AssignmentTeams.test). Un `waitFor` ne distingue pas un effet de mise en page d'un effet
+ * passif : RTL laisse passer un tour de boucle après lui, qui vide les effets passifs. Hors
+ * `act` (qui les viderait aussi) le temps de l'attente.
+ */
+async function focusWhenShown(trigger: () => void, isShown: () => boolean): Promise<Element | null> {
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+  const shown = new Promise<Element | null>((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!isShown()) return;
+      observer.disconnect();
+      resolve(document.activeElement);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  trigger();
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    return await shown;
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+  }
+}
+
 function makeQuiz(over: Partial<Quiz> = {}): Quiz {
   return { id: 1, title: 'Quiz A', isPublished: true, isDaily: false, questions: [], ...over };
 }
@@ -63,6 +90,22 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.queryByText(listT.reviewBadge(2))).toBeNull();
   });
 
+  it('Échap ferme l\'éditeur depuis les tentatives à revoir (aucune saisie à perdre)', async () => {
+    const onClose = vi.fn();
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
+        onClose={onClose}
+        handlers={{ onFetchReviewAttempts: vi.fn(async () => [EVA, BOB]), onRegradeAttempt: vi.fn() }}
+      />
+    );
+    fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 2)));
+    await screen.findByText('Éva Test');
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('pastille → liste ; relance → ligne retirée et pastille décrémentée', async () => {
     const onFetchReviewAttempts = vi.fn(async () => [EVA, BOB]);
     const onRegradeAttempt = vi.fn(async () => undefined);
@@ -90,14 +133,17 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.getByText(reviewT.attemptLabel(2))).toBeTruthy();
     expect(screen.getByText(reviewT.attemptSub(null, 1))).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText(reviewT.regradeAria('Éva Test', 2)));
-    await waitFor(() => expect(screen.queryByText('Éva Test')).toBeNull());
+    // Le focus passe à la ligne voisine au lieu de sortir de la fenêtre. Posé par un effet de
+    // MISE EN PAGE dans la mise à jour qui retire la ligne : il y est déjà quand elle disparaît.
+    const focused = await focusWhenShown(
+      () => fireEvent.click(screen.getByLabelText(reviewT.regradeAria('Éva Test', 2))),
+      () => screen.queryByText('Éva Test') == null
+    );
+    const bobButton = screen.getByLabelText(reviewT.regradeAria('Bob Test', 1));
+    expect(focused).toBe(bobButton);
+    expect(document.activeElement).toBe(bobButton);
     expect(onRegradeAttempt).toHaveBeenCalledWith(1, 81);
     expect(screen.getByText('Bob Test')).toBeTruthy();
-    // Le focus passe à la ligne voisine au lieu de sortir de la fenêtre.
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText(reviewT.regradeAria('Bob Test', 1)))
-    );
 
     // Retour à la liste : un « à revoir » de moins.
     fireEvent.click(screen.getByLabelText(/retour/i));
@@ -185,6 +231,25 @@ describe('QuizEditor — tentatives à revoir', () => {
     ) as HTMLElement;
     fireEvent.click(within(errorDialog).getByRole('button', { name: 'Fermer' }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText(reviewT.intro)));
+  });
+
+  it('chargement des tentatives en échec → popup d\'erreur propre au chargement (pas celui de la relance)', async () => {
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 1 })]}
+        onClose={vi.fn()}
+        handlers={{
+          onFetchReviewAttempts: vi.fn(async () => {
+            throw new Error('503');
+          }),
+          onRegradeAttempt: vi.fn(),
+        }}
+      />
+    );
+    fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 1)));
+    expect(await screen.findByText(editorT.reviewLoadError)).toBeTruthy();
+    expect(screen.queryByText(editorT.regradeError)).toBeNull();
   });
 
   it('retour à la liste avant la réponse de la relance → la pastille n\'est pas décomptée une fois de trop', async () => {

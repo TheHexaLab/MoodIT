@@ -50,7 +50,8 @@ describe('devoirs : données fictives', () => {
     // Le devoir à l’échéance la plus LOINTAINE : les échéances fictives sont relatives à
     // « maintenant » en heure LOCALE, et le premier devoir de la liste peut échoir le jour
     // même — déjà passé en CI (UTC) mais pas en local (UTC−5), donc « late » basculait
-    // selon le fuseau et l’heure du run. Celui de la semaine prochaine ne bascule jamais.
+    // selon le fuseau et l’heure du run. Le plus lointain (« Devoir 6 : Arbres AVL », à +21 j,
+    // cf. demoAssignments) ne bascule jamais.
     const candidates = (await fetchAssignments(3)).filter((a) => !a.submission && a.dueAt);
     const assignment = candidates.reduce((x, y) =>
       new Date(x.dueAt!) > new Date(y.dueAt!) ? x : y);

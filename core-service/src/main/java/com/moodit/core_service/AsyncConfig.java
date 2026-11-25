@@ -29,10 +29,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  *       qu'une fois la file pleine.
  * </ul>
  *
- * <p>Une tâche refusée (file pleine) n'est jamais perdue en silence : le listener supprime alors la
- * tentative pending et prévient l'étudiant, qui peut resoumettre. Les files vivent en mémoire :
- * une correction perdue par un arrêt de core est reprise au démarrage suivant (cf.
- * QuizGradingListener#resumePendingGradings).
+ * <p>Une tâche refusée (file pleine) n'est jamais perdue en silence : le listener abandonne alors la
+ * correction et prévient l'étudiant — tentative pending supprimée (il peut resoumettre), ou gardée
+ * « à revoir » au plafond d'échecs sans verdict ou après une relance (QuizService#abandonGrading).
+ * Les files vivent en mémoire : une correction perdue par un arrêt de core est reprise au
+ * démarrage suivant (cf. QuizGradingListener#resumePendingGradings).
  */
 @Configuration
 @EnableAsync
@@ -69,12 +70,13 @@ public class AsyncConfig {
   }
 
   /**
-   * Accepte les tâches jusqu'à la DESTRUCTION de l'executor, pas seulement jusqu'au début de la
-   * fermeture du contexte. Par défaut, Spring les arrête dès cet événement, AVANT l'arrêt gracieux
-   * du serveur web : une soumission (ou une relance) qui commit pendant cet arrêt était refusée
-   * par l'executor, puis {@code abandonGrading} SUPPRIMAIT la tentative — l'étudiant devait
-   * resoumettre. Acceptée, elle est soit corrigée, soit interrompue à la destruction : elle reste
-   * alors {@code pending} et la reprise au démarrage la corrige ({@code resumePendingGradings}).
+   * Garde l'executor ACTIF jusqu'à sa destruction. Par défaut (Spring 7), la fermeture du contexte
+   * le met en pause à l'arrêt du cycle de vie, et cet arrêt attend les tâches en cours — une
+   * correction compilée peut durer jusqu'à 15 min. Avec ce réglage, l'arrêt n'attend pas,
+   * l'executor reste en marche et exécute encore une soumission (ou une relance) qui commit pendant
+   * l'arrêt gracieux du serveur web. Une correction que la destruction interrompt reste
+   * {@code pending}, et la reprise au démarrage la corrige ({@code resumePendingGradings}).
+   * Comportement épinglé par {@code AsyncConfigTest}.
    */
   static void acceptUntilDestroyed(ThreadPoolTaskExecutor executor) {
     executor.setAcceptTasksAfterContextClose(true);

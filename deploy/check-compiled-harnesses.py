@@ -328,6 +328,13 @@ def internal_token(container):
     return token
 
 
+def case_name(case, index):
+    """Nom envoyé pour le cas `index` (0-based) : « cas N » s'il est vide, comme core. FONCTION PURE
+    (testée)."""
+    name = case.get("name")
+    return name if name and name.strip() else "cas %d" % (index + 1)
+
+
 def evaluate(base_url, token, question):
     body = {
         "language": question["language"],
@@ -335,8 +342,11 @@ def evaluate(base_url, token, question):
         # Comme core à la correction : un nom que le code de départ déclare est celui que
         # l'énoncé impose, et n'est pas refusé comme « Nom réservé » (#22).
         "startCode": question["start_code"],
-        "testCases": [{"name": c["name"], "harnessCode": c["harnessCode"],
-                       "weight": c["weight"]} for c in question["cases"]],
+        # Nom vide → « cas N », comme core (ExecutionClient) : execution-service exige un nom
+        # (@NotBlank), et un 400 classait À VÉRIFIER — voire fermait (--unpublish) — une question
+        # que la correction réelle note normalement.
+        "testCases": [{"name": case_name(c, i), "harnessCode": c["harnessCode"],
+                       "weight": c["weight"]} for i, c in enumerate(question["cases"])],
     }
     timeout_ms = question.get("exec_timeout_ms")
     if timeout_ms and timeout_ms > 0:

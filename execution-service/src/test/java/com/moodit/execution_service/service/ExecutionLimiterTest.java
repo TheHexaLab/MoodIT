@@ -167,7 +167,7 @@ class ExecutionLimiterTest {
     }
 
     @Test
-    void place_de_son_cote_obtenue_mais_aucune_place_globale_refuse_et_rend_la_premiere() throws Exception {
+    void own_side_slot_obtained_but_no_global_slot_refuses_and_releases_the_first() throws Exception {
         // Une seule place : la correction interne la tient. L'appel public obtient la place de
         // SON côté, pas la place globale → refus, et sa place de côté est rendue.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 5000, 5);

@@ -921,9 +921,9 @@ class DockerSandboxTest {
         assertThat(prod.boxSizeMb() + prod.tmpSizeMb() + prod.shmSizeMb()).isLessThan(1024);
 
         // Planchers : une mémoire minuscule garde des tmpfs utilisables.
-        DockerSandbox lowercase = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
-        assertThat(lowercase.boxSizeMb()).isEqualTo(256);
-        assertThat(lowercase.tmpSizeMb()).isEqualTo(32);
-        assertThat(lowercase.shmSizeMb()).isEqualTo(16);
+        DockerSandbox tinySandbox = new DockerSandbox("tcp://localhost:1", 128, 64, 1.0);
+        assertThat(tinySandbox.boxSizeMb()).isEqualTo(256);
+        assertThat(tinySandbox.tmpSizeMb()).isEqualTo(32);
+        assertThat(tinySandbox.shmSizeMb()).isEqualTo(16);
     }
 }

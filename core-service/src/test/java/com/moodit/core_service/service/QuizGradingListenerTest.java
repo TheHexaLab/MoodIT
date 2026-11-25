@@ -50,7 +50,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void quizAvecHarnais_corrigeSurLePoolDuCode() {
+  void quizWithHarness_gradedOnCodePool() {
     listener.onAttemptSubmitted(new AttemptSubmittedEvent(7, true));
 
     verify(codeExecutor).execute(any());
@@ -59,7 +59,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void quizSansHarnais_corrigeSurLePoolRapide() {
+  void quizWithoutHarness_gradedOnFastPool() {
     listener.onAttemptSubmitted(new AttemptSubmittedEvent(8, false));
 
     verify(quickExecutor).execute(any());
@@ -68,7 +68,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void tacheRefusee_abandonneLaTentative() {
+  void taskRejected_abandonsAttempt() {
     TaskRejectedException rejected = new TaskRejectedException("file pleine");
     doThrow(rejected).when(codeExecutor).execute(any());
 
@@ -79,7 +79,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void demarrage_reprendChaquePendingSurSonPool() {
+  void startup_resumesEachPendingOnItsPool() {
     when(quizService.pendingGradings())
         .thenReturn(List.of(new AttemptSubmittedEvent(11, true), new AttemptSubmittedEvent(12, false)));
 
@@ -92,7 +92,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void demarrage_repriseRefusee_abandonneLaTentative() {
+  void startup_resumeRejected_abandonsAttempt() {
     TaskRejectedException rejected = new TaskRejectedException("file pleine");
     doThrow(rejected).when(codeExecutor).execute(any());
     when(quizService.pendingGradings()).thenReturn(List.of(new AttemptSubmittedEvent(13, true)));
@@ -103,7 +103,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void demarrage_sansPending_rienNestPlanifie() {
+  void startup_noPending_nothingScheduled() {
     when(quizService.pendingGradings()).thenReturn(List.of());
 
     listener.resumePendingGradings();
@@ -112,7 +112,7 @@ class QuizGradingListenerTest {
   }
 
   @Test
-  void demarrage_lectureEnEchec_nEmpechePasLeDemarrage() {
+  void startup_readFailure_doesNotBlockStartup() {
     when(quizService.pendingGradings()).thenThrow(new IllegalStateException("BD indisponible"));
 
     listener.resumePendingGradings();

@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.UncheckedIOException;
@@ -13,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -368,7 +366,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void noms_unicode_lus_en_entier() {
+    void unicode_names_are_read_in_full() {
         // Revue #246 : en ASCII seul, `def carré` donnait un mandataire `carr`, et la table
         // `élèves` n'était pas une table de travail (base vide en phase 2) — 0 sur une réponse juste.
         assertThat(assembler.assemble("Python", "def carré(x):\n    return x * x",
@@ -386,7 +384,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void filterDumpToData_refuse_un_parametre_dans_une_instruction_gardee() {
+    void filterDumpToData_refuses_a_parameter_in_a_kept_statement() {
         // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema). `$x(/*)` est UN
         // paramètre pour SQLite ; lu comme un commentaire, il cachait au filtre une vue TEMP
         // exécutée en phase 2. .dump n'écrit jamais de paramètre : dump refusé.
@@ -409,7 +407,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void splitSqlStatements_lit_les_parametres_comme_sqlite() {
+    void splitSqlStatements_reads_parameters_like_sqlite() {
         // Variable TCL : jusqu'à `)` incluse, ou au premier blanc ; son contenu n'ouvre ni
         // commentaire, ni chaîne, et son `;` ne finit pas l'instruction.
         assertThat(CodeAssembler.splitSqlStatements("SELECT $x(/*); SELECT 2 /* */"))
@@ -447,7 +445,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void splitSqlStatements_segments_de_blancs_ou_de_commentaires_seuls_sont_ignores() {
+    void splitSqlStatements_blank_or_comment_only_segments_are_ignored() {
         assertThat(CodeAssembler.splitSqlStatements(" /* a */ ; -- b\n ;\t\n; SELECT 1 ; /* fin"))
                 .containsExactly("SELECT 1");
         // Le « /* » d'un commentaire de ligne n'ouvre rien : ce qui suit le saut de ligne est
@@ -460,7 +458,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void pythonStringLiteral_echappe_tout_ce_qui_sortirait_du_litteral() {
+    void pythonStringLiteral_escapes_everything_that_would_leave_the_literal() {
         // Valable en Python comme en JavaScript : barre oblique inverse, guillemet, saut de
         // ligne, contrôles et non-ASCII échappés ; l'ASCII imprimable (espace à ~) tel quel.
         assertThat(CodeAssembler.pythonStringLiteral("a\\b\"c\nd\te\u001f é~ "))
@@ -469,7 +467,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void isShellTerminatorLine_bornes_exactes() {
+    void isShellTerminatorLine_exact_boundaries() {
         // Lignes coupées pile en fin de chaîne : aucun accès au-delà du dernier caractère.
         assertThat(CodeAssembler.isShellTerminatorLine("   ")).isFalse();
         assertThat(CodeAssembler.isShellTerminatorLine("g")).isFalse();
@@ -483,7 +481,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void splitSqlStatements_reste_lineaire_sur_un_litteral_plein_de_commentaires_ouverts() {
+    void splitSqlStatements_stays_linear_on_a_literal_full_of_open_comments() {
         // Dump de phase 1 (contenu étudiant, jusqu'à 512 000 caractères) : une valeur faite de
         // « /* » répétés. L'ancien test « porte du SQL » (regex) relançait un balayage jusqu'à la
         // fin à chaque « /* » : plusieurs minutes de CPU sur le fil de la requête.
@@ -495,7 +493,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void lecture_des_noms_soumis_reste_lineaire() {
+    void reading_submitted_names_stays_linear() {
         // Revue #246 : `function` + 100 000 blancs + `(` coûtait 45 s de CPU par harnais à
         // JS_CALLABLE (deux `\s*` autour de `\*?`), hors de toute place du sandbox.
         for (String language : List.of("JavaScript", "TypeScript", "Python", "PHP", "Bash")) {
@@ -511,7 +509,7 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
-    void formes_de_fonctions_bash_et_lambda_python_ont_leur_mandataire() {
+    void bash_function_forms_and_python_lambdas_get_their_proxy() {
         // Revue #246 : `function f {` (sans parenthèses), un nom Unicode en Bash, et une lambda
         // nommée en Python n'avaient pas de mandataire — « command not found », 0 sur une
         // réponse juste.

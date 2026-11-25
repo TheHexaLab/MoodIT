@@ -640,7 +640,7 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
     @org.junit.jupiter.params.ParameterizedTest(name = "statut {0}")
     @org.junit.jupiter.params.provider.ValueSource(strings = {"pending", "review"})
     @DisplayName("Tentative pas encore corrigée (pending) ou à revoir → 404 : le corrigé n'est livré qu'avec la note")
-    void tentativeNonCorrigee_404(String status) {
+    void ungradedAttempt_404(String status) {
         Question q = question(91, SINGLE, 2.0, 0);
         answer(q, 1, "ok", true);
         Attempt attempt = attempt(ATTEMPT_ID, quiz(1, course(1), q), eva, 1, status);
