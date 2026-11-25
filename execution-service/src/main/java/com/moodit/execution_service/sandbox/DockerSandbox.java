@@ -84,15 +84,23 @@ public class DockerSandbox {
     /** Étiquette posée sur tout conteneur runner : permet de retrouver les orphelins. */
     public static final String RUNNER_LABEL = "moodit.runner";
 
-    /** Établissement de la connexion au démon : au-delà, il est tenu pour injoignable. */
+    /**
+     * Établissement de la connexion au démon : au-delà, il est tenu pour injoignable. MIROIR
+     * côté core : {@code ExecutionClient.CONTAINER_LIFECYCLE_MS} et
+     * {@code DAEMON_CALLS_OUTSIDE_WALL} (7 appels hors mur : info, create, copie, start,
+     * exitCodeIfStopped, oomKilled, suppression du finally) — changer cette borne, ou ajouter un
+     * appel au démon dans {@link #run}, impose de revoir ce miroir.
+     */
     static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
 
     /**
-     * Silence maximal du démon pendant une réponse (create, copie, start, suppression, liste,
-     * inspection, ping). Sans cette borne, un démon qui accepte la connexion sans répondre bloquait
+     * Silence maximal du démon pendant une réponse (info, create, copie, start, suppression,
+     * liste, inspection, ping). Sans cette borne, un démon qui accepte la connexion sans répondre bloquait
      * le fil indéfiniment, avec sa place du sémaphore du sandbox : trois appels suffisaient à rendre
      * l'exécution indisponible jusqu'au redémarrage du service. Ne s'applique PAS à {@code /wait},
-     * silencieux jusqu'à la fin du conteneur (voir {@link #waitClient()}).
+     * silencieux jusqu'à la fin du conteneur (voir {@link #waitClient()}). MIROIR côté core
+     * ({@code ExecutionClient.CONTAINER_LIFECYCLE_MS}, {@code DAEMON_CALLS_OUTSIDE_WALL}) :
+     * cf. {@link #CONNECTION_TIMEOUT}.
      */
     static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(60);
 
@@ -191,7 +199,9 @@ public class DockerSandbox {
     private final Duration responseTimeout;
     /**
      * Délai de lecture des journaux d'un conteneur terminé (le verdict). Compté dans
-     * {@code ORPHAN_GRACE_MS}. Modifiable par les tests seulement.
+     * {@code ORPHAN_GRACE_MS} et dans le miroir de core ({@code ExecutionClient.
+     * CONTAINER_LIFECYCLE_MS}) : le changer impose de revoir les deux. Modifiable par les tests
+     * seulement.
      */
     Duration logReadTimeout = Duration.ofSeconds(30);
     /** Plafond des journaux relus, par flux. Modifiable par les tests seulement. */
@@ -239,10 +249,14 @@ public class DockerSandbox {
         // Docker traduit NanoCPUs en quota CFS sur une période de 100 ms : quota = nanos × 100 000
         // / 1e9 µs. Sous 10 000 nanoCPU, le quota vaut 0 — AUCUNE borne CPU (« max » en
         // cgroup v2) ; sous 0,01 CPU, il passe sous 1 ms, que le noyau refuse (EINVAL) : chaque
-        // démarrage de conteneur échouait, donc chaque notation en 502. NaN, nul et négatif
-        // donnent nanos ≤ 0 et tombent sous le même plancher.
+        // démarrage de conteneur échouait, donc chaque notation en 502. Nul et négatif donnent
+        // nanos ≤ 0 et tombent sous le même plancher.
+        if (!Double.isFinite(cpus)) {
+            throw new IllegalArgumentException("Limite du bac à sable invalide : "
+                    + "app.sandbox.cpus (SANDBOX_CPUS) doit être un nombre fini, reçu " + cpus);
+        }
         long nanos = (long) (cpus * 1_000_000_000L);
-        if (Double.isInfinite(cpus) || nanos < MIN_NANO_CPUS) {
+        if (nanos < MIN_NANO_CPUS) {
             throw new IllegalArgumentException("Limite du bac à sable invalide : "
                     + "app.sandbox.cpus (SANDBOX_CPUS) doit valoir au moins 0,01 (quota CFS "
                     + "minimal de 1 ms ; 0 signifie « illimité » pour Docker), reçu " + cpus);
@@ -255,8 +269,9 @@ public class DockerSandbox {
     }
 
     /**
-     * NanoCPUs appliqués, plafonnés au nombre de CPU de l'hôte (lu une fois, au premier usage du
-     * démon) ; {@code null} tant que la lecture n'a pas réussi.
+     * NanoCPUs appliqués, plafonnés au nombre de CPU de l'hôte (lu une fois : préchauffage par
+     * {@link OrphanSweeper}, ou première exécution) ; {@code null} tant que la lecture n'a pas
+     * réussi.
      */
     private volatile Long cappedNanoCpus;
     /** Une lecture de {@code /info} est en cours : les autres exécutions ne l'attendent pas. */
@@ -270,47 +285,85 @@ public class DockerSandbox {
     /** Horloge monotone ; remplaçable par les tests seulement. */
     java.util.function.LongSupplier nanoClock = System::nanoTime;
 
+    /** Un CPU : tout hôte en a au moins un, donc toujours accepté par le démon. */
+    static final long ONE_CPU_NANOS = 1_000_000_000L;
+
     /**
      * Le démon REFUSE à la création un NanoCPUs au-delà de ses propres CPU (« Range of CPUs is
      * from 0.01 to N.00 ») : avec SANDBOX_CPUS=2.0 sur un hôte à 1 vCPU, chaque exécution
-     * répondait 502. Plafonner à NCPU garde une limite effective — tout l'hôte, au lieu d'un
-     * refus. Lu au premier usage et pas au démarrage : le service doit démarrer sans démon
-     * joignable.
+     * répondait 502. Une fois le nombre de CPU de l'hôte (NCPU) connu, la valeur configurée y
+     * est plafonnée : limite effective — tout l'hôte —, au lieu d'un refus.
      *
-     * <p>Au plus UN appel {@code /info} par exécution, et jamais d'attente sur celui d'une
-     * autre : une seule lecture à la fois, HORS verrou ; pendant qu'elle court, les autres
-     * exécutions prennent la valeur configurée. En échec (démon muet sur {@code /info},
-     * réponse sans NCPU), la valeur configurée est gardée et l'échec est retenu
-     * {@link #CPU_READ_RETRY} avant une nouvelle tentative : un démon qui ne répond pas ne
-     * coûte pas un délai de réponse complet à chaque exécution, en plus des appels que core
-     * compte dans son miroir de délai.
+     * <p>Tant que NCPU est INCONNU (lecture en cours par une autre exécution, ou dans les
+     * {@link #CPU_READ_RETRY} qui suivent un échec), la valeur rendue est
+     * {@code min(SANDBOX_CPUS, 1 CPU)} : toujours acceptée par le démon, et toujours une borne,
+     * seulement plus stricte. Rendre la valeur configurée faisait échouer en 502 les
+     * corrections relancées au redémarrage sur un hôte sous-dimensionné — tentatives supprimées.
+     *
+     * <p>Lecture PRÉCHAUFFÉE hors du fil principal ({@link #warmUpCpuLimit}, au premier passage
+     * d'{@link OrphanSweeper}) : le service démarre sans démon joignable, et la première
+     * exécution trouve d'ordinaire NCPU déjà lu. Sinon, AU PLUS UN appel {@code /info} par
+     * exécution, sans jamais attendre celui d'une autre : une seule lecture à la fois, hors
+     * verrou ; en échec (démon muet sur {@code /info}, réponse sans NCPU), l'échec est retenu
+     * {@link #CPU_READ_RETRY} avant une nouvelle tentative.
      */
     long effectiveNanoCpus(DockerClient docker) {
         Long cached = cappedNanoCpus;
         if (cached != null) {
             return cached;
         }
-        if (cpuReadFailed && nanoClock.getAsLong() - cpuReadRetryAtNs < 0) {
-            return nanoCpus;   // échec récent : pas de nouvelle tentative avant l'échéance
+        long unknown = Math.min(nanoCpus, ONE_CPU_NANOS);
+        if (recentCpuReadFailure()) {
+            return unknown;   // échec récent : pas de nouvelle tentative avant l'échéance
         }
         if (!cpuReadInFlight.compareAndSet(false, true)) {
-            return nanoCpus;   // une autre exécution lit déjà : ne pas l'attendre
+            return unknown;   // une autre exécution lit déjà : ne pas l'attendre
         }
         try {
-            cached = cappedNanoCpus;   // lue par une exécution précédente entre-temps
-            if (cached != null) {
-                return cached;
-            }
-            Long read = readCappedNanoCpus(docker);
-            if (read == null) {
-                cpuReadRetryAtNs = nanoClock.getAsLong() + CPU_READ_RETRY.toNanos();
-                cpuReadFailed = true;
-                return nanoCpus;
-            }
-            cappedNanoCpus = read;
-            return read;
+            return readUnderFlag(docker, unknown);
         } finally {
             cpuReadInFlight.set(false);
+        }
+    }
+
+    /**
+     * Lecture par le détenteur du drapeau. Cache ET échéance d'échec relus d'abord : la lecture
+     * précédente a pu réussir ou échouer entre la première vérification et l'obtention du
+     * drapeau — sans cette relecture, une exécution relançait aussitôt un {@code /info} qui
+     * venait d'échouer. Package-private : seule cette fenêtre de course n'a pas d'autre accès.
+     */
+    long readUnderFlag(DockerClient docker, long unknown) {
+        Long cached = cappedNanoCpus;
+        if (cached != null) {
+            return cached;
+        }
+        if (recentCpuReadFailure()) {
+            return unknown;
+        }
+        Long read = readCappedNanoCpus(docker);
+        if (read == null) {
+            cpuReadRetryAtNs = nanoClock.getAsLong() + CPU_READ_RETRY.toNanos();
+            cpuReadFailed = true;
+            return unknown;
+        }
+        cappedNanoCpus = read;
+        return read;
+    }
+
+    private boolean recentCpuReadFailure() {
+        return cpuReadFailed && nanoClock.getAsLong() - cpuReadRetryAtNs < 0;
+    }
+
+    /**
+     * Préchauffe la lecture du nombre de CPU de l'hôte (cf. {@link #effectiveNanoCpus}). Appelé
+     * par {@link OrphanSweeper}, sur le fil du planificateur : jamais sur le fil principal, et
+     * un échec y est inoffensif (valeur prudente gardée, nouvelle tentative plus tard).
+     */
+    public void warmUpCpuLimit() {
+        try {
+            effectiveNanoCpus(client());
+        } catch (RuntimeException e) {
+            log.debug("Préchauffage du nombre de CPU de l'hôte impossible : {}", e.getMessage());
         }
     }
 
@@ -320,7 +373,7 @@ public class DockerSandbox {
         try {
             hostCpus = docker.infoCmd().exec().getNCPU();
         } catch (RuntimeException e) {
-            log.debug("Nombre de CPU du démon illisible ({}) : SANDBOX_CPUS gardé tel quel",
+            log.debug("Nombre de CPU du démon illisible ({}) : au plus 1 CPU en attendant",
                     e.getMessage());
             return null;
         }

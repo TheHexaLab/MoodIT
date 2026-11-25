@@ -1475,6 +1475,26 @@ def run_proc(cmd, cwd, env, timeout_s, out_path, err_path, preexec, stdin_path=N
                   detail="écriture des sorties impossible")
 
 
+def run_aux_proc(*args, **kwargs):
+    """run_proc pour un outil AUXILIAIRE dont l'expiration ou la mort ne dit RIEN du cas, et que
+    le cas sait déjà traiter : `nm` sur le binaire soumis (expiré : aucun refus, ce n'est qu'un
+    diagnostic) et le préprocesseur seul (expiré : retour au texte brut). run_proc pose
+    `expired`/`killed_by_signal` sur l'état DU CAS : sous forte charge, un `nm` expiré rendait
+    tout le cas « non concluant » — un canari « fail » perdait sa force de preuve, ce qui
+    pouvait mener à « incoherents », une accusation à tort. Ces deux drapeaux sont donc rendus
+    tels qu'avant l'appel ; la perte d'une sortie (`lost`, disque saturé) reste comptée.
+
+    Les autres outils du cas gardent run_proc : leur expiration ou leur mort a DÉJÀ un sens
+    pour le cas, cohérent avec ces drapeaux — compilation du code soumis (échec non concluant),
+    compilation du noteur (HARNESS_BUILD_ABORTED), javap, javac du serveur RPC et sondes des
+    noms réservés (cas interrompu, cf. platform_aborted)."""
+    expired, killed = EXIT_STATE.expired, EXIT_STATE.killed_by_signal
+    try:
+        return run_proc(*args, **kwargs)
+    finally:
+        EXIT_STATE.expired, EXIT_STATE.killed_by_signal = expired, killed
+
+
 def student_dir(case_dir, name):
     """Crée un dossier possédé par l'étudiant (sorties, HOME, TMP)."""
     path = os.path.join(case_dir, name)
@@ -4659,6 +4679,35 @@ def reserved_name_message(names, origin):
                "" if len(names) == 1 else "s", origin))
 
 
+# Noteur C++ : une exception du HARNAIS (le code du prof) le terminait par std::terminate,
+# sans message — rpc_verdict présentait alors le stderr de l'étudiant comme la cause. Elle est
+# attrapée et relayée `[MOODIT] harnais: <what()>`, comme en Java, Go et C#, SANS saut de ligne
+# (\n et \r deviennent des espaces : le texte peut venir du code soumis, et une ligne fabriquée
+# est la matière première d'une forge ; une ligne qui commence par ce préfixe n'est jamais le
+# nonce, que rpc_verdict exige en ligne ENTIÈRE). Défini AVANT les bouchons et leurs #define :
+# une fonction soumise nommée `what` ne le renomme pas.
+CPP_GRADER_GUARD = r'''
+static void moodit_relaie(const char *moodit_texte) {
+    fputs("[MOODIT] harnais: ", stderr);
+    for (const char *moodit_c = moodit_texte ? moodit_texte : ""; *moodit_c; moodit_c++) {
+        fputc((*moodit_c == 10 || *moodit_c == 13) ? ' ' : *moodit_c, stderr);
+    }
+    fputc(10, stderr);
+}
+
+static int moodit_protege(int (*moodit_h)(void)) {
+    try {
+        return moodit_h();
+    } catch (const std::exception &moodit_e) {
+        moodit_relaie(moodit_e.what());
+    } catch (...) {
+        moodit_relaie("exception (type inconnu)");
+    }
+    return 0;
+}
+'''
+
+
 def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     """Programme NOTEUR C/C++ : bouchons typés + harnais booléen + nonce. PURE (testée)."""
     stubs = []
@@ -4682,10 +4731,10 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     # (c_reserved_names). Sinon le #define detournait vers le code note les `fabs`, `sqrt`,
     # `isnan`… que le harnais utilise comme OUTILS, et une `fabs` soumise qui renvoie 0
     # faisait passer `fabs(f(x) - attendu) < 1e-9` quel que soit f.
-    header = C_GRADER_HEADER
+    header = C_GRADER_HEADER + ("#include <exception>\n" if cpp else "")
     renames = "".join("#define %s moodit_f_%s\n" % (n, n)
                          for n in dict.fromkeys(ident for _, ident, _ in methods))
-    return header + C_RUNTIME + r'''
+    return header + C_RUNTIME + (CPP_GRADER_GUARD if cpp else "") + r'''
 /* Identifiant IMPREVISIBLE par appel, tire de /dev/urandom : sans lui, le code note pouvait
    imprimer la reponse attendue AVANT la question et faire passer un code faux. */
 static void moodit_identifiant(char *sortie) {
@@ -4708,7 +4757,7 @@ static int moodit_harnais(void) {
 }
 
 int main(void) {
-    if (moodit_harnais()) {
+    if (''' + ("moodit_protege(moodit_harnais)" if cpp else "moodit_harnais()") + r''') {
         fputc(10, stderr);
         fputs("''' + nonce + r'''", stderr);
         fputc(10, stderr);
@@ -5414,6 +5463,21 @@ fn moodit_harnais() -> bool {
 }
 
 fn main() {
+    // Panique du HARNAIS (le code du prof, `assert_eq!` compris) : relayée `[MOODIT] harnais: `
+    // comme en Java, Go et C#, et non par le message par défaut de Rust, que rpc_verdict ne
+    // reconnaissait pas (il désignait alors l'étudiant). Sans saut de ligne : le texte peut
+    // venir du code soumis, et une ligne fabriquée est la matière première d'une forge.
+    ::std::panic::set_hook(::std::boxed::Box::new(|moodit_info| {
+        let moodit_charge = moodit_info.payload();
+        let moodit_msg: ::std::string::String = match moodit_charge.downcast_ref::<&str>() {
+            Some(moodit_s) => (*moodit_s).to_string(),
+            None => match moodit_charge.downcast_ref::<::std::string::String>() {
+                Some(moodit_s) => moodit_s.clone(),
+                None => ::std::string::String::from("panique"),
+            },
+        };
+        eprintln!("[MOODIT] harnais: {}", moodit_msg.replace('\\n', " ").replace('\\r', " "));
+    }));
     let ok = ::std::panic::catch_unwind(moodit_harnais).unwrap_or(false);
     if ok {
         eprintln!();
@@ -6362,6 +6426,15 @@ CS_NAMESPACE = re.compile(r"\bnamespace\s+([\w.]+)")
 def cs_top_level_classes(source):
     """Classes de PREMIER NIVEAU du code soumis, dans l'ordre, sans doublon. PURE (testee).
 
+    Une COPIE de la liste mémoïsée (_cs_top_level_classes) : appelée quatre fois par cas sur le
+    même texte, elle le reparcourait à chaque fois."""
+    return list(_cs_top_level_classes(source or ""))
+
+
+@functools.lru_cache(maxsize=8)
+def _cs_top_level_classes(source):
+    """Cf. cs_top_level_classes ; tuple mémoïsé, à ne pas modifier.
+
     Premier niveau = enfermee seulement dans des `namespace`. Une classe IMBRIQUEE n'est pas
     visible sous son nom depuis le serveur (`typeof(Rect)` ne compilait pas), et le code
     soumis ne compilait plus.
@@ -6370,12 +6443,15 @@ def cs_top_level_classes(source):
     faisait echouer TOUT le serveur, donc tous les cas d'une reponse juste. Ses membres ne
     sont de toute facon pas appelables par le fil (type ouvert)."""
     src_text = source or ""
-    idents, stack, segment = [], [], 0
+    # Déduplication par ENSEMBLE : `not in` sur la liste coûtait le produit des deux — ~7 600
+    # classes vides en 100 Ko tenaient le choix de la classe 2,8 s par cas, hors délai.
+    idents, seen, stack, segment = [], set(), [], 0
     for m in CS_TOKENS.finditer(src_text):
         if m.group(1):
             if m.group(2):
                 continue
-            if all(stack) and m.group(1) not in idents:
+            if all(stack) and m.group(1) not in seen:
+                seen.add(m.group(1))
                 idents.append(m.group(1))
             continue
         if m.group(0) == "{":
@@ -6383,16 +6459,13 @@ def cs_top_level_classes(source):
         elif m.group(0) == "}" and stack:
             stack.pop()
         segment = m.end()
-    return idents
+    return tuple(idents)
 
 
 def cs_namespaces(source):
     """Espaces de noms declares (bloc ou fichier) : le serveur les importe. PURE (testee)."""
-    seen_names = []
-    for ident in CS_NAMESPACE.findall(source or ""):
-        if ident not in seen_names:
-            seen_names.append(ident)
-    return seen_names
+    # Dans l'ordre, sans doublon, par dictionnaire (et non `not in` sur une liste : quadratique).
+    return list(dict.fromkeys(CS_NAMESPACE.findall(source or "")))
 
 
 def cs_student_class(source, harness=""):
@@ -6402,13 +6475,23 @@ def cs_student_class(source, harness=""):
     recevait les bouchons, et `Solution.F()` du harnais ne compilait plus. On prend la premiere
     classe de premier niveau que le harnais NOMME, sinon Solution, sinon la premiere."""
     classes = cs_top_level_classes(source)
-    bare = cs_strip_comments(harness or "")
+    # Les MOTS du harnais, calculés une fois (cf. _cs_harness_words) : une expression par classe
+    # sur tout le harnais coûtait le produit des deux — 7,5 s par cas pour ~7 600 classes et un
+    # harnais de 10 Ko. Même résultat que `\bNom\b` : un nom de classe est un mot entier.
+    words = _cs_harness_words(harness or "")
     for ident in classes:
-        if re.search(r"\b%s\b" % re.escape(ident), bare):
+        if ident in words:
             return ident
     if "Solution" in classes:
         return "Solution"
     return classes[0] if classes else "Solution"
+
+
+@functools.lru_cache(maxsize=4)
+def _cs_harness_words(harness):
+    """Mots du CODE d'un harnais C# (identifiants entiers), commentaires et littéraux blanchis.
+    Mémoïsé."""
+    return frozenset(re.findall(r"\w+", cs_strip_comments(harness)))
 
 
 def cs_has_object_api(source):
@@ -6565,6 +6648,12 @@ def javap_aborted_message(klass):
             "chargée). Le code soumis n'est pas en cause : la correction est à rejouer.")
 
 
+# Refus d'un `package …;` dans le code soumis Java (cf. run_java_rpc), tel que l'étudiant le lit.
+JAVA_PACKAGE_REFUSAL = ("Retirez la ligne « package … ; » en tête du fichier : la notation attend "
+                        "la classe dans le paquet par défaut. (Le bouton « Exécuter » l'accepte, "
+                        "pas la notation.)")
+
+
 def java_class_count_refusal(count):
     """Message de refus si la compilation du code soumis a produit plus de JAVA_MAX_CLASSES
     classes, sinon None. FONCTION PURE (testée). Ne dépend que du code soumis : canaris et cas
@@ -6623,9 +6712,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # rethreader le nom qualifie dans tout le pipeline (risque de recreer le defaut qu on ferme).
     # Source BLANCHIE : un `package` en commentaire ou chaine ne declenche rien.
     if PACKAGE_JAVA.search(blank_code(student_content)):
-        return None, ("Retire la ligne « package ... ; » en tete du fichier : la notation "
-                      "attend la classe dans le paquet par defaut. (Le bouton « Executer » "
-                      "l accepte, pas la notation.)")
+        return None, JAVA_PACKAGE_REFUSAL
     code, expired = compile_student(["javac", "-encoding", "UTF-8", "-d", student_classes, student_file],
                                     case_dir, student_build_env(build_area), case_dir, [student_file],
                                     os.path.join(case_dir, "cc.out"), os.path.join(case_dir, "cc.err"),
@@ -7085,10 +7172,11 @@ def c_directives_only_source(student_source, compiler, std, case_dir, ext):
     set_owner_mode(source, STUDENT_UID, STUDENT_GID, 0o600)
     segment = None
     try:
-        code, expired = run_proc([compiler, std, "-O1", "-fno-builtin", "-E", "-fdirectives-only",
-                                  name, "-o", "pp.i"], build_area, student_build_env(build_area),
-                                 C_PREPROCESS_TIMEOUT_S, os.path.join(case_dir, "pp.out"),
-                                 os.path.join(case_dir, "pp.err"), preexec_student_compile)
+        code, expired = run_aux_proc(
+            [compiler, std, "-O1", "-fno-builtin", "-E", "-fdirectives-only", name, "-o", "pp.i"],
+            build_area, student_build_env(build_area), C_PREPROCESS_TIMEOUT_S,
+            os.path.join(case_dir, "pp.out"), os.path.join(case_dir, "pp.err"),
+            preexec_student_compile)
         if code == 0 and not expired:
             # Sans suivre de lien, fichier ordinaire seulement (chantier de l'UID étudiant).
             fd = os.open(target, os.O_RDONLY | O_NO_LINK)
@@ -7207,9 +7295,9 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
             # Symboles de la libc redéfinis par le code soumis, lus sur le BINAIRE (cf.
             # c_binary_linked_symbols). nm tourne sous l'UID étudiant, comme la compilation.
             nm_out = os.path.join(case_dir, "nm.out")
-            code, expired = run_proc(["nm", "--defined-only", out_value], cwd_c, env_c,
-                                     NM_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
-                                     preexec_c)
+            code, expired = run_aux_proc(["nm", "--defined-only", out_value], cwd_c, env_c,
+                                         NM_TIMEOUT_S, nm_out, os.path.join(case_dir, "nm.err"),
+                                         preexec_c)
             linked = c_binary_linked_symbols(code, expired, nm_out)
             if linked:
                 return None, reserved_name_message(

@@ -298,6 +298,38 @@ describe('QuizView — pied de navigation', () => {
     await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
   });
 
+  it('verdict reçu mais résultat illisible : libellé dédié de la vue (tentative enregistrée)', async () => {
+    const graded = {
+      attemptId: 9, earned: 2, max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([
+        { id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+      ]),
+      onFetchAttemptResult: vi.fn().mockRejectedValueOnce(new Error('réseau')).mockResolvedValue(graded),
+      onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+      // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+      labels: { view: { resultUnavailable: 'RESULTAT_VUE' } },
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(screen.getByText('RESULTAT_VUE')).toBeTruthy());
+  });
+
   it('attente de la correction : texte d’état, contenu inerte, « Soumettre » désactivé', async () => {
     // L'attente peut durer de longues minutes : la région d'état le dit, et rien sous le voile
     // n'est actionnable (un second envoi lançait une seconde attente).

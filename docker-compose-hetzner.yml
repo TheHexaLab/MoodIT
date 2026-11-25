@@ -241,7 +241,7 @@ services:
       # Requêtes en vol par utilisateur. DOIT rester STRICTEMENT sous le nombre de places
       # publiques (EXEC_MAX_CONCURRENT − 1, soit 2 ici) : à égalité, un seul compte peut les
       # occuper toutes et refuser « Exécuter »/« Tester » à toute l'instance — un appel public
-      # tient un conteneur entier (jusqu'à ~60 s de compilation pour un langage compilé).
+      # tient un conteneur entier (jusqu'au mur public de 4 min pour un « Tester » compilé).
       EXEC_MAX_PER_USER: "1"
       # Conteneurs runner (#116) : 1 vCPU et 1 Go chacun sur ce VPS — deux notations
       # simultanées ne doivent pas monopoliser la machine (Caddy, Postgres, services Java)

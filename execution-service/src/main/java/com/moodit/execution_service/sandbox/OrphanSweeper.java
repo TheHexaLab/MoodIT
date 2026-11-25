@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
  *
  * Premier passage dès le démarrage du planificateur ({@code orphan-sweep-initial-ms}, 0 par
  * défaut) : il remplace l'ancien balayage fait dans la fabrique du bean, qui bloquait le
- * démarrage du service quand le démon acceptait la connexion sans répondre.
+ * démarrage du service quand le démon acceptait la connexion sans répondre. Chaque passage
+ * préchauffe aussi la lecture du nombre de CPU de l'hôte (sans effet une fois réussie).
  */
 @Component
 public class OrphanSweeper {
@@ -25,6 +26,10 @@ public class OrphanSweeper {
     @Scheduled(initialDelayString = "${app.sandbox.orphan-sweep-initial-ms:0}",
             fixedDelayString = "${app.sandbox.orphan-sweep-ms:600000}")
     public void sweep() {
+        // Préchauffage du nombre de CPU de l'hôte (cf. DockerSandbox.effectiveNanoCpus), sur ce
+        // fil et non au démarrage : sans effet une fois lu, et un échec ne lève pas — le
+        // balayage a lieu quoi qu'il arrive.
+        sandbox.warmUpCpuLimit();
         sandbox.removeOrphans();
     }
 }

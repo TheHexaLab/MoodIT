@@ -664,7 +664,7 @@ class BoxExhaustedTest(unittest.TestCase):
                 f.write("x")
             calls = []
             def fake_run(cmd, **kwargs):
-                calls.append(len(cmd))
+                calls.append(list(cmd))
             with unittest.mock.patch.object(supervisor, "RM", sys.executable), \
                     unittest.mock.patch.object(supervisor.subprocess, "run", fake_run):
                 supervisor.remove_trees(paths + [leaf])
@@ -674,6 +674,13 @@ class BoxExhaustedTest(unittest.TestCase):
             self.assertEqual(len(supervisor.rm_batches(paths)), len(calls))
             self.assertGreaterEqual(len(calls), 2)
             self.assertLessEqual(len(calls), 4)
+            # Les ARGUMENTS : chaque lot est passé après `--`, leur suite redonne exactement les
+            # dossiers (le fichier n'y est pas), et chaque lot tient dans RM_BATCH_BYTES.
+            for cmd in calls:
+                self.assertEqual([sys.executable, "-rf", "--one-file-system", "--"], cmd[:4])
+                self.assertLessEqual(sum(len(os.fsencode(arg)) + 1 for arg in cmd[4:]),
+                                     supervisor.RM_BATCH_BYTES)
+            self.assertEqual(paths, [arg for cmd in calls for arg in cmd[4:]])
             self.assertEqual([], os.listdir(root))
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -4797,6 +4804,27 @@ class ExtractionBoundsTest(unittest.TestCase):
         # 495 Mo à la compilation. 20 000 copies admises rendaient l'OOM du conteneur possible.
         self.assertLessEqual(supervisor.MAX_FIELD_COPIES, 5_000)
 
+    def test_cs_class_choice_is_linear(self):
+        # Une expression par classe sur tout le harnais, et `not in` sur la liste des classes :
+        # ~7 600 classes vides en 100 Ko et un harnais de 10 Ko nommant la dernière tenaient le
+        # choix de la classe 6,3 s par cas (moodit-runner-csharp, 1 CPU) ; après : 0,03 s.
+        # Entrées UNIQUES à chaque appel : les fonctions sont mémoïsées.
+        counter = iter(range(10 ** 9))
+        def prepare(n):
+            k = next(counter)
+            source = "".join("class C%d {}\n" % i for i in range(n)) + "// %d\n" % k
+            harness = "return C%d.F() == 0; // %d\n" % (n - 1, k) + "x " * n
+            return source, harness
+        ratio = growth_ratio(supervisor.cs_student_class, prepare, 500, 8_000)
+        self.assertLess(ratio, 4, "choix de la classe C# quadratique (rapport %.1f)" % ratio)
+        source, harness = prepare(50)
+        self.assertEqual("C49", supervisor.cs_student_class(source, harness))
+        # `\bNom\b` : un nom qui n'est qu'une partie d'un mot ne désigne pas la classe.
+        self.assertEqual("Solution", supervisor.cs_student_class(
+            "class Aide {}\nclass Solution {}\n", "return Aide_bis.F() == 0;"))
+        self.assertEqual(["Q", "R"], supervisor.cs_namespaces(
+            "namespace Q { }\nnamespace R { }\nnamespace Q { }\n"))
+
     def test_go_embedded_types_are_deduplicated(self):
         # 19 000 lignes `B` dans une structure embarquée par 3 000 types : 57 millions de
         # parents parcourus, 3,5 s par cas.
@@ -4939,6 +4967,14 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertEqual("", inventory[condition:message].split(":", 1)[1].strip())
         self.assertLess(message, inventory.index("Aucune méthode statique ni objet exploitable"))
 
+    def test_java_package_refusal_reads_well(self):
+        # Message lu par l'étudiant : accents, vouvoiement, « Exécuter » comme dans l'interface.
+        message = supervisor.JAVA_PACKAGE_REFUSAL
+        self.assertTrue(message.startswith("Retirez la ligne « package … ; » en tête du fichier"))
+        for word in ("par défaut", "« Exécuter »", "l'accepte"):
+            self.assertIn(word, message)
+        self.assertIn("return None, JAVA_PACKAGE_REFUSAL", inspect.getsource(supervisor.run_java_rpc))
+
     def test_java_rpc_server_compile_abort_is_interrupted(self):
         # javac du SERVEUR RPC expiré ou tué : « Erreur interne du noteur » sans cause, donc un 0
         # définitif. Avec la borne de classes, le code soumis ne peut pas le pousser au délai.
@@ -5038,6 +5074,128 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertFalse(supervisor.oom_killed_during(1, 1))
         self.assertFalse(supervisor.oom_killed_during(None, 1))
         self.assertFalse(supervisor.oom_killed_during(1, None))
+
+    def test_reserved_name_probes_share_one_total_budget(self):
+        # Les sondes (groupée, puis individuelles quand elle échoue) se partagent C_PROBE_BUDGET_S
+        # AU TOTAL, le miroir de DockerEvaluator.toolsPerCaseMs : chacune reçoit le temps qui
+        # RESTE. Horloge simulée : chaque sonde « dure » 3 s et échoue (nom refusé).
+        now = [1000.0]
+        timeouts = []
+        def fake_run(cmd, cwd, env, timeout_s, out_path, err_path, *rest, **kwargs):
+            timeouts.append(timeout_s)
+            now[0] += 3
+            return 1, False
+        names = ["n%d" % k for k in range(supervisor.C_PROBE_MAX + 2)]
+        with unittest.mock.patch.object(supervisor, "run_proc", fake_run), \
+                unittest.mock.patch.object(supervisor.time, "monotonic", lambda: now[0]):
+            with self.assertRaises(supervisor.ToolAborted):
+                supervisor.c_reserved_names(names, "gcc", "-std=gnu17", self.directory, {})
+        budget = supervisor.C_PROBE_BUDGET_S
+        self.assertEqual([budget - 3 * k for k in range(len(timeouts))], timeouts)
+        self.assertLessEqual(3 * len(timeouts), budget + 3)      # la dernière dépasse, puis arrêt
+        self.assertLess(len(timeouts), supervisor.C_PROBE_MAX + 2)
+
+    def test_preprocessor_runs_once_per_job(self):
+        # `gcc -E -fdirectives-only` du code soumis : une fois par job (C_PREPROCESSED), comme le
+        # budgète DockerEvaluator.toolsPerJobMs — pas une fois par cas.
+        runs = []
+        def fake_run(cmd, *args, **kwargs):
+            runs.append(cmd)
+            return 1, False                       # préprocesseur en échec : segment None
+        source = "#ifdef DEBUG\nint f(void) { return 1; }\n#endif\nint g(void) { return 2; }\n"
+        supervisor.C_PREPROCESSED.clear()
+        try:
+            with unittest.mock.patch.object(supervisor, "run_proc", fake_run), \
+                    unittest.mock.patch.object(supervisor, "lock_src_dir", lambda d: None), \
+                    unittest.mock.patch.object(supervisor, "student_build_dir",
+                                               lambda d: self.directory), \
+                    unittest.mock.patch.object(supervisor, "set_owner_mode", lambda *a: None):
+                for case in range(3):
+                    self.assertIsNone(supervisor.c_directives_only_source(
+                        source, "gcc", "-std=gnu17", os.path.join(self.directory, str(case)), "c"))
+        finally:
+            supervisor.C_PREPROCESSED.clear()
+        self.assertEqual(1, len(runs))
+        self.assertIn("-fdirectives-only", runs[0])
+
+    def test_auxiliary_tools_do_not_make_the_case_inconclusive(self):
+        # `nm` ou le préprocesseur expirés/tués : run_proc posait expired/killed_by_signal sur
+        # l'état DU CAS, qui devenait « non concluant » — un canari « fail » perdait sa force de
+        # preuve (accusation à tort possible sous forte charge). run_aux_proc rend ces drapeaux
+        # tels qu'avant l'appel ; la perte d'une sortie (disque saturé) reste comptée.
+        saved = supervisor.EXIT_STATE
+        try:
+            supervisor.EXIT_STATE = supervisor.ExitState(0)
+            def expired_and_lost(*args, **kwargs):
+                supervisor.EXIT_STATE.expired = True
+                supervisor.EXIT_STATE.killed_by_signal = True
+                supervisor.EXIT_STATE.lost = True
+                return None, True
+            with unittest.mock.patch.object(supervisor, "run_proc", expired_and_lost):
+                self.assertEqual((None, True), supervisor.run_aux_proc(["nm"], ".", {}, 1, "o", "e", None))
+            state = supervisor.EXIT_STATE
+            self.assertEqual((False, False, True), (state.expired, state.killed_by_signal, state.lost))
+            # Un drapeau déjà posé par un autre processus du cas reste posé.
+            state.expired = True
+            with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (0, False)):
+                supervisor.run_aux_proc(["nm"], ".", {}, 1, "o", "e", None)
+            self.assertTrue(state.expired)
+        finally:
+            supervisor.EXIT_STATE = saved
+        # nm et le préprocesseur passent par run_aux_proc ; les compilations, javap, le serveur
+        # RPC Java et les sondes, non (leur expiration a déjà un sens pour le cas).
+        c_rpc = inspect.getsource(supervisor.run_c_rpc)
+        self.assertIn('run_aux_proc(["nm", "--defined-only"', c_rpc)
+        self.assertIn("run_aux_proc(", inspect.getsource(supervisor.c_directives_only_source))
+        self.assertNotIn("run_aux_proc(", inspect.getsource(supervisor.c_reserved_names))
+        self.assertNotIn("run_aux_proc(", inspect.getsource(supervisor.run_java_rpc))
+
+    def test_grader_relays_harness_exception_or_panic(self):
+        # Exception C++ ou panique Rust du HARNAIS (le code du prof) : sans relais préfixé
+        # `[MOODIT] harnais: `, rpc_verdict présentait le stderr de l'étudiant comme la cause.
+        cpp = supervisor.c_grader_source([("int", "what", [])], "return what() == 1;", "N", cpp=True)
+        self.assertIn("#include <exception>", cpp)
+        self.assertIn("moodit_protege(moodit_harnais)", cpp)
+        # Avant les #define des bouchons : une fonction soumise `what` ne renomme pas e.what().
+        self.assertLess(cpp.index("moodit_e.what()"), cpp.index("#define what moodit_f_what"))
+        self.assertNotIn("moodit_protege", supervisor.c_grader_source([], "return 1;", "N"))
+        rust = supervisor.rust_grader_source([], "true", "N")
+        self.assertLess(rust.index("::std::panic::set_hook("), rust.index("catch_unwind(moodit_harnais)"))
+        # Compilation et exécution RÉELLES, dans l'image qui a le compilateur (sinon ignoré).
+        work = tempfile.mkdtemp()
+        try:
+            checks = []
+            if shutil.which("g++"):
+                body = ("struct E : std::exception {\n"
+                        "    const char *what() const noexcept override { return \"boum\\nfaux\"; }\n"
+                        "};\nthrow E();")
+                checks.append(("g++", "noteur.cpp", supervisor.c_grader_source([], body, "NONCE42", cpp=True),
+                               ["g++", "-std=c++20", "-O1", "-fno-builtin", "noteur.cpp", "-o", "noteur", "-lm"],
+                               "[MOODIT] harnais: boum faux"))
+                checks.append(("g++ inconnu", "noteur.cpp", supervisor.c_grader_source([], "throw 42;", "NONCE42", cpp=True),
+                               ["g++", "-std=c++20", "-O1", "noteur.cpp", "-o", "noteur", "-lm"],
+                               "[MOODIT] harnais: exception (type inconnu)"))
+            if shutil.which("rustc"):
+                checks.append(("rustc", "noteur.rs", supervisor.rust_grader_source([], "assert_eq!(1, 2);\ntrue", "NONCE42"),
+                               ["rustc", "--edition", "2021", "noteur.rs", "-o", "noteur"],
+                               "[MOODIT] harnais: assertion `left == right` failed"))
+            for label, name, source, build, expected in checks:
+                with self.subTest(label=label):
+                    with open(os.path.join(work, name), "w", encoding="utf-8") as f:
+                        f.write(source)
+                    built = subprocess.run(build, cwd=work, capture_output=True, text=True, timeout=300)
+                    self.assertEqual(0, built.returncode, built.stderr[-800:])
+                    ran = subprocess.run([os.path.join(work, "noteur")], cwd=work,
+                                         capture_output=True, text=True, timeout=60)
+                    self.assertNotEqual(0, ran.returncode)
+                    relayed = [l for l in ran.stderr.splitlines() if l.startswith("[MOODIT] harnais: ")]
+                    self.assertEqual(1, len(relayed), ran.stderr)
+                    self.assertTrue(relayed[0].startswith(expected), relayed[0])
+                    passed, detail = supervisor.rpc_verdict("NONCE42", ran.stderr, "bruit de l'étudiant")
+                    self.assertFalse(passed)
+                    self.assertTrue(detail.startswith("[MOODIT] harnais: "), detail)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes

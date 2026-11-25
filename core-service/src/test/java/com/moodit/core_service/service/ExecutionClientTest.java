@@ -190,7 +190,7 @@ class ExecutionClientTest {
         // 60 s de temps limite : chaque unité attend 60 s + 5 s de marge (> 20 s par défaut).
         assertThat(client.readTimeoutMs("Python", 1, 60_000))
                 .isEqualTo(10_000 + (65_000 + 75_000 + LIFECYCLE + 15_000));
-        // Sous le défaut (10 s + 5 s < 20 s) : le plancher par défaut de l'unité reste.
+        // Sous le défaut (5 s + 5 s = 10 s < 20 s) : le plancher par défaut de l'unité reste.
         assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + PER_UNIT);
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
         // (N + 2 canaris) × (run + 10 s de marge + les COMPILATIONS du cas + 5 s d'inventaire
@@ -398,6 +398,38 @@ class ExecutionClientTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    @DisplayName("evaluate budgète sa lecture sur les unités de travail du langage et le temps limite NORMALISÉ")
+    void evaluate_passesWorkUnitsAndNormalizedTimeLimitToReadTimeout() throws Exception {
+        // Les formules de readTimeoutMs sont épinglées ailleurs ; ici, ce qu'evaluate LEUR donne.
+        // Le nombre brut de harnais au lieu des unités (SQL : deux phases ; compilé : compilation
+        // et deux canaris), ou un temps limite ignoré, raccourcirait le délai sous le pire cas
+        // serveur : core renoncerait pendant une correction encore en cours (#216).
+        List<String> calls = new java.util.ArrayList<>();
+        ExecutionClient recording = new ExecutionClient(startStub(200, "[]", 0), TOKEN, 2_000,
+                2_000, 2_000, 0) {
+            @Override
+            long readTimeoutMs(String language, int units, Integer timeoutMs) {
+                calls.add(language + "|" + units + "|" + timeoutMs);
+                return 2_000;
+            }
+        };
+
+        recording.evaluate("sql", "x", TWO_HARNESSES);
+        recording.evaluate("Java", "x", TWO_HARNESSES, 30_000);
+        // Temps limite aberrant (ligne de BD corrompue) : plafonné au maximum du runner (60 s)
+        // AVANT le calcul du délai, comme dans le corps envoyé ; non positif → défaut (null).
+        recording.evaluate("Python", "x", TWO_HARNESSES, 999_999);
+        recording.evaluate("Python", "x", TWO_HARNESSES, -5);
+
+        assertThat(calls).containsExactly(
+                "sql|4|null",
+                "Java|" + ExecutionClient.workUnits("Java", 2) + "|30000",
+                "Python|2|60000",
+                "Python|2|null");
+        assertThat(ExecutionClient.workUnits("Java", 2)).isEqualTo(6);
     }
 
     @Test

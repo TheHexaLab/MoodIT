@@ -46,7 +46,7 @@ type PendingSubmission = {
   /**
    * Instant de l'envoi (ms), écrit AVANT le POST : l'échéance d'attente en part, et non du
    * montage — sinon un marqueur abandonné (correction en échec reçue par personne) relançait
-   * 30 min d'attente à chaque retour sur le quiz, même des jours plus tard.
+   * toute l'attente (RECONCILE_CEILING_MS) à chaque retour sur le quiz, même des jours plus tard.
    */
   submittedAt?: number;
 };
@@ -129,6 +129,22 @@ function clearDraft(quizId: number): void {
   }
 }
 
+/**
+ * La tentative d'une soumission en vol est-elle apparue dans l'historique (corrigée ou à revoir ;
+ * il exclut les tentatives en correction) ? Par son id s'il est connu ; sinon, la première
+ * tentative absente des connues à l'envoi (tentatives + dernier verdict vu) ; marqueur d'ancien
+ * format seulement : une tentative de plus qu'avant l'envoi.
+ */
+function landedAttempt(
+  pending: PendingSubmission,
+  history: AttemptSummary[]
+): AttemptSummary | undefined {
+  if (pending.attemptId != null) return history.find((a) => a.id === pending.attemptId);
+  const known = pending.knownAttemptIds;
+  if (known) return history.find((a) => !known.includes(a.id));
+  return history.length > pending.attemptsBefore ? history[history.length - 1] : undefined;
+}
+
 /** Ramène un index de question dans les bornes valides du quiz (0..n-1, ou 0 si vide). */
 function clampIndex(index: number, quiz: Quiz): number {
   return Math.max(0, Math.min(index, Math.max((quiz.questions?.length ?? 0) - 1, 0)));
@@ -139,20 +155,23 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 /**
  * Attente du résultat de la correction ASYNCHRONE : normalement résolue par le push WebSocket
  * (`quiz:attempt-*`) en quelques secondes ; le sondage de l'historique n'est qu'un FILET (WS
- * manqué / reconnexion). Une correction de code peut durer bien plus que 2 min (#116) : attente
- * de file d'execution-service jusqu'à 120 s, temps limite jusqu'à 60 s par harnais, interprétés
- * exécutés un par un sous un budget de 15 min, compilés jusqu'au mur de 15 min ; core attend un
- * appel d'évaluation jusqu'à `ExecutionClient.readTimeoutMs` (≈ 25 min au pire), sans compter sa
- * propre file de correction. Conclure trop tôt à un échec faisait renvoyer une tentative encore
- * en correction (409) et perdre son verdict. D'où :
+ * manqué / reconnexion). Une correction de code peut durer bien plus que 2 min (#116). Core
+ * attend chaque appel d'évaluation jusqu'à `ExecutionClient.readTimeoutMs` — au pire ≈ 40 min en
+ * SQL (≥ 2 harnais), ≈ 28 min en interprété, ≈ 25 min en compilé (file d'execution-service,
+ * temps limite jusqu'à 60 s par harnais, budget de 15 min des interprétés, mur de 15 min des
+ * compilés, vie du conteneur sous un démon lent) — et corrige les questions Code UNE APRÈS
+ * L'AUTRE : K questions, jusqu'à K fois ce pire cas, sans compter sa propre file de correction.
+ * Aucun plafond fixe ne couvre tout. Conclure trop tôt à un échec faisait renvoyer une tentative
+ * encore en correction (409) et perdre son verdict. D'où :
  * - un sondage rapide (1,5 s) les deux premières minutes, puis lent (15 s), interrompu dès que le
  *   verdict poussé arrive ;
- * - au-delà de RECONCILE_CEILING_MS seulement (au-dessus du pire cas d'un appel d'évaluation),
- *   l'attente bloquante cesse : message « non confirmée » et renvoi possible. Un verdict poussé
- *   plus tard est encore consommé, et un renvoi refusé en 409 (correction toujours en cours)
- *   revient à l'attente.
+ * - au-delà de RECONCILE_CEILING_MS (45 min : un appel SQL au pire, plus une marge), l'attente
+ *   BLOQUANTE cesse — ce n'est pas une borne de la correction : la vue dit qu'elle prend plus de
+ *   temps que prévu, sans conclure à un échec. Un verdict poussé plus tard est encore consommé,
+ *   et « Réessayer » pendant une correction encore en cours reçoit un 409 « en_cours » qui
+ *   relance l'attente, sans perte.
  */
-const RECONCILE_CEILING_MS = 30 * 60_000;
+const RECONCILE_CEILING_MS = 45 * 60_000;
 const RECONCILE_FAST_MS = 120_000;
 const RECONCILE_INTERVAL_MS = 1_500;
 const RECONCILE_SLOW_INTERVAL_MS = 15_000;
@@ -208,11 +227,19 @@ interface UseQuizAttemptParams {
    */
   codeVerificationUnavailableMessage?: string;
   /**
-   * Message affiché quand la correction d'une soumission n'a pas été confirmée au plafond
-   * d'attente (RECONCILE_CEILING_MS), ou si sa lecture échoue après un verdict : réponses
-   * restaurées, renvoi possible (label, surchargeable).
+   * Message affiché quand la correction d'une soumission n'est pas encore confirmée au plafond
+   * d'attente (RECONCILE_CEILING_MS — pas une borne de la correction, qui peut tourner encore),
+   * ou si sa lecture échoue après un verdict : réponses restaurées. N'affirme pas un échec :
+   * « Réessayer » pendant une correction encore en cours relance l'attente (409 « en_cours »)
+   * (label, surchargeable).
    */
   submissionNotConfirmedMessage?: string;
+  /**
+   * Message affiché quand la correction a abouti (verdict, ou tentative dans l'historique) mais
+   * que la lecture de son résultat a échoué : la tentative EST enregistrée ; « Réessayer » relit
+   * l'historique et ouvre son résumé, sans la renvoyer (label, surchargeable).
+   */
+  resultUnavailableMessage?: string;
 }
 
 export interface QuizAttemptApi {
@@ -317,7 +344,8 @@ export function useQuizAttempt({
   submitRegradingMessage = 'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.',
   submitAlreadySubmittedMessage = 'Ce quiz a déjà été soumis.',
   codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
-  submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
+  submissionNotConfirmedMessage = "La correction prend plus de temps que prévu. Réessayez pour reprendre l'attente : vos réponses sont conservées.",
+  resultUnavailableMessage = "Votre tentative est enregistrée, mais son résultat n'a pas pu être chargé. Réessayez pour l'afficher.",
 }: UseQuizAttemptParams): QuizAttemptApi {
   const [quiz, setQuiz] = useState<Quiz>(initialQuiz);
   const [loading, setLoading] = useState<boolean>(Boolean(onFetchQuiz));
@@ -495,14 +523,18 @@ export function useQuizAttempt({
           setReconciling(false);
           setSubmitError(submissionNotConfirmedMessage);
         } catch {
+          // Correction ABOUTIE (verdict, ou tentative dans l'historique), mais la lecture de son
+          // résultat a échoué : la tentative est enregistrée. « Réessayer » la relira (lateRef)
+          // au lieu de la renvoyer — sur un quiz avec reprise, un renvoi en créait une seconde.
           clearPending(quizId);
           if (!mountedRef.current) return;
+          lateRef.current = pending;
           setReconciling(false);
-          setSubmitError(submissionNotConfirmedMessage);
+          setSubmitError(resultUnavailableMessage);
         }
       }
     },
-    [submissionNotConfirmedMessage, codeVerificationUnavailableMessage]
+    [submissionNotConfirmedMessage, codeVerificationUnavailableMessage, resultUnavailableMessage]
   );
 
   /** Charge le détail du quiz + l'historique ; ouvre sur la dernière tentative s'il y en a. */
@@ -784,8 +816,10 @@ export function useQuizAttempt({
     setSubmitError(null);
     setSubmitRejected(false);
     setSubmitting(true);
-    // Nouvel envoi : une soumission restée sans verdict au plafond n'est plus attendue ici (un
-    // 409 ci-dessous, si sa correction tourne encore, rejoint son attente).
+    // Soumission restée sans conclusion (plafond, ou résultat illisible) : « Réessayer » la
+    // vérifie d'abord (cf. plus bas), puis elle n'est plus attendue ici — un 409 « en_cours »,
+    // si sa correction tourne encore, rejoint son attente.
+    const late = lateRef.current;
     lateRef.current = null;
     const usingServer = Boolean(onSubmitQuiz);
     const attemptsBefore = attempts.length;
@@ -799,10 +833,32 @@ export function useQuizAttempt({
     // l'onglet est rechargé pendant l'envoi OU la correction, le remontage réconciliera. Les
     // tentatives déjà connues y figurent : sans id (vue démontée pendant le POST), seul le verdict
     // d'une AUTRE tentative pourra conclure (cf. outcomeMatches).
-    if (usingServer) {
-      writePending(initialQuiz.id, { answers, attemptsBefore, knownAttemptIds, submittedAt });
-    }
     try {
+      // « Réessayer » après une attente non conclue : la tentative attendue a peut-être abouti
+      // depuis. On relit d'abord l'historique et on OUVRE son résumé si elle y est (sur un quiz
+      // avec reprise, un renvoi en créait une seconde) ; sinon seulement, on renvoie.
+      if (late && onSubmitQuiz) {
+        let history: AttemptSummary[];
+        try {
+          history = fetchAttemptsRef.current ? await fetchAttemptsRef.current(initialQuiz.id) : [];
+        } catch {
+          // Historique illisible : pas de renvoi à l'aveugle ; l'étudiant réessaiera.
+          if (!mountedRef.current) return;
+          lateRef.current = late;
+          setSubmitError(submissionNotConfirmedMessage);
+          return;
+        }
+        if (!mountedRef.current) return;
+        const landed = landedAttempt(late, history);
+        if (landed) {
+          clearPending(initialQuiz.id);
+          await settleLateOutcome({ quizId: initialQuiz.id, attemptId: landed.id, ok: true });
+          return;
+        }
+      }
+      if (usingServer) {
+        writePending(initialQuiz.id, { answers, attemptsBefore, knownAttemptIds, submittedAt });
+      }
       if (onSubmitQuiz) {
         // Mode serveur ASYNCHRONE : le POST enregistre la tentative (202 + id) et rend la main ;
         // la correction (sandbox) tourne en tâche de fond. On attend le résultat via le push WS
@@ -870,7 +926,8 @@ export function useQuizAttempt({
   }, [
     quiz, initialQuiz.id, answers, attempts, onSubmitQuiz, submitErrorMessage,
     submitRejectedMessage, submitTooLargeMessage, submitRegradingMessage,
-    submitAlreadySubmittedMessage, reconcilePending, reload,
+    submitAlreadySubmittedMessage, reconcilePending, reload, settleLateOutcome,
+    submissionNotConfirmedMessage,
   ]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */

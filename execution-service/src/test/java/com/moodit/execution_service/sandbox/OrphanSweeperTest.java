@@ -6,7 +6,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 
 class OrphanSweeperTest {
 
@@ -16,7 +15,11 @@ class OrphanSweeperTest {
 
         new OrphanSweeper(sandbox).sweep();
 
-        verify(sandbox).removeOrphans();
+        // Préchauffage du nombre de CPU de l'hôte AVANT le balayage (premier passage dès le
+        // démarrage, hors du fil principal), puis le balayage lui-même.
+        var order = org.mockito.Mockito.inOrder(sandbox);
+        order.verify(sandbox).warmUpCpuLimit();
+        order.verify(sandbox).removeOrphans();
         // Planifié, et la planification est activée : sans @EnableScheduling, @Scheduled ne
         // fait rien, et l'orphelin d'un redéploiement n'était jamais ramassé.
         Scheduled schedule = OrphanSweeper.class.getMethod("sweep").getAnnotation(Scheduled.class);

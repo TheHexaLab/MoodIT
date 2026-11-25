@@ -111,9 +111,12 @@ Modèle de menace complet, statut par langage, limites assumées, protocole et s
   (`SANDBOX_MEMORY_MB` 1,5 Go, `SANDBOX_PIDS_LIMIT` 512, `SANDBOX_CPUS` 2 ; vérifiés au démarrage :
   au moins 6 Mo, 1 PID et 0,01 CPU, sinon le service refuse de démarrer — Docker lit 0 comme
   « illimité », un quota CFS nul (moins de 10 000 nanoCPU) ne borne plus rien et un quota sous
-  1 ms fait refuser chaque démarrage par le noyau). `SANDBOX_CPUS` vaut au plus le nombre de CPU de
-  l'hôte Docker : au-delà, le démon refuserait chaque conteneur, la valeur est donc plafonnée à ce
-  nombre (lu au premier usage du démon, avertissement unique dans le journal). Rlimits du processus
+  1 ms fait refuser chaque démarrage par le noyau ; un nombre non fini est refusé aussi).
+  `SANDBOX_CPUS` vaut au plus le nombre de CPU de l'hôte Docker : au-delà, le démon refuserait
+  chaque conteneur, la valeur est donc plafonnée à ce nombre (lu dès le premier balayage des
+  orphelins, au démarrage, ou par la première exécution ; avertissement unique dans le journal).
+  Tant que ce nombre est inconnu (lecture en cours ou en échec, retentée après 60 s), chaque
+  conteneur reçoit au plus 1 CPU : toujours accepté, et toujours une borne. Rlimits du processus
   étudiant (fichiers, nproc, nofile) ; sorties tronquées (64 Ko en notation, 1,2 Mo en exec —
   le dump SQL de la phase 1 peut approcher `app.sql.max-dump-chars`).
 - **Charge** (`ExecutionLimiter`) : au plus `EXEC_MAX_CONCURRENT` conteneurs runner simultanés (file

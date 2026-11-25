@@ -239,13 +239,22 @@ MAX_TIMEOUT_MS = 60_000
 # Délai d'attente de la réponse : le PIRE CAS serveur, miroir de core-service
 # ExecutionClient.readTimeoutMs (mêmes termes, mêmes défauts). Plus court, le script renonçait
 # pendant une correction encore en cours : « le noteur n'a pas répondu », À VÉRIFIER, et
-# --unpublish fermait un quiz juste. Les termes :
+# --unpublish fermait un quiz juste. Les termes (`_X` ici = constante `X` d'ExecutionClient ;
+# ExecutionClientDriftTest vérifie qu'ils restent égaux) :
 _BASE_READ_MS = 10_000            # app.execution-service.read-timeout-ms de core
 _PER_TEST_MS = 20_000             # app.execution-service.per-test-timeout-ms de core
-_RUN_MARGIN_MS = 5_000            # RUN_MARGIN_MS
-_EXEC_WALL_MS = 75_000            # EXEC_WALL_SLACK_MS (RunnerExec.WALL_OVERHEAD_MS)
-_CONTAINER_LIFECYCLE_MS = 35_000  # CONTAINER_LIFECYCLE_MS
-_EVAL_MAX_WALL_MS = 15 * 60_000   # EVAL_MAX_WALL_MS (DockerEvaluator.MAX_WALL_MS)
+_RUN_MARGIN_MS = 5_000
+_EXEC_WALL_SLACK_MS = 75_000      # RunnerExec.WALL_OVERHEAD_MS
+_EVAL_MAX_WALL_MS = 15 * 60_000   # DockerEvaluator.MAX_WALL_MS
+# Cycle de vie d'UN conteneur hors de son mur, démon lent (chaque appel juste sous ses bornes) :
+# 7 appels au démon × (connexion 5 s + silence 60 s) + lecture des journaux 30 s = 485 s, payé
+# une fois par job compilé et une fois par unité interprétée (miroirs de DockerSandbox).
+_DAEMON_RESPONSE_MS = 60_000      # DockerSandbox.RESPONSE_TIMEOUT
+_DAEMON_CONNECT_MS = 5_000        # DockerSandbox.CONNECTION_TIMEOUT
+_LOG_READ_MS = 30_000             # DockerSandbox.logReadTimeout
+_DAEMON_CALLS_OUTSIDE_WALL = 7
+_CONTAINER_LIFECYCLE_MS = (_DAEMON_CALLS_OUTSIDE_WALL * (_DAEMON_CONNECT_MS + _DAEMON_RESPONSE_MS)
+                           + _LOG_READ_MS)
 # Réglages d'execution-service partagés par le .env commun : lus dans l'environnement de son
 # conteneur, sinon dans celui du script, sinon leur défaut d'application.properties
 # (cf. server_settings).
@@ -298,7 +307,7 @@ def read_timeout_s(environ):
     budget = _env_ms(environ, "EXEC_INTERPRETED_BUDGET_MS", _DEFAULT_INTERPRETED_BUDGET_MS)
     compiled = (_BASE_READ_MS + queue + _EVAL_MAX_WALL_MS + _RUN_MARGIN_MS
                 + _CONTAINER_LIFECYCLE_MS)
-    unit = (queue + max(_PER_TEST_MS, MAX_TIMEOUT_MS + _RUN_MARGIN_MS) + _EXEC_WALL_MS
+    unit = (queue + max(_PER_TEST_MS, MAX_TIMEOUT_MS + _RUN_MARGIN_MS) + _EXEC_WALL_SLACK_MS
             + _CONTAINER_LIFECYCLE_MS)
     interpreted = _BASE_READ_MS + budget + unit
     return (max(compiled, interpreted) + _READ_SAFETY_MS) / 1000
@@ -459,8 +468,9 @@ def evaluate(base_url, token, question, timeout_s=None):
     request = urllib.request.Request(
         base_url + "/internal/exec/evaluate", data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "X-Internal-Token": token}, method="POST")
-    # Une correction peut tenir une vingtaine de minutes (attente d'une place, compilations ou
-    # budget interprété) : cf. read_timeout_s ; main le calcule avec les réglages du conteneur.
+    # Une correction peut tenir près d'une demi-heure (attente d'une place, compilations ou
+    # budget interprété, démon Docker lent) : cf. read_timeout_s ; main le calcule avec les
+    # réglages du conteneur.
     if timeout_s is None:
         timeout_s = read_timeout_s(os.environ)
     with urllib.request.urlopen(request, timeout=timeout_s) as response:

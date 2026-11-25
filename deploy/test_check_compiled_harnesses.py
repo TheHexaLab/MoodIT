@@ -192,7 +192,9 @@ class ClassifyTest(unittest.TestCase):
         for detail in ("Erreur interne du noteur (serveur RPC)",
                        "Erreur interne du noteur",
                        "Aucun fichier de code soumis",
-                       "Retire la ligne « package ... ; » en tete du fichier",
+                       "Retirez la ligne « package … ; » en tête du fichier : la notation attend la "
+                       "classe dans le paquet par défaut. (Le bouton « Exécuter » l'accepte, pas "
+                       "la notation.)",
                        "Nom de classe réservé : class Math déjà fourni au harnais",
                        "Notation incomplète (cas sans verdict)",
                        "Échec de compilation :\nMain.java:1: error",
@@ -477,16 +479,84 @@ class SupervisorDriftTest(unittest.TestCase):
         self.assertEqual([chk.RESERVED_NAME], prefixes)
 
 
+_EXECUTION_CLIENT = os.path.join(_ROOT, "core-service", "src", "main", "java", "com", "moodit",
+                                 "core_service", "service", "ExecutionClient.java")
+
+
+class ExecutionClientDriftTest(unittest.TestCase):
+    """Le délai d'attente du script COPIE le pire cas de core (ExecutionClient.readTimeoutMs) :
+    si core le relève et pas le script, celui-ci renonce avant le noteur, et --unpublish ferme un
+    quiz juste. Chaque terme copié est relu dans la source Java. Revue #246."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(_EXECUTION_CLIENT, encoding="utf-8") as f:
+            cls.source = f.read()
+
+    def java_constant(self, name):
+        """Valeur d'une constante `static final long|int NAME = <entiers et *>;` de la source."""
+        found = re.findall(r"\bstatic\s+final\s+(?:long|int)\s+%s\s*=\s*([\d_\s*]+);" % name,
+                           self.source)
+        self.assertEqual(1, len(found), "constante %s introuvable ou ambiguë" % name)
+        value = 1
+        for factor in found[0].split("*"):
+            value *= int(factor.strip().replace("_", ""))
+        return value
+
+    def spring_default(self, key):
+        """Défaut d'une propriété `@Value("${clé:défaut}")` (ou `${…:${VAR:défaut}}`)."""
+        found = re.findall(r"\$\{" + re.escape(key) + r":(?:\$\{\w+:)?(\d+)\}", self.source)
+        self.assertEqual(1, len(found), "défaut de %s introuvable ou ambigu" % key)
+        return int(found[0])
+
+    def test_constantes_egales_a_celles_de_core(self):
+        for name in ("RUN_MARGIN_MS", "EXEC_WALL_SLACK_MS", "EVAL_MAX_WALL_MS",
+                     "DAEMON_RESPONSE_MS", "DAEMON_CONNECT_MS", "LOG_READ_MS",
+                     "DAEMON_CALLS_OUTSIDE_WALL"):
+            with self.subTest(name=name):
+                self.assertEqual(self.java_constant(name), getattr(chk, "_" + name))
+
+    def test_cycle_de_vie_meme_formule_que_core(self):
+        formula = "DAEMON_CALLS_OUTSIDE_WALL * (DAEMON_CONNECT_MS + DAEMON_RESPONSE_MS) + LOG_READ_MS"
+        found = re.findall(r"\bCONTAINER_LIFECYCLE_MS\s*=\s*([^;]+);", self.source)
+        self.assertEqual([formula], [" ".join(f.split()) for f in found])
+        self.assertEqual(
+            self.java_constant("DAEMON_CALLS_OUTSIDE_WALL")
+            * (self.java_constant("DAEMON_CONNECT_MS") + self.java_constant("DAEMON_RESPONSE_MS"))
+            + self.java_constant("LOG_READ_MS"),
+            chk._CONTAINER_LIFECYCLE_MS)
+
+    def test_reglages_par_defaut_egaux_a_ceux_de_core(self):
+        for key, name in (("app.execution-service.read-timeout-ms", "_BASE_READ_MS"),
+                          ("app.execution-service.per-test-timeout-ms", "_PER_TEST_MS"),
+                          ("app.execution-service.internal-queue-wait-ms",
+                           "_DEFAULT_QUEUE_WAIT_MS"),
+                          ("app.execution-service.interpreted-budget-ms",
+                           "_DEFAULT_INTERPRETED_BUDGET_MS")):
+            with self.subTest(key=key):
+                self.assertEqual(self.spring_default(key), getattr(chk, name))
+
+    def test_temps_limite_plafonne_comme_core(self):
+        self.assertIn("Math.min(Math.max(execTimeoutMs, 1), %s)" % format(chk.MAX_TIMEOUT_MS, "_"),
+                      self.source)
+
+
 class ReadTimeoutTest(unittest.TestCase):
     """Revue #246 : 900 s, plus court que le pire cas serveur — le script renonçait pendant une
     correction en cours, et --unpublish fermait un quiz juste."""
 
+    # Cycle de vie d'un conteneur hors mur, démon lent : 7 × (5 s + 60 s) + 30 s (revue #246 :
+    # l'ancien terme de 35 s ne couvrait que des appels rapides).
+    LIFECYCLE_S = 7 * (5 + 60) + 30
+
     def test_couvre_le_pire_cas_serveur(self):
+        self.assertEqual(485, self.LIFECYCLE_S)
         # Interprété (défauts) : base 10 s + budget 900 s + l'unité déjà partie (attente 120 s +
-        # temps limite 60 s + marge 5 s + mur 75 s + cycle de vie 35 s) = 1 205 s.
-        self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 900 + 120 + 60 + 5 + 75 + 35)
-        # Compilé : base 10 s + attente 120 s + mur 900 s + marge 5 s + cycle de vie 35 s.
-        self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 120 + 900 + 5 + 35)
+        # temps limite 60 s + marge 5 s + mur 75 s + cycle de vie 485 s) = 1 655 s.
+        self.assertGreaterEqual(chk.read_timeout_s({}),
+                                10 + 900 + 120 + 60 + 5 + 75 + self.LIFECYCLE_S)
+        # Compilé : base 10 s + attente 120 s + mur 900 s + marge 5 s + cycle de vie 485 s.
+        self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 120 + 900 + 5 + self.LIFECYCLE_S)
 
     def test_suit_les_reglages_partages_du_serveur(self):
         default = chk.read_timeout_s({})
@@ -570,7 +640,8 @@ class ReadTimeoutTest(unittest.TestCase):
             chk.evaluate("http://x", "t", question)
             expected = chk.read_timeout_s(chk.os.environ)
         self.assertEqual(expected, seen["timeout"])
-        self.assertGreaterEqual(seen["timeout"], 10 + 1800 + 120 + 60 + 5 + 75 + 35)
+        self.assertGreaterEqual(seen["timeout"],
+                                10 + 1800 + 120 + 60 + 5 + 75 + self.LIFECYCLE_S)
 
 
 class CaseNameTest(unittest.TestCase):

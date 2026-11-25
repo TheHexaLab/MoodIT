@@ -39,11 +39,17 @@ export interface QuizViewLabels {
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
   /**
-   * Message quand la correction d'une soumission n'a pas été confirmée au plafond d'attente
-   * (30 min, au-delà du pire cas serveur) ou après un rechargement : réponses restaurées, renvoi
-   * possible (un renvoi refusé parce que la correction tourne encore revient à l'attente).
+   * Message quand la correction d'une soumission n'est pas encore confirmée au plafond d'attente
+   * (45 min : pas une borne de la correction, qui peut durer jusqu'à ≈ 40 min PAR question Code
+   * au pire) : réponses restaurées. N'affirme pas un échec : « Réessayer » pendant une correction
+   * encore en cours reçoit un 409 « en_cours » et reprend l'attente, sans perte.
    */
   submissionNotConfirmed: string;
+  /**
+   * Correction aboutie, mais lecture de son résultat en échec : la tentative EST enregistrée ;
+   * « Réessayer » relit l'historique et ouvre son résumé, sans la renvoyer.
+   */
+  resultUnavailable: string;
   /**
    * Texte de la région d'état pendant l'attente de la correction (spinner plein quiz) : elle peut
    * durer plusieurs minutes, et l'étudiant peut quitter la page.
@@ -102,7 +108,9 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   codeVerificationUnavailable:
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:
-    "Votre tentative n'a pas pu être confirmée. Vérifiez l'historique ou renvoyez-la.",
+    "La correction prend plus de temps que prévu. Réessayez pour reprendre l'attente : vos réponses sont conservées.",
+  resultUnavailable:
+    "Votre tentative est enregistrée, mais son résultat n'a pas pu être chargé. Réessayez pour l'afficher.",
   gradingInProgress:
     'Correction en cours… cela peut prendre plusieurs minutes ; vous pouvez quitter cette page et revenir.',
   awaitingReviewStatus: "En attente de l'enseignant",

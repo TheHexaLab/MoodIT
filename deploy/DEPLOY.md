@@ -337,8 +337,9 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > ```
 >
 > `EXEC_URL` est obligatoire sous Docker Desktop : l'IP d'un conteneur n'y est pas joignable
-> depuis l'hôte. Le script attend chaque réponse aussi longtemps que le pire cas du serveur
-> (une vingtaine de minutes), calculé avec `EXEC_INTERNAL_QUEUE_WAIT_MS` et
+> depuis l'hôte. Le script attend chaque réponse aussi longtemps que le pire cas du serveur,
+> miroir du délai de core (`ExecutionClient.readTimeoutMs`, démon Docker lent compris) : près
+> d'une demi-heure aux réglages par défaut (1 715 s), calculé avec `EXEC_INTERNAL_QUEUE_WAIT_MS` et
 > `EXEC_INTERPRETED_BUDGET_MS` : lus dans le conteneur execution-service à l'étape 2 ; ici, sans
 > conteneur, les donner aussi si le `.env` local les change. Le harnais C/C++ dispose de
 > `<math.h>`, `<stdbool.h>`, `<stdlib.h>`, `<string.h>` et `<stdio.h>`, pas de la STL.

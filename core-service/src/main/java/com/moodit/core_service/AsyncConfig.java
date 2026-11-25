@@ -73,7 +73,9 @@ public class AsyncConfig {
   /**
    * Garde l'executor ACTIF jusqu'à sa destruction. Par défaut (Spring 7), la fermeture du contexte
    * le met en pause à l'arrêt du cycle de vie, et cet arrêt attend les tâches en cours — une
-   * correction compilée peut durer jusqu'à 15 min. Avec ce réglage, l'arrêt n'attend pas,
+   * correction peut durer plusieurs dizaines de minutes (par question Code : file d'attente, mur du
+   * conteneur jusqu'à 15 min et vie du conteneur hors mur, cf. {@code ExecutionClient#readTimeoutMs}).
+   * Avec ce réglage, l'arrêt n'attend pas,
    * l'executor reste en marche et exécute encore une soumission (ou une relance) qui commit pendant
    * l'arrêt gracieux du serveur web. Une correction que la destruction interrompt reste
    * {@code pending}, et la reprise au démarrage la corrige ({@code resumePendingGradings}).

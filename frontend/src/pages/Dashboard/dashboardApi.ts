@@ -307,7 +307,7 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
   if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
   if (res.status === 409) {
     // Trois 409 reconnus (cf. JSDoc) : deux en JSON (cause), « déjà soumis » par son texte EXACT.
-    // Tout autre corps ne vaut ni « en cours » (30 min d'attente pour rien), ni « relance », ni
+    // Tout autre corps ne vaut ni « en cours » (une longue attente pour rien), ni « relance », ni
     // « déjà soumis » (un conflit de contrainte se réessaie) : échec ordinaire.
     const body = (await res.text().catch(() => '')).trim();
     let cause: unknown;

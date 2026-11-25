@@ -94,6 +94,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     submitAlreadySubmittedMessage: t.submitAlreadySubmitted,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
+    resultUnavailableMessage: t.resultUnavailable,
   });
   const { quiz, phase, currentIndex, answers, result } = attempt;
 
@@ -436,7 +437,8 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (isLast) {
       // Grisé pendant l'envoi ET si la tentative unique est déjà consommée (miroir du
       // 409 backend : évite le double-clic / rejeu qui serait de toute façon rejeté).
-      // `reconciling` : une correction est attendue (jusqu'à 30 min) — pas de second envoi.
+      // `reconciling` : une correction est attendue (jusqu'au plafond de 45 min) — pas de second
+      // envoi.
       const disabled = attempt.submitting || attempt.reconciling || attempt.alreadySubmitted;
       return (
         <button
