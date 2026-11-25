@@ -125,16 +125,17 @@ docker compose --env-file .env.docker -f docker-compose-hetzner.yml logs -f gate
 | Tout arrêter | `docker compose --env-file .env.docker -f docker-compose-hetzner.yml down` |
 
 **Redémarrer `execution-service` pendant des corrections.** Une correction en cours au moment de
-l'arrêt est perdue : sa tentative est supprimée et l'étudiant resoumet. Les corrections en file
+l'arrêt est perdue : sa tentative est supprimée et l'étudiant resoumet (sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise : gardée « à revoir »). Les corrections en file
 dans core, elles, attendent : core retente la connexion pendant
 `EXEC_UNREACHABLE_RETRY_MS` (2 min par défaut) avant d'abandonner, ce qui couvre un `restart`,
 un `./deploy/update.sh` ou un redémarrage de l'hôte où core est prêt le premier. Au-delà de ce
-délai, chaque correction en file est abandonnée à son tour (tentative supprimée) : pour un arrêt
+délai, chaque correction en file est abandonnée à son tour (tentative supprimée, mêmes
+exceptions) : pour un arrêt
 plus long, attendre que la file soit vide (`SELECT count(*) FROM Attempt WHERE status =
 'pending';` rend 0) ou prévenir les enseignants. Une sandbox indisponible n'est pas comptée dans
-le plafond des échecs sans verdict (#116) : un arrêt ne fait passer aucune tentative « à revoir »,
-sauf une relance d'enseignant en cours (la tentative relancée reste `review`, sur tout quiz, à
-relancer depuis l'éditeur de quiz).
+le plafond des échecs sans verdict (#116) : un arrêt ne fait passer « à revoir » que la
+tentative d'une relance d'enseignant en cours (sur tout quiz), ou celle d'un étudiant DÉJÀ au
+plafond sur un quiz sans reprise ; l'enseignant la relance depuis l'éditeur de quiz.
 
 ### Mettre à jour la prod
 
@@ -394,7 +395,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >   migration suivante pourrait reprendre leur numéro, et les bases neuves n'auraient plus le
 >   schéma de la prod. Gardées, elles restent appliquées en prod et s'appliquent aux bases
 >   neuves (dev, e2e, CI) : l'ancienne version tourne sur le schéma de cette version (voir
->   ci-dessous pourquoi c'est sans danger). `db/demo/` suit la même règle (`V2_3` y a changé) ;
+>   ci-dessous pourquoi c'est sans danger). `git checkout HEAD -- db` garde aussi `db/demo/`
+>   tel quel ;
 > - **urgence**, en attendant : si un cron lance `update.sh` (`crontab -l`), suspendre cette
 >   ligne (`crontab -e`), puis
 >
@@ -413,6 +415,31 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >   et réactiver le cron, s'il y en a un, une fois le revert arrivé sur `deploiement`. Garder
 >   `MOODIT_RUNNER_TAG` exporté pour toute autre commande `docker compose` lancée à la main
 >   d'ici là.
+>
+> **Tentatives en cours ou à revoir (les deux voies).** L'ancien core n'a ni la reprise des
+> corrections `pending` au démarrage, ni l'état `review` (« à revoir ») : une tentative laissée
+> dans l'un ou l'autre bloque son étudiant sans qu'il le voie — `pending` occupe
+> `uq_attempt_pending` (nouvelle soumission refusée, 409) et n'est jamais corrigée, `review`
+> compte comme sa tentative unique sans s'afficher. Avant la bascule, laisser si possible la
+> file se vider, puis lister ce qui reste :
+>
+> ```bash
+> # Corrections en file ou en cours : attendre 0 si possible (prévenir les enseignants).
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc >   "SELECT count(*) FROM Attempt WHERE status = 'pending';"
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c >   "SELECT id, quiz_id, user_id, status, submitted_at FROM Attempt
+>     WHERE status IN ('pending', 'review') ORDER BY quiz_id, id;"
+> ```
+>
+> Une fois l'ancienne version démarrée, relancer la même liste (une correction coupée par
+> l'arrêt reste `pending`) puis, avec l'accord des enseignants concernés, supprimer ces lignes
+> pour rendre leur tentative aux étudiants — sauvegarde d'abord, puis une seule transaction
+> (`-1`) qui ne touche que des lignes encore dans ces états (les réponses suivent par cascade) :
+>
+> ```bash
+> mkdir -p backups
+> docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" >   | gzip > "backups/db-avant-purge-tentatives-$(date +%Y%m%d-%H%M%S).sql.gz"
+> docker exec moodit_postgres psql -1 -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c >   "DELETE FROM Attempt WHERE id IN (<ids>) AND status IN ('pending', 'review');"
+> ```
 >
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son
 > image et son volume (qui porte ses paquets) sont encore là, et le compose recrée ses conteneurs.
@@ -551,7 +578,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   côté en garde toujours une, même pendant une rafale de l'autre. La garantie porte sur **une**
   place, pas sur deux : quand deux « Tester » longs tiennent les deux places publiques, une
   seule correction passe ; la seconde attend `EXEC_INTERNAL_QUEUE_WAIT_MS`, puis sa tentative
-  est supprimée et l'étudiant resoumet. File d'attente publique
+  est supprimée et l'étudiant resoumet (sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise : gardée « à revoir »). File d'attente publique
   `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
   au-delà, l'interface affiche « Trop d'exécutions en cours ».
 - **Runner Docker (#116)** : TOUTE exécution (notation des questions Go/Rust/C/C++/C#/Java,
@@ -564,7 +591,7 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   fail-closed et gardé par des canaris anti-falsification (`docker/runners/README.md`).
   Capacité : une correction compilée tient une place (au plus `EXEC_MAX_CONCURRENT − 1`, 2 en
   prod, pour les corrections) pendant TOUT son conteneur ; l'attente interne des corrections (`EXEC_INTERNAL_QUEUE_WAIT_MS`, 120 s)
-  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet.
+  absorbe un pic — au-delà, la tentative échoue et l'étudiant resoumet (sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise : gardée « à revoir »).
   Une correction INTERPRÉTÉE/SQL, elle, prend une place et un conteneur **par harnais** : sa
   boucle est donc bornée par un budget global (`EXEC_INTERPRETED_BUDGET_MS`, 15 min — même
   plafond que le mur d'un conteneur compilé ; 4 min pour un « Tester » public). Au-delà, les
@@ -573,7 +600,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   - **note partielle** (harnais restants « non évalué ») quand la cause est imputable au code
     soumis : solution lente qui épuise le budget par son propre travail, harnais interrompu
     (timeout, `SIGKILL`), panne d'environnement (`OSError` : disque, processus) ;
-  - **502, tentative supprimée, l'étudiant resoumet** quand elle ne l'est pas : budget épuisé
+  - **502, tentative supprimée, l'étudiant resoumet** (sauf relance de l'enseignant, ou
+    plafond atteint : voir ci-dessous) quand elle ne l'est pas : budget épuisé
     surtout par l'ATTENTE d'une place (surcharge — le temps d'attente est mesuré et retiré du
     travail), ou erreur déclarée par le superviseur. Le premier compte dans le plafond
     `QUIZ_MAX_NO_VERDICT_FAILURES` (cause « sans verdict ») : un code qui s'arrête juste sous le

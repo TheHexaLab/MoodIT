@@ -47,8 +47,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * Une erreur d'infrastructure (démon Docker injoignable, image absente) devient une
  * {@link SandboxException} → 502 de cause « indisponible » : côté core, la tentative en attente
- * est SUPPRIMÉE (quiz:attempt-failed) et l'étudiant resoumet, sauf relance de l'enseignant ou
- * plafond atteint (gardée « à revoir », cf. QuizService#failGrading) — pas de rejouage automatique, d'où
+ * est SUPPRIMÉE (quiz:attempt-failed) et l'étudiant resoumet, sauf relance de l'enseignant, ou
+ * plafond d'échecs atteint sur un quiz sans reprise (gardée « à revoir », cf. QuizService#failGrading) — pas de rejouage automatique, d'où
  * l'attente interne généreuse (EXEC_INTERNAL_QUEUE_WAIT_MS). Un conteneur qui a TOURNÉ sans
  * rendre de verdict (mur atteint, superviseur muet) lève une {@link NoVerdictException} → 502 de
  * cause « sans_verdict », comptée par core : au plafond, la tentative reste « à revoir ».

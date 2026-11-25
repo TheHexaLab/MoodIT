@@ -72,7 +72,7 @@ est pédagogique (varier les cas).
 
 Si le conteneur meurt sans imprimer son JSON une fois le code soumis pris en charge,
 `DockerEvaluator` lève une `NoVerdictException` (avant, une panne de plateforme : voir la ligne
-témoin plus bas) : 502, la tentative est supprimée et l'étudiant resoumet. Aucune note n'est falsifiée ; le défaut
+témoin plus bas) : 502, la tentative est supprimée et l'étudiant resoumet (sauf relance de l'enseignant, ou plafond d'échecs sans verdict atteint : gardée « à revoir »). Aucune note n'est falsifiée ; le défaut
 était le rejeu, à volonté sur une question à tentative unique. Il est désormais plafonné (voir
 « Mort sans verdict : journal et plafond » plus bas), et trois réglages ferment cette classe pour
 ce que le code soumis peut provoquer.
@@ -192,6 +192,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 | boucle d'évaluation constante Rust | 90 s de compilation **par cas** : 451 s de place pour 3 cas + 2 canaris → 183 s (délai dépassé : rejoué une fois constaté deux fois) | corrigé (compilation rejouée) |
 | compilation lente qui RÉUSSIT juste avant le délai | refaite à chaque cas ; après : une fois par job, binaire recopié | corrigé (compilation rejouée) |
 | code soumis à des milliers de fonctions (100 Ko) : bouchons du noteur recompilés à chaque cas (ils portent le nonce) | avant : 3 cas + 2 canaris : C 34 s, C++ 43 s, Go 60 s, Java 28 s, C# 8 s, tous notés ; Rust 2 730 fonctions : compilateur tué à 1 Go, échec noté ; après : au-delà de 1 000 fonctions, méthodes et constructeurs relayés, refus noté avant toute compilation (`MAX_RELAYED_ENTRIES`) | borné (≤ une solution lente honnête) |
+| /box rempli par le code soumis, puis compilation du noteur (conteneur à 1 024 Mo, /box 614 Mo) | entre deux cas, le dossier du cas est supprimé et /tmp et /dev/shm vidés : seuls l'artefact gardé (≤ 64 Mo) et, en Go, le cache de compilation de l'étudiant (remplissable À L'EXÉCUTION) survivent. /box rempli à 566 Mo puis pire noteur sous les bornes : Go à cache froid 32 s et 238 Mo, Rust 383 Mo, aucun OOM (`oom_kill` 0) ; mais le noteur Go a écrit 48 Mo de cache et laissé 1 Mo libre, au bord d'un « no space left on device » présenté comme « Le harnais ne compile pas » → seuil de saturation de /box porté de 48 à 96 Mo (`BOX_MIN_FREE_BYTES`) : au-delà, cas suivants sautés, cause « espace », imputable | corrigé (marge mesurée) |
 | fichiers de l'image inscriptibles | `/tmp` seulement, masqué par le tmpfs ; à l'exécution, `/box` (dossiers de l'étudiant), `/tmp` et `/dev/shm` | réglage existant |
 
 ### Mort sans verdict : journal et plafond (S3, S4)
@@ -239,7 +240,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   échec. Core compte les
   `sans_verdict` par étudiant et par quiz (table `Grading_Failure`, migration V6). En deçà de
   `QUIZ_MAX_NO_VERDICT_FAILURES` (3), la tentative est supprimée et l'étudiant resoumet, comme
-  avant ; au-delà, elle est GARDÉE en statut `review` : elle consomme la tentative unique, sans
+  avant (sauf relance de l'enseignant, voir plus bas) ; au-delà, elle est GARDÉE en statut `review` : elle consomme la tentative unique, sans
   note, et l'étudiant voit « transmise à votre enseignant ». L'enseignant la retrouve dans
   l'éditeur de quiz (pastille « N à revoir ») et relance sa correction
   (`POST /api/quizzes/{quizId}/attempts/{attemptId}/regrade`). Sur un quiz SANS reprise, une fois
@@ -255,8 +256,11 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
 
 - **Pas de borne par utilisateur sur le chemin interne** (3 fils de correction de code dans core,
   partagés). Au pire, une soumission tient une place le temps d'une compilation étudiante jusqu'à
-  90 s (deux fois si elle expire ou est tuée), puis, par cas, de la compilation du noteur (bouchons gonflés :
-  jusqu'à ~12 s par cas mesurés) et de l'exécution jusqu'au temps limite du prof — ce dernier
+  90 s (deux fois si elle expire ou est tuée), puis, par cas, de la compilation du noteur
+  (bouchons au maximum des bornes : jusqu'à ~16 s par cas mesurés, Go à cache froid), des outils
+  du cas (en C/C++ sondes des noms réservés 20 s et `nm` 10 s ; en Java `javap` 5 s et `javac` du
+  serveur RPC ; en C#, une compilation du code soumis par classe que les harnais nomment — cf.
+  `DockerEvaluator.toolsPerCaseMs`) et de l'exécution jusqu'au temps limite du prof — ce dernier
   terme est aussi celui d'une solution honnête qui boucle —, sous le plafond de 15 min. Un
   artefact de plus de 64 Mo ou de 256 fichiers n'est pas gardé : sa compilation est refaite à
   chaque cas. Le nombre de soumissions d'un étudiant est borné par la tentative unique (une par
@@ -271,7 +275,7 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   fausse note : au pire une tentative « à revoir », et un bogue déterministe y reste après
   relance — l'enseignant ne peut que relancer.
 - **Attente d'une place au-delà de `EXEC_INTERNAL_QUEUE_WAIT_MS` (429)** : tentative supprimée,
-  non comptée. Pour un compilé, elle a lieu avant tout conteneur ; pour un interprété ou du SQL,
+  non comptée (sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise : gardée « à revoir »). Pour un compilé, elle a lieu avant tout conteneur ; pour un interprété ou du SQL,
   qui prend une place PAR harnais, elle peut tomber entre deux harnais, après que le code soumis
   a déjà tourné. Elle dépend de la charge des corrections, que le code soumis ne règle pas, mais
   un étudiant qui a des soumissions en cours sur plusieurs quiz tient une place par quiz en
@@ -306,15 +310,17 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   sonde des noms réservés C/C++ ou javac du serveur RPC Java expirés ou tués (cause
   `interrompu`, `platform_aborted`) ; « tué » comprend le travailleur tué sous un pilote qui
   survit et sort en 1 (`gcc: fatal error: Killed signal terminated program cc1`, `…/compile:
-  signal: killed` sous `go build`, `tool_killed`) — signature lue sur le stderr du noteur ou de
+  signal: killed` sous `go build`, `collect2: fatal error: ld terminated with signal 9 [Killed]`
+  sous gcc ou, préfixé de `= note:`, sous rustc ; `TOOL_KILLED`, `tool_killed`) — signature lue sur le stderr du noteur ou de
   la sonde seulement, que le code soumis ne contrôle pas. Ces cas devenaient un 0 définitif que
   personne ne pouvait rejouer. Le code soumis ne peut pas les provoquer : l'API relayée, les
   classes Java et les noms sondés sont bornés en amont (refus noté), et le pire cas mesuré reste
-  loin des délais. Le « Tester » garde leur message. La compilation du CODE SOUMIS tuée, elle,
-  n'est jamais `interrompu` ni `incomplet` : c'est un échec noté (le code soumis peut la
-  provoquer), non concluant seulement pour son rejeu et pour les canaris (cf. « Compilation du
-  code soumis faite une fois par job »). Sur le chemin interne, `DockerEvaluator` en fait un 502 « sans verdict », compté par core, et la
-  tentative est à reprendre ou, au plafond, « à revoir ». `canaries` vaut `aucun` seulement pour
+  loin des délais. Le « Tester » garde leur message. Sur le chemin interne, `DockerEvaluator`
+  fait de ces cas interrompus un 502 « sans verdict », compté par core, et la tentative est à
+  reprendre ou, au plafond, « à revoir ». La compilation du CODE SOUMIS tuée, elle, n'est
+  jamais `interrompu` ni `incomplet` : c'est un échec noté (le code soumis peut la provoquer),
+  non concluant seulement pour son rejeu et pour les canaris (cf. « Compilation du code soumis
+  faite une fois par job »). `canaries` vaut `aucun` seulement pour
   un job sans canaris : `DockerEvaluator` le refuse, chaque job en portant deux. Des canaris incohérents l'emportent : la notation n'est alors
   jamais « incomplète ».
 
@@ -349,7 +355,7 @@ d'après les signatures réellement présentes dans le code soumis.
 - Dev local : démon Docker requis (Windows : named pipe, détecté automatiquement par
   `DockerSandbox`). Sans démon ni images, les tests s'ignorent et l'évaluation compilée répond 502
   (cause `indisponible`) — côté core, la tentative en attente est alors SUPPRIMÉE
-  (`quiz:attempt-failed`) et l'étudiant doit resoumettre : il n'existe pas de rejouage
+  (`quiz:attempt-failed`) et l'étudiant doit resoumettre (sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise : gardée « à revoir ») : il n'existe pas de rejouage
   automatique. Seuls les 502 `sans_verdict` sont comptés (plafond ci-dessus).
 
 Images du mode « exec » : `python` (numpy/pandas/scipy/sympy), `node` (+ tsc — JS, TS et les

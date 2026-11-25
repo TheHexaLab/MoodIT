@@ -226,7 +226,8 @@ services:
       # file de corrections (fin d'examen) ne refuse pas tous les « Exécuter ». La garantie
       # porte sur UNE place : si deux « Tester » longs tiennent les deux places publiques, la
       # seconde correction simultanée attend EXEC_INTERNAL_QUEUE_WAIT_MS, puis est refusée
-      # (tentative supprimée, l'étudiant resoumet).
+      # (tentative supprimée, l'étudiant resoumet — sauf relance de l'enseignant, ou plafond
+      # d'échecs atteint sur un quiz sans reprise : gardée « à revoir »).
       # ATTENTION — ne pas ajouter ici EXEC_INTERNAL_QUEUE_WAIT_MS ni EXEC_INTERPRETED_BUDGET_MS :
       # ces deux-là sont lus AUSSI par core-service (son délai de lecture de la correction, #216).
       # Posées dans ce bloc, elles ne vaudraient que pour execution-service, et core abandonnerait

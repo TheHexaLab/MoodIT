@@ -728,30 +728,40 @@ class RunnerSandboxIntegrationTest {
             worker.join(java.time.Duration.ofSeconds(60).toMillis());
             assertThat(worker.isAlive()).as("la notation interrompue doit rendre la main").isFalse();
             assertThat(thrown.get()).isInstanceOf(SandboxException.class);
-            java.util.Set<String> remaining = new java.util.HashSet<>(runnerContainers());
-            remaining.retainAll(mine);
+            java.util.Set<String> remaining = existingContainers(mine);
             assertThat(remaining)
                     .as("aucun conteneur de cette notation ne doit rester, même arrêté")
                     .isEmpty();
         } finally {
             worker.interrupt();
-            java.util.Set<String> left = new java.util.HashSet<>(runnerContainers());
-            left.retainAll(mine);
-            for (String id : left) {   // ne rien laisser derrière un test en échec — les siens seuls
+            for (String id : existingContainers(mine)) {   // ne rien laisser derrière un test en échec — les siens seuls
                 new ProcessBuilder("docker", "rm", "-f", id).inheritIO().start().waitFor();
             }
         }
     }
 
-    /** Conteneurs runner (étiquette de {@link DockerSandbox}), arrêtés compris. */
-    private static java.util.Set<String> runnerContainers() throws Exception {
-        Process ps = new ProcessBuilder("docker", "ps", "-a", "-q", "--no-trunc",
-                "--filter", "label=" + DockerSandbox.RUNNER_LABEL + "=1")
-                .redirectErrorStream(true).start();
+    /**
+     * Parmi {@code ids}, les conteneurs qui existent encore, arrêtés compris. Recherche par
+     * IDENTIFIANT, pas par l'étiquette de {@link DockerSandbox} : filtré par étiquette, le test
+     * passerait à vide si l'étiquette disparaissait (elle est épinglée par DockerSandboxTest).
+     */
+    private static java.util.Set<String> existingContainers(java.util.Set<String> ids)
+            throws Exception {
+        if (ids.isEmpty()) {
+            return java.util.Set.of();   // sans filtre, docker ps listerait TOUS les conteneurs
+        }
+        java.util.List<String> command = new java.util.ArrayList<>(
+                java.util.List.of("docker", "ps", "-a", "-q", "--no-trunc"));
+        for (String id : ids) {   // plusieurs filtres id : leur union
+            command.add("--filter");
+            command.add("id=" + id);
+        }
+        Process ps = new ProcessBuilder(command).redirectErrorStream(true).start();
         String out = new String(ps.getInputStream().readAllBytes(),
                 java.nio.charset.StandardCharsets.UTF_8);
         assertThat(ps.waitFor()).as("docker ps : %s", out).isZero();
-        return out.lines().map(String::trim).filter(l -> !l.isEmpty())
+        // Le filtre id= accepte un PRÉFIXE : on ne garde que les identifiants exacts de `ids`.
+        return out.lines().map(String::trim).filter(ids::contains)
                 .collect(java.util.stream.Collectors.toSet());
     }
 

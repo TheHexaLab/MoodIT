@@ -95,6 +95,19 @@ public class GlobalExceptionHandler {
                 .body(Map.of("cause", GradingInProgressException.CAUSE, "message", ex.getMessage()));
     }
 
+    /**
+     * Soumission pendant que l'enseignant RELANCE la correction d'une tentative de l'étudiant → 409,
+     * corps JSON {@code {"cause":"relance","message":…}} : le frontend ne doit pas attendre ce
+     * verdict comme s'il était celui de la soumission refusée.
+     */
+    @ExceptionHandler(RegradeInProgressException.class)
+    public ResponseEntity<Map<String, String>> handleRegradeInProgress(RegradeInProgressException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("cause", RegradeInProgressException.CAUSE, "message", ex.getMessage()));
+    }
+
     //Relance de correction refusée : tentative pas « à revoir », ou correction déjà en cours (#116, S4)
     @ExceptionHandler(AttemptNotReviewableException.class)
     public ResponseEntity<String> handleAttemptNotReviewable(AttemptNotReviewableException ex) {

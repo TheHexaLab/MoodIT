@@ -24,6 +24,7 @@ import com.moodit.core_service.exception.AttemptNotReviewableException;
 import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.GradingInProgressException;
 import com.moodit.core_service.exception.QuizNotFoundException;
+import com.moodit.core_service.exception.RegradeInProgressException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.Attempt;
 import com.moodit.core_service.model.GradingFailure;
@@ -130,12 +131,38 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            // Pending ordinaire : la correction d'une soumission de l'étudiant, pas une relance.
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(false);
 
             // Le pending compte aussi parmi les tentatives : vérifié AVANT la tentative unique, il
             // ne retombe pas dans le 409 « déjà soumis ».
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
                     .isInstanceOf(GradingInProgressException.class)
                     .hasMessage("Une correction de ce quiz est déjà en cours.");
+            // L'ordre est épinglé : le comptage des tentatives (qui lèverait « déjà soumis ») n'a
+            // même pas lieu.
+            verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Pending = RELANCE de l'enseignant → RegradeInProgressException (« relance »), pas « en cours »")
+        void pendingRegrade_regradeInProgress() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(true);
+
+            // Le verdict de cette relance n'est pas celui de la soumission : le client ne doit pas
+            // l'attendre comme le sien.
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(RegradeInProgressException.class)
+                    .hasMessage("Votre tentative précédente est en cours de recorrection par votre"
+                            + " enseignant. Réessayez plus tard.");
+            verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
@@ -340,36 +367,42 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Insert concurrent, aucun pending à la relecture → AlreadySubmittedException, pas d'évènement")
-        void violationContrainte_409() {
+        @DisplayName("Insert concurrent, l'autre soumission déjà corrigée à la relecture → GradingInProgressException, jamais « déjà soumis »")
+        void constraintViolation_otherSubmissionAlreadyGraded_stillInProgress() {
+            // Quiz AVEC reprise et sans harnais : la soumission gagnante passe en done en quelques
+            // millisecondes, avant la relecture, qui ne trouve plus aucun pending. Le conflit
+            // vient pourtant d'une écriture concurrente du même étudiant : c'est « en cours ».
+            quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
-            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(2L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_quiz_user_attempt_no"));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(false);
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
-                    .isInstanceOf(AlreadySubmittedException.class);
-            verify(attemptRepository, times(2)).existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending");
+                    .isInstanceOf(GradingInProgressException.class);
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
 
         @Test
-        @DisplayName("Insert concurrent, pending de l'autre soumission relu → GradingInProgressException, dans une transaction NOUVELLE")
-        void constraintViolation_pendingReread_inProgress() {
+        @DisplayName("Insert concurrent avec une RELANCE de l'enseignant → RegradeInProgressException, relue dans une transaction NOUVELLE")
+        void constraintViolation_regradeReread_regradeInProgress() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            // Contrôle préalable : rien encore (les deux soumissions passent) ; relecture après
-            // l'échec de l'insert : le pending de la soumission concurrente, committé entre-temps.
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending"))
-                    .thenReturn(false, true);
+            // Contrôle préalable : rien encore ; l'enseignant relance une tentative « à revoir »
+            // entre-temps, et son pending (marqué relance) fait échouer l'insert.
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(true);
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
-                    .isInstanceOf(GradingInProgressException.class);
+                    .isInstanceOf(RegradeInProgressException.class);
             // La transaction de l'insert est annulée (inutilisable sous PostgreSQL après l'erreur) ;
             // la relecture se fait dans une seconde transaction, en lecture seule.
             ArgumentCaptor<TransactionDefinition> defs = ArgumentCaptor.forClass(TransactionDefinition.class);

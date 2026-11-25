@@ -3,7 +3,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { HarnessBody } from './HarnessPopup';
 import { EditorShell } from './EditorShell';
 import { defaultHarnessLabels } from './harnessLabels';
-import { type TestCaseDraft, defaultHarness } from './editorTypes';
+import { type TestCaseDraft } from './editorTypes';
 import { type Language } from '../../types/domain';
 import './editorTestSetup';
 
@@ -217,21 +217,7 @@ describe('HarnessBody', () => {
       expect(screen.getByLabelText(t.codeAria(1))).toBeTruthy();
     });
 
-    it('« Ajouter » insère le gabarit booléen du langage compilé', () => {
-      // Le gabarit vient de defaultHarness, comme dans QuizEditor : l'ancien gabarit Java
-      // (« lève une exception ») décrivait une forme que le runner refuse.
-      const { onSave } = renderHarness({
-        harnessLanguage: JAVA,
-        defaultHarnessCode: defaultHarness(JAVA, undefined),
-      });
-      fireEvent.click(screen.getByText(`+ ${t.add}`));
-      fireEvent.change(screen.getByPlaceholderText(t.namePlaceholder), {
-        target: { value: 'A' },
-      });
-      fireEvent.click(screen.getByText(t.save));
-      const saved = onSave.mock.calls[0][0] as TestCaseDraft[];
-      expect(saved[0].harnessCode).toMatch(/renvoie true/);
-      expect(saved[0].harnessCode).not.toMatch(/exception/);
-    });
+    // Le gabarit inséré par « Ajouter » (defaultHarness, branché par QuizEditor) est testé dans
+    // QuizEditor.test.tsx, sur le vrai branchement.
   });
 });

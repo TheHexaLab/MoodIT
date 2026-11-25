@@ -378,6 +378,19 @@ describe('submitQuiz', () => {
     );
   });
 
+  it('409 JSON de cause « relance » (recorrection par l’enseignant) → refus temporaire, sans attente', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () =>
+        '{"cause":"relance","message":"Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard."}',
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect(error).not.toBeInstanceOf(SubmissionInProgressError);
+    expect((error as SubmissionRejectedError).reason).toBe('regrading');
+  });
+
   it.each([
     ['texte (tentative déjà soumise)', 'Vous avez déjà soumis ce quiz.'],
     ['JSON d’une autre cause', '{"cause":"autre"}'],

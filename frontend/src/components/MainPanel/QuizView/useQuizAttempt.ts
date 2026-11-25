@@ -45,11 +45,15 @@ type PendingSubmission = {
   knownAttemptIds?: number[];
 };
 
-/** Le verdict poussé est-il celui de la soumission attendue ? */
+/**
+ * Le verdict poussé est-il celui de la soumission attendue ? Par son id s'il est connu ; sinon,
+ * tout verdict d'une tentative absente de `knownAttemptIds`. Sans l'un ni l'autre (marqueur d'un
+ * ancien format), AUCUN : on ne sait pas distinguer la nouvelle tentative d'une ancienne.
+ */
 function outcomeMatches(pending: PendingSubmission, outcome: AttemptOutcome): boolean {
-  return pending.attemptId != null
-    ? outcome.attemptId === pending.attemptId
-    : !(pending.knownAttemptIds ?? []).includes(outcome.attemptId);
+  if (pending.attemptId != null) return outcome.attemptId === pending.attemptId;
+  if (!pending.knownAttemptIds) return false;
+  return !pending.knownAttemptIds.includes(outcome.attemptId);
 }
 
 const PENDING_KEY = (quizId: number) => `moodit:quiz-pending-submission:${quizId}`;
@@ -181,13 +185,19 @@ interface UseQuizAttemptParams {
   /** Message d'une soumission trop volumineuse (413 du gateway) — label, surchargeable. */
   submitTooLargeMessage?: string;
   /**
+   * Message d'un refus temporaire (409 de cause « relance » : l'enseignant relance la correction
+   * de la tentative précédente) — label, surchargeable.
+   */
+  submitRegradingMessage?: string;
+  /**
    * Message affiché si la vérification du code est indisponible (503) : la tentative n'a pas été
    * enregistrée, l'étudiant peut renvoyer (label, surchargeable).
    */
   codeVerificationUnavailableMessage?: string;
   /**
-   * Message affiché quand une soumission interrompue par un refresh n'a pas pu être confirmée
-   * côté serveur après réconciliation (label, surchargeable).
+   * Message affiché quand la correction d'une soumission n'a pas été confirmée au plafond
+   * d'attente (RECONCILE_CEILING_MS), ou si sa lecture échoue après un verdict : réponses
+   * restaurées, renvoi possible (label, surchargeable).
    */
   submissionNotConfirmedMessage?: string;
 }
@@ -226,8 +236,9 @@ export interface QuizAttemptApi {
   /** Efface l'erreur de soumission (fermeture du popup). */
   dismissSubmitError: () => void;
   /**
-   * Réconciliation en cours : une soumission avait été lancée puis l'onglet a été rechargé ;
-   * on sonde le serveur pour retrouver la tentative. Pilote le spinner plein quiz.
+   * Attente de la correction d'une soumission (après le 202, après un 409 « en cours », ou au
+   * remontage si une soumission était en vol) : verdict poussé ou sondage de l'historique, jusqu'à
+   * RECONCILE_CEILING_MS. Pilote le spinner plein quiz et son texte ; aucun nouvel envoi pendant.
    */
   reconciling: boolean;
 
@@ -289,6 +300,7 @@ export function useQuizAttempt({
   submitErrorMessage = 'La soumission a échoué. Réessayez.',
   submitRejectedMessage = 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
   submitTooLargeMessage = 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
+  submitRegradingMessage = 'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.',
   codeVerificationUnavailableMessage = "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmedMessage = "Ta tentative n'a pas pu être confirmée. Vérifie l'historique ou renvoie-la.",
 }: UseQuizAttemptParams): QuizAttemptApi {
@@ -317,6 +329,13 @@ export function useQuizAttempt({
   // Dernier verdict WS reçu pour CE quiz : consulté par la boucle d'attente (reconcilePending)
   // pour résoudre immédiatement une correction sans attendre le prochain sondage.
   const outcomeRef = useRef<AttemptOutcome | null>(null);
+  // Verdict déjà présent au MONTAGE (le Dashboard garde le dernier reçu, jamais vidé) : il précède
+  // tout envoi de cette vue. Un marqueur sans id de tentative ne doit pas le prendre pour le sien
+  // (ex. tentative #1 corrigée, « Refaire », envoi, changement de canal pendant le POST, retour).
+  const mountOutcomeRef = useRef(attemptOutcome ?? null);
+  // Attente d'une correction en cours (reconcilePending) : `submit` refuse un second envoi, qui
+  // lancerait une seconde boucle, écraserait le marqueur et pourrait consommer le verdict.
+  const waitingRef = useRef(false);
   useEffect(() => {
     if (attemptOutcome && attemptOutcome.quizId === initialQuiz.id) {
       outcomeRef.current = attemptOutcome;
@@ -352,92 +371,115 @@ export function useQuizAttempt({
    */
   const reconcilePending = useCallback(
     async (quizId: number, pending: PendingSubmission) => {
-      setReconciling(true);
-      const refresh = fetchAttemptsRef.current;
-      const started = Date.now();
-      const ceiling = started + RECONCILE_CEILING_MS;
-      const takeOutcome = () => {
-        const outcome = outcomeRef.current;
-        return outcome && outcomeMatches(pending, outcome) ? outcome : null;
-      };
-      // Charge le résultat corrigé d'une tentative et ouvre le résumé — ou, si elle attend
-      // l'enseignant (#116), le message « à revoir » : elle n'a ni note ni corrigé.
-      const openSummary = async (attemptId: number) => {
-        clearPending(quizId);
-        clearDraft(quizId);
-        const history = refresh ? await refresh(quizId) : [];
-        if (!mountedRef.current) return;
-        setAttempts(history);
-        if (isAwaitingReview(history.find((a) => a.id === attemptId))) {
-          setResult(null);
-          setCurrentAttemptId(attemptId);
-          setAwaitingReview(true);
-          setPhase('summary');
-          setReconciling(false);
-          return;
-        }
-        const lastResult = fetchAttemptResultRef.current
-          ? await fetchAttemptResultRef.current(quizId, attemptId)
-          : null;
-        if (!mountedRef.current) return;
-        if (lastResult) {
-          setResult(lastResult);
-          setCurrentAttemptId(attemptId);
-          setPhase('summary');
-        }
-        setReconciling(false);
-      };
+      waitingRef.current = true;
       try {
-        while (Date.now() < ceiling) {
-          // (1) Verdict WS ciblé reçu ? → résolution IMMÉDIATE (prioritaire sur le polling).
-          const outcome = takeOutcome();
-          if (outcome) {
-            outcomeRef.current = null;
-            if (outcome.ok || outcome.reason === REVIEW_REASON) {
-              // `review` : la tentative est GARDÉE (à revoir par l'enseignant), pas supprimée.
-              await openSummary(outcome.attemptId);
-            } else {
-              // Correction échouée (code inévaluable) : la tentative a été SUPPRIMÉE côté serveur,
-              // l'étudiant peut renvoyer. On reste en passation.
-              clearPending(quizId);
-              if (!mountedRef.current) return;
-              setReconciling(false);
-              setSubmitError(codeVerificationUnavailableMessage);
-            }
-            return;
-          }
-          // (2) Filet : sondage de l'historique (WS manqué / reconnexion), rapide puis lent.
-          const interval =
-            Date.now() - started < RECONCILE_FAST_MS ? RECONCILE_INTERVAL_MS : RECONCILE_SLOW_INTERVAL_MS;
-          for (let waited = 0; waited < interval && !takeOutcome(); waited += OUTCOME_CHECK_MS) {
-            await delay(OUTCOME_CHECK_MS);
-            if (!mountedRef.current) return;
-          }
-          if (takeOutcome()) continue;
-          let history: AttemptSummary[];
-          try {
-            history = refresh ? await refresh(quizId) : [];
-          } catch {
-            continue; // sondage en échec (réseau) : transitoire, la correction tourne toujours
-          }
+        await waitForGrading(quizId, pending);
+      } finally {
+        waitingRef.current = false;
+      }
+
+      async function waitForGrading(quizId: number, pending: PendingSubmission) {
+        setReconciling(true);
+        const refresh = fetchAttemptsRef.current;
+        const started = Date.now();
+        const ceiling = started + RECONCILE_CEILING_MS;
+        const takeOutcome = () => {
+          const outcome = outcomeRef.current;
+          if (!outcome || !outcomeMatches(pending, outcome)) return null;
+          // Sans id de tentative, le verdict présent au montage précède cet envoi : pas le sien.
+          if (pending.attemptId == null && outcome === mountOutcomeRef.current) return null;
+          return outcome;
+        };
+        // Charge le résultat corrigé d'une tentative et ouvre le résumé — ou, si elle attend
+        // l'enseignant (#116), le message « à revoir » : elle n'a ni note ni corrigé.
+        const openSummary = async (attemptId: number) => {
+          clearPending(quizId);
+          clearDraft(quizId);
+          const history = refresh ? await refresh(quizId) : [];
           if (!mountedRef.current) return;
-          if (history.length > pending.attemptsBefore) {
-            await openSummary(history[history.length - 1].id);
+          setAttempts(history);
+          if (isAwaitingReview(history.find((a) => a.id === attemptId))) {
+            setResult(null);
+            setCurrentAttemptId(attemptId);
+            setAwaitingReview(true);
+            setPhase('summary');
+            setReconciling(false);
             return;
           }
+          const lastResult = fetchAttemptResultRef.current
+            ? await fetchAttemptResultRef.current(quizId, attemptId)
+            : null;
+          if (!mountedRef.current) return;
+          if (lastResult) {
+            setResult(lastResult);
+            setCurrentAttemptId(attemptId);
+            setPhase('summary');
+          }
+          setReconciling(false);
+        };
+        // Verdict poussé de la soumission attendue → résumé, ou échec (tentative supprimée).
+        const settle = async (outcome: AttemptOutcome) => {
+          outcomeRef.current = null;
+          if (outcome.ok || outcome.reason === REVIEW_REASON) {
+            // `review` : la tentative est GARDÉE (à revoir par l'enseignant), pas supprimée.
+            await openSummary(outcome.attemptId);
+          } else {
+            // Correction échouée (code inévaluable) : la tentative a été SUPPRIMÉE côté serveur,
+            // l'étudiant peut renvoyer. On reste en passation.
+            clearPending(quizId);
+            if (!mountedRef.current) return;
+            setReconciling(false);
+            setSubmitError(codeVerificationUnavailableMessage);
+          }
+        };
+        try {
+          while (Date.now() < ceiling) {
+            // (1) Verdict WS ciblé reçu ? → résolution IMMÉDIATE (prioritaire sur le polling).
+            const outcome = takeOutcome();
+            if (outcome) {
+              await settle(outcome);
+              return;
+            }
+            // (2) Filet : sondage de l'historique (WS manqué / reconnexion), rapide puis lent.
+            const interval =
+              Date.now() - started < RECONCILE_FAST_MS ? RECONCILE_INTERVAL_MS : RECONCILE_SLOW_INTERVAL_MS;
+            for (let waited = 0; waited < interval && !takeOutcome(); waited += OUTCOME_CHECK_MS) {
+              await delay(OUTCOME_CHECK_MS);
+              if (!mountedRef.current) return;
+            }
+            if (takeOutcome()) continue;
+            let history: AttemptSummary[];
+            try {
+              history = refresh ? await refresh(quizId) : [];
+            } catch {
+              continue; // sondage en échec (réseau) : transitoire, la correction tourne toujours
+            }
+            if (!mountedRef.current) return;
+            if (history.length > pending.attemptsBefore) {
+              await openSummary(history[history.length - 1].id);
+              return;
+            }
+          }
+          // Un verdict arrivé pendant la DERNIÈRE lecture de l'historique : l'effet des verdicts
+          // tardifs a déjà couru (lateRef encore vide) — on le traite ici, sinon il était perdu.
+          const lastOutcome = takeOutcome();
+          if (lastOutcome) {
+            await settle(lastOutcome);
+            return;
+          }
+          // Plafond atteint sans verdict : l'attente bloquante cesse, réponses restaurées et renvoi
+          // possible. Le verdict, s'il arrive encore, sera consommé (lateRef).
+          clearPending(quizId);
+          if (!mountedRef.current) return;
+          lateRef.current = pending;
+          setReconciling(false);
+          setSubmitError(submissionNotConfirmedMessage);
+        } catch {
+          clearPending(quizId);
+          if (!mountedRef.current) return;
+          setReconciling(false);
+          setSubmitError(submissionNotConfirmedMessage);
         }
-        // Plafond atteint sans verdict : l'attente bloquante cesse, réponses restaurées et renvoi
-        // possible. Le verdict, s'il arrive encore, sera consommé (lateRef).
-        clearPending(quizId);
-        if (!mountedRef.current) return;
-        lateRef.current = pending;
-        setReconciling(false);
-        setSubmitError(submissionNotConfirmedMessage);
-      } catch {
-        clearPending(quizId);
-        if (!mountedRef.current) return;
-        setReconciling(false);
-        setSubmitError(submissionNotConfirmedMessage);
       }
     },
     [submissionNotConfirmedMessage, codeVerificationUnavailableMessage]
@@ -712,7 +754,13 @@ export function useQuizAttempt({
     [questionCount]
   );
 
+  // Envoi en cours (POST, puis attente de la correction) : un second appel est ignoré.
+  const sendingRef = useRef(false);
   const submit = useCallback(async () => {
+    // Garde : « Soumettre » est désactivé pendant l'envoi et l'attente, mais un double appel
+    // (clavier, « Réessayer ») lancerait une seconde boucle et écraserait le marqueur « en vol ».
+    if (sendingRef.current || waitingRef.current) return;
+    sendingRef.current = true;
     setSubmitError(null);
     setSubmitRejected(false);
     setSubmitting(true);
@@ -721,9 +769,12 @@ export function useQuizAttempt({
     lateRef.current = null;
     const usingServer = Boolean(onSubmitQuiz);
     const attemptsBefore = attempts.length;
+    const knownAttemptIds = attempts.map((a) => a.id);
     // Marqueur « en vol » AVANT le POST (clé sur `initialQuiz.id`, cf. effet de persistance) : si
-    // l'onglet est rechargé pendant l'envoi OU la correction, le remontage réconciliera.
-    if (usingServer) writePending(initialQuiz.id, { answers, attemptsBefore });
+    // l'onglet est rechargé pendant l'envoi OU la correction, le remontage réconciliera. Les
+    // tentatives déjà connues y figurent : sans id (vue démontée pendant le POST), seul le verdict
+    // d'une AUTRE tentative pourra conclure (cf. outcomeMatches).
+    if (usingServer) writePending(initialQuiz.id, { answers, attemptsBefore, knownAttemptIds });
     try {
       if (onSubmitQuiz) {
         // Mode serveur ASYNCHRONE : le POST enregistre la tentative (202 + id) et rend la main ;
@@ -746,13 +797,14 @@ export function useQuizAttempt({
         setPhase('summary');
       }
     } catch (e) {
-      // 409 : une tentative est déjà en correction (renvoi après le plafond, autre onglet) — ou la
-      // tentative unique déjà consommée ailleurs. Pas un échec : on rejoint l'attente, qui ouvre
-      // le résumé dès que la tentative apparaît (ou que son verdict est poussé). Seuls comptent
-      // les verdicts reçus à partir de maintenant, d'une tentative pas encore connue.
+      // 409 de cause « en_cours » : une tentative est déjà en correction (renvoi après le plafond,
+      // autre onglet). Pas un échec : on rejoint l'attente, qui ouvre le résumé dès que la
+      // tentative apparaît (ou que son verdict est poussé). Seuls comptent les verdicts reçus à
+      // partir de maintenant, d'une tentative pas encore connue. (Tentative unique déjà
+      // consommée, relance par l'enseignant : autres 409, traités plus bas comme des refus.)
       if (usingServer && e instanceof SubmissionInProgressError) {
         if (!mountedRef.current) return;
-        const pending = { answers, attemptsBefore, knownAttemptIds: attempts.map((a) => a.id) };
+        const pending = { answers, attemptsBefore, knownAttemptIds };
         writePending(initialQuiz.id, pending);
         outcomeRef.current = null;
         setSubmitting(false);
@@ -762,21 +814,27 @@ export function useQuizAttempt({
       // Échec du POST lui-même (réseau, 5xx) : rien « en vol ».
       if (usingServer) clearPending(initialQuiz.id);
       if (!mountedRef.current) return;
-      // Refus (400, 413) : le message du serveur dit quoi corriger, « réessayez » non.
+      // Refus (400, 413, 409 « relance ») : le message dit quoi faire, « réessayez » non. Le
+      // brouillon de passation reste en place (rien n'est enregistré).
       if (e instanceof SubmissionRejectedError) {
         setSubmitRejected(true);
         setSubmitError(
-          e.reason === 'tooLarge' ? submitTooLargeMessage : e.message || submitRejectedMessage
+          e.reason === 'tooLarge'
+            ? submitTooLargeMessage
+            : e.reason === 'regrading'
+              ? submitRegradingMessage
+              : e.message || submitRejectedMessage
         );
       } else {
         setSubmitError(submitErrorMessage);
       }
     } finally {
+      sendingRef.current = false;
       if (mountedRef.current) setSubmitting(false);
     }
   }, [
     quiz, initialQuiz.id, answers, attempts, onSubmitQuiz, submitErrorMessage,
-    submitRejectedMessage, submitTooLargeMessage, reconcilePending,
+    submitRejectedMessage, submitTooLargeMessage, submitRegradingMessage, reconcilePending,
   ]);
 
   /** Relance une nouvelle tentative (vide la saisie, repasse en passation). */

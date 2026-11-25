@@ -54,7 +54,9 @@ import org.springframework.test.context.transaction.TestTransaction;
  *   5. compteur « à revoir » de l'éditeur → la requête par cours, statut et quiz, interrogée sur la
  *      vraie base (sans commit, dans la transaction du test).
  *   6. deux soumissions de suite → la 2e est refusée « correction en cours »
- *      ({@code GradingInProgressException}), avec ou sans reprise, et non « déjà soumis ».
+ *      ({@code GradingInProgressException}), avec ou sans reprise, et non « déjà soumis » ;
+ *      pendant une relance de l'enseignant, elle est refusée « relance »
+ *      ({@code RegradeInProgressException}).
  * Les scénarios 1, 3 et 4 committent leurs données (chaque correction tourne dans ses propres
  * transactions, comme en prod) ; {@link #purgeCommitted} les efface.
  * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
@@ -363,6 +365,31 @@ class QuizServiceSubmitIT {
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
         .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class);
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
+  }
+
+  @Test
+  @DisplayName("Soumission pendant une RELANCE de l'enseignant : refusée « relance », pas « en cours »")
+  void submissionDuringTeacherRegrade_isRegradeInProgress() {
+    // Tentative « à revoir », relancée par l'enseignant : elle repasse pending avec le marqueur
+    // de relance, que la requête dérivée du dépôt lit vraiment ici.
+    Attempt review = new Attempt();
+    review.setQuiz(em.find(Quiz.class, quizId));
+    review.setUser(em.getEntityManager()
+        .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
+        .setParameter("email", USER_EMAIL).getSingleResult());
+    review.setAttemptNo(1);
+    review.setStatus(QuizService.REVIEW);
+    review.setSubmittedAt(LocalDateTime.now());
+    em.persist(review);
+    em.flush();
+    quizService.regradeAttempt(quizId, review.getId());
+    em.flush();
+    em.clear();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.RegradeInProgressException.class);
     assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
   }
 

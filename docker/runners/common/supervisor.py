@@ -600,7 +600,20 @@ def canary_verdict(cases, outcomes):
 
 # En dessous de ce seuil, /box ne peut plus accueillir une compilation : on le traite comme une
 # saturation plutôt que de laisser échouer les cas suivants avec un diagnostic trompeur.
-BOX_MIN_FREE_BYTES = 48 * 1024 * 1024
+#
+# Ce qui reste du code soumis dans /box pendant la compilation du NOTEUR (tmpfs compté dans la
+# mémoire du conteneur) : entre deux cas, son dossier est supprimé et /tmp et /dev/shm sont
+# vidés (after_case_cleanup) ; ne survivent que l'artefact gardé (≤ STUDENT_ARTIFACT_CAP) et,
+# en Go seulement, le cache de compilation de l'étudiant, qu'il peut remplir À L'EXÉCUTION
+# jusqu'à ce seuil. Mesuré dans les images (conteneur à 1 024 Mo et tmpfs de DockerSandbox,
+# /box 614 Mo), /box rempli à 566 Mo puis le pire noteur sous les bornes : Go à cache froid
+# 32 s et 238 Mo, aucun OOM (oom_kill 0) — mais il a écrit 48 Mo de cache dans /box et n'en
+# laissait plus que 1 Mo, au bord du « no space left on device » (« Le harnais ne compile
+# pas », trompeur). D'où 96 Mo et non 48 : la compilation du noteur garde sa place, et un code
+# qui remplit /box au-delà fait sauter les cas suivants avec la cause « espace », imputable.
+# (Rust, sans cache étudiant persistant, n'atteint pas ce remplissage ; même à 566 Mo, son pire
+# noteur passe : 383 Mo, aucun OOM.)
+BOX_MIN_FREE_BYTES = 96 * 1024 * 1024
 
 
 def box_exhausted():
@@ -1645,7 +1658,9 @@ def harness_build_failure(expired, code, against, diagnostic):
 
     `diagnostic` : le stderr ENTIER du compilateur du noteur (tête et queue, cf. read_capped) ;
     le message n'en garde que 1 500 caractères. Une compilation expirée, ou TUÉE (tool_killed :
-    par un signal, ou son travailleur sous gcc/g++/go build) n'est pas un diagnostic du
+    par un signal, ou un processus qu'elle lance — cc1/cc1plus/as sous gcc/g++, compile sous go
+    build, l'éditeur de liens sous collect2, y compris derrière le `= note:` de rustc ; liste
+    exacte : TOOL_KILLED) n'est pas un diagnostic du
     compilateur : elle reçoit HARNESS_BUILD_ABORTED, jamais HARNESS_BUILD_ERROR. Le stderr du
     noteur ne vient pas du code soumis : la signature ne peut pas y être forgée."""
     if expired or tool_killed(code, diagnostic):
@@ -1668,7 +1683,8 @@ def platform_aborted(detail):
     """Le cas a-t-il été INTERROMPU par la plateforme, sans verdict ? FONCTION PURE (testée).
 
     Compilation du NOTEUR expirée ou tuée (HARNESS_BUILD_ABORTED ; tuée au sens de tool_killed :
-    par un signal, ou cc1/compile tué sous gcc/go build qui sortent en 1), outil de la notation
+    par un signal, ou un processus qu'elle lance tué sous un pilote qui sort en 1 — cc1 sous
+    gcc, compile sous go build, ld sous collect2 et rustc ; cf. TOOL_KILLED), outil de la notation
     expiré ou tué (TOOL_ABORTED) : le message vient de NOUS, en tête (un diagnostic du compilateur ne vient
     qu'après « Échec de compilation : »). Ce n'est pas une note : sur le chemin interne, le job
     est « incomplet » (cf. grading_incomplete) et la tentative est à reprendre — un 0 définitif

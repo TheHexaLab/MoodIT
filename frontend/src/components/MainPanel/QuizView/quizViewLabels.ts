@@ -25,11 +25,25 @@ export interface QuizViewLabels {
   submitRejected: string;
   /** Soumission refusée car trop volumineuse (413 du gateway, au-delà de 1 Mo). */
   submitTooLarge: string;
+  /**
+   * Soumission refusée TEMPORAIREMENT (409 de cause « relance ») : l'enseignant relance la
+   * correction de la tentative précédente. Le brouillon est gardé, à renvoyer plus tard.
+   */
+  submitRegrading: string;
   /** Message d'erreur quand la vérification du code est indisponible (503) : la tentative
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
-  /** Message quand une soumission interrompue par un refresh n'a pas pu être confirmée. */
+  /**
+   * Message quand la correction d'une soumission n'a pas été confirmée au plafond d'attente
+   * (30 min, au-delà du pire cas serveur) ou après un rechargement : réponses restaurées, renvoi
+   * possible (un renvoi refusé parce que la correction tourne encore revient à l'attente).
+   */
   submissionNotConfirmed: string;
+  /**
+   * Texte de la région d'état pendant l'attente de la correction (spinner plein quiz) : elle peut
+   * durer plusieurs minutes, et l'étudiant peut quitter la page.
+   */
+  gradingInProgress: string;
   /** Statut d'en-tête d'une tentative à revoir par l'enseignant (#116). */
   awaitingReviewStatus: string;
   /** Titre du message affiché à la place du résumé : tentative à revoir (#116). */
@@ -77,10 +91,14 @@ export const defaultQuizViewLabels: QuizViewLabels = {
   submitError: 'La soumission a échoué. Réessayez.',
   submitRejected: 'La soumission a été refusée : vérifiez vos réponses avant de la renvoyer.',
   submitTooLarge: 'Réponses trop volumineuses : réduisez le code soumis, puis renvoyez.',
+  submitRegrading:
+    'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.',
   codeVerificationUnavailable:
     "La vérification du code est momentanément indisponible. Votre tentative n'a pas été enregistrée : réessayez de l'envoyer.",
   submissionNotConfirmed:
     "Votre tentative n'a pas pu être confirmée. Vérifiez l'historique ou renvoyez-la.",
+  gradingInProgress:
+    'Correction en cours… cela peut prendre plusieurs minutes ; vous pouvez quitter cette page et revenir.',
   awaitingReviewStatus: "En attente de l'enseignant",
   awaitingReviewTitle: 'Tentative transmise à votre enseignant',
   awaitingReview:

@@ -455,12 +455,16 @@ export class ExecutionBusyError extends Error {
  */
 export class SubmissionRejectedError extends Error {
   /**
-   * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo). Le texte affiché vient
-   * alors des libellés de la vue (`submitTooLarge`), pas de ce message.
+   * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo).
+   * `regrading` : 409 de cause « relance » — l'enseignant relance la correction de la tentative
+   * précédente ; refus TEMPORAIRE, à renvoyer plus tard (aucune attente : l'id relancé est déjà
+   * connu, son verdict ne conclurait pas cet envoi).
+   * Le texte affiché vient alors des libellés de la vue (`submitTooLarge`, `submitRegrading`),
+   * pas de ce message.
    */
-  readonly reason?: 'tooLarge';
+  readonly reason?: 'tooLarge' | 'regrading';
 
-  constructor(message: string, reason?: 'tooLarge') {
+  constructor(message: string, reason?: 'tooLarge' | 'regrading') {
     super(message);
     this.name = 'SubmissionRejectedError';
     this.reason = reason;
@@ -468,10 +472,11 @@ export class SubmissionRejectedError extends Error {
 }
 
 /**
- * Soumission refusée en 409 : une tentative de l'étudiant est déjà en correction sur ce quiz
- * (index `uq_attempt_pending` de core), ou sa tentative unique est déjà consommée (ailleurs, ex.
- * un autre onglet). Core ne distingue pas les deux : la vue rejoint l'attente de la correction,
- * qui ouvre le résumé dès que la tentative apparaît dans l'historique.
+ * Soumission refusée en 409 de cause « en_cours » : une tentative de l'étudiant est déjà en
+ * correction sur ce quiz (index `uq_attempt_pending` de core ; ex. renvoi après le plafond
+ * d'attente, autre onglet). La vue rejoint l'attente de cette correction, qui ouvre le résumé dès
+ * que la tentative apparaît dans l'historique ou que son verdict est poussé. Les autres 409
+ * (tentative unique déjà consommée, relance par l'enseignant) ne passent pas par ici.
  */
 export class SubmissionInProgressError extends Error {
   constructor() {

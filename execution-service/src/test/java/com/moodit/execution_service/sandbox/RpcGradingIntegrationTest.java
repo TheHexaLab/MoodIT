@@ -2910,94 +2910,41 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void teacher_path_starting_from_defaults() {
-        // Code de départ de la base (V2), complété par l'étudiant, noté par le GABARIT de harnais
-        // de la base (V5) : c'est ce que vit un prof qui ne touche à rien dans l'éditeur. Rien ne
-        // le vérifiait, et le gabarit C# y appelait une méthode qui n'existe pas.
-        record CaseSpec(String lang, String harnessCode, String code) { }
-        List<CaseSpec> specs = List.of(
-                new CaseSpec("Java", "return Solution.solution() == 42;", """
-                        // Sandbox : bibliothèque standard Java (JDK, aucun réseau).
-                        public class Solution {
-                            public static int solution() {
-                                return 42;
-                            }
+    void teacher_path_starting_from_defaults() throws java.io.IOException {
+        // Code de départ de la base, complété par l'étudiant, noté par le GABARIT de harnais de
+        // la base (ATTENDU remplacé par 42) : c'est ce que vit un prof qui ne touche à rien dans
+        // l'éditeur. Rien ne le vérifiait, et le gabarit C# y appelait une méthode qui n'existe
+        // pas. Les deux textes sont LUS dans db/migration (valeur effective : la dernière
+        // migration qui les écrit, comme HarnessProjectsTest), jamais recopiés ici : une copie
+        // resterait verte sur un gabarit périmé.
+        java.util.List<String> migrations = HarnessProjectsTest.migrationsByVersion();
+        // La ligne « à compléter » suivie du retour par défaut (return 0; / return 0 / 0) :
+        // l'étudiant la remplace par la bonne réponse.
+        java.util.regex.Pattern todo = java.util.regex.Pattern.compile(
+                "//\\s*à compléter\\s*\\R(\\s*)(return )?0(;?)");
+        for (String lang : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            String template = HarnessProjectsTest.effectiveValue(migrations,
+                    "('" + lang + "', $hc$", "$hc$");
+            String startCode = HarnessProjectsTest.effectiveValue(migrations,
+                    "('" + lang + "',", "$sc$");
+            assertThat(template).as("gabarit de " + lang).contains("ATTENDU");
+            java.util.regex.Matcher m = todo.matcher(startCode);
+            assertThat(m.find()).as("« à compléter » du code de départ de " + lang).isTrue();
+            String harness = template.replace("ATTENDU", "42");
+            String code = startCode.substring(0, m.start()) + m.group(1)
+                    + (m.group(2) == null ? "" : m.group(2)) + "42" + m.group(3)
+                    + startCode.substring(m.end());
+            assertThat(code).as("code complété en " + lang).contains("42");
 
-                            public static void main(String[] args) {
-                                System.out.println(solution());
-                            }
-                        }
-                        """),
-                new CaseSpec("C#", "return Solution.solution() == 42;", """
-                        // Sandbox : bibliothèque standard .NET/Mono (aucun réseau).
-                        using System;
-
-                        class Solution {
-                            public static int solution() {
-                                return 42;
-                            }
-
-                            public static void Main() {
-                                Console.WriteLine(solution());
-                            }
-                        }
-                        """),
-                new CaseSpec("Go", "return solution() == 42", """
-                        // Sandbox : bibliothèque standard Go (aucun réseau).
-                        package main
-
-                        import "fmt"
-
-                        func solution() int {
-                        \treturn 42
-                        }
-
-                        func main() { fmt.Println(solution()) }
-                        """),
-                new CaseSpec("Rust", "solution() == 42", """
-                        // Sandbox : bibliothèque standard Rust (aucun réseau, pas de crate externe).
-                        fn solution() -> i32 {
-                            42
-                        }
-
-                        fn main() { println!("{}", solution()); }
-                        """),
-                new CaseSpec("C", "return solution() == 42;", """
-                        // Sandbox : bibliothèque standard C (libc, aucun réseau).
-                        #include <stdio.h>
-
-                        int solution(void) {
-                            return 42;
-                        }
-
-                        int main(void) {
-                            printf("%d\\n", solution());
-                            return 0;
-                        }
-                        """),
-                new CaseSpec("C++", "return solution() == 42;", """
-                        // Sandbox : bibliothèque standard C++ (STL, aucun réseau).
-                        #include <iostream>
-
-                        int solution() {
-                            return 42;
-                        }
-
-                        int main() {
-                            std::cout << solution() << std::endl;
-                            return 0;
-                        }
-                        """));
-        for (CaseSpec c : specs) {
-            TestResult good = note(c.lang(), c.harnessCode(), c.code());
+            TestResult good = note(lang, harness, code);
             assertThat(good.passed())
-                    .as("valeurs par défaut en " + c.lang() + " : "
+                    .as("valeurs par défaut en " + lang + " : "
                             + (good.detail() == null ? "" : good.detail()))
                     .isTrue();
             // Et une mauvaise réponse échoue : le test mesure bien la notation, pas un « tout
             // passe ».
-            assertThat(note(c.lang(), c.harnessCode(), c.code().replace("42", "41")).passed())
-                    .as("mauvaise réponse en " + c.lang())
+            assertThat(note(lang, harness, code.replace("42", "41")).passed())
+                    .as("mauvaise réponse en " + lang)
                     .isFalse();
         }
     }

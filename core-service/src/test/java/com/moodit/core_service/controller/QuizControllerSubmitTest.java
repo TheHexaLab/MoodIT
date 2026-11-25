@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.GradingInProgressException;
+import com.moodit.core_service.exception.RegradeInProgressException;
 import com.moodit.core_service.service.QuizService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,23 @@ class QuizControllerSubmitTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.cause").value("en_cours"))
                 .andExpect(jsonPath("$.message").value("Une correction de ce quiz est déjà en cours."));
+    }
+
+    @Test
+    @DisplayName("Relance de l'enseignant en cours → 409 en JSON {cause: relance, message}")
+    void submit_whenRegradeInProgress_returns409WithCause() throws Exception {
+        when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
+                .thenThrow(new RegradeInProgressException());
+
+        mockMvc.perform(post("/api/quizzes/1/submissions")
+                        .header("X-User-Email", "eva@test.ca")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BODY))
+                .andExpect(status().isConflict()) // 409
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.cause").value("relance"))
+                .andExpect(jsonPath("$.message").value("Votre tentative précédente est en cours de"
+                        + " recorrection par votre enseignant. Réessayez plus tard."));
     }
 
     @Test

@@ -188,7 +188,7 @@ class HarnessProjectsTest {
     }
 
     /** Contenu des migrations {@code db/migration/V*.sql}, par numéro de version croissant. */
-    private static java.util.List<String> migrationsByVersion() throws java.io.IOException {
+    static java.util.List<String> migrationsByVersion() throws java.io.IOException {
         java.util.TreeMap<Integer, String> byVersion = new java.util.TreeMap<>();
         try (var fileList = java.nio.file.Files.list(
                 java.nio.file.Path.of("..", "db", "migration"))) {
@@ -215,7 +215,7 @@ class HarnessProjectsTest {
      * fichier où le langage cherché est absent : c'est ce que faisait la première version de ce
      * test, et elle échouait sur Java.
      */
-    private static String effectiveValue(java.util.List<String> migrations, String begin,
+    static String effectiveValue(java.util.List<String> migrations, String begin,
             String delimiter) {
         String value = "";
         for (String migration : migrations) {

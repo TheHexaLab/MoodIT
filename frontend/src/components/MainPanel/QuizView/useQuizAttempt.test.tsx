@@ -389,49 +389,71 @@ describe('réconciliation via polling de secours', () => {
     vi.useRealTimers();
   });
 
-  it('plafond (30 min) sans verdict → message « non confirmée », puis verdict tardif consommé', async () => {
-    vi.useFakeTimers();
-    let history: AttemptSummary[] = [];
-    const onFetchQuiz = vi.fn(async () => makeQuiz());
-    let outcome: AttemptOutcome | null = null;
-    const { result, rerender } = renderHook(() =>
-      useQuizAttempt({
-        initialQuiz, onFetchQuiz, onFetchAttempts: vi.fn(async () => history),
-        onFetchAttemptResult: vi.fn(async () => makeResult(9)),
-        onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
-        attemptOutcome: outcome,
-        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
-      })
-    );
-    await vi.waitFor(() => expect(result.current.loading).toBe(false));
-    act(() => { result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
-    act(() => { result.current.submit(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  // Quiz AVEC reprise : `reload` n'y jette pas le brouillon de lui-même (seule une tentative
+  // unique consommée le fait) ; c'est donc settleLateOutcome qui doit le jeter avant de recharger.
+  it.each([
+    ['corrigée (ok)', { ok: true }, summary(9)],
+    ['gardée à revoir (review)', { ok: false, reason: 'review' }, { ...summary(9), earned: null, status: 'review' }],
+    ['en échec (supprimée)', { ok: false }, null],
+  ] as const)(
+    'plafond (30 min) sans verdict → « non confirmée », puis verdict tardif %s consommé',
+    async (_case, verdict, landed) => {
+      vi.useFakeTimers();
+      let history: AttemptSummary[] = [];
+      let outcome: AttemptOutcome | null = null;
+      const { result, rerender } = renderHook(() =>
+        useQuizAttempt({
+          initialQuiz,
+          onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+          onFetchAttempts: vi.fn(async () => history),
+          onFetchAttemptResult: vi.fn(async () => makeResult(9)),
+          onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+          attemptOutcome: outcome,
+          submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+          codeVerificationUnavailableMessage: 'CODE_KO',
+        })
+      );
+      await vi.waitFor(() => expect(result.current.loading).toBe(false));
+      act(() => { result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
+      act(() => { result.current.submit(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(29 * 60_000); });
-    expect(result.current.submitError).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60_000); });
-    await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
-    expect(result.current.phase).toBe('taking');
-    expect(result.current.reconciling).toBe(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(29 * 60_000); });
+      expect(result.current.submitError).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60_000); });
+      await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+      expect(result.current.phase).toBe('taking');
+      expect(result.current.reconciling).toBe(false);
+      // Le brouillon de passation est toujours là (réponses restaurées pour un renvoi).
+      expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).not.toBeNull();
 
-    // La correction finit enfin : son verdict poussé ouvre le résumé (le brouillon est jeté).
-    history = [summary(9)];
-    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
-    rerender();
-    await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
-    expect(result.current.result?.attemptId).toBe(9);
-    expect(result.current.submitError).toBeNull();
-    expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).toBeNull();
-    vi.useRealTimers();
-  });
+      // La correction finit enfin : son verdict poussé est consommé.
+      if (landed) history = [landed];
+      outcome = { quizId: QUIZ_ID, attemptId: 9, ...verdict };
+      rerender();
+      if (!landed) {
+        // Tentative supprimée : message de vérification impossible, on reste en passation.
+        await vi.waitFor(() => expect(result.current.submitError).toBe('CODE_KO'));
+        expect(result.current.phase).toBe('taking');
+      } else {
+        // Brouillon jeté, tentative ouverte : résumé, ou message « à revoir ».
+        await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
+        expect(result.current.currentAttemptId).toBe(9);
+        expect(result.current.awaitingReview).toBe(verdict.ok ? false : true);
+        if (verdict.ok) expect(result.current.result?.attemptId).toBe(9);
+        expect(result.current.submitError).toBeNull();
+        expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).toBeNull();
+      }
+      vi.useRealTimers();
+    }
+  );
 
   it('renvoi refusé en 409 (correction déjà en cours) → attente, puis verdict de cette correction', async () => {
+    // Temps simulé, et un historique qui ne montre JAMAIS la tentative en correction : seul son
+    // verdict poussé peut conclure (aucun sondage n'a lieu avant).
+    vi.useFakeTimers();
     let outcome: AttemptOutcome | null = null;
-    const onFetchAttempts = vi
-      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
-      .mockResolvedValueOnce([summary(5)])
-      .mockResolvedValue([summary(5), summary(6, 2)]);
+    const onFetchAttempts = vi.fn(async () => [summary(5)]);
     const { result, rerender } = renderHook(() =>
       useQuizAttempt({
         initialQuiz,
@@ -445,10 +467,11 @@ describe('réconciliation via polling de secours', () => {
         submitErrorMessage: 'POST_KO',
       })
     );
-    await waitFor(() => expect(result.current.result?.attemptId).toBe(5));
+    await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(5));
     act(() => result.current.retry());
+    const callsBefore = onFetchAttempts.mock.calls.length;
 
-    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    await act(async () => { result.current.submit(); await vi.advanceTimersByTimeAsync(0); });
     // Pas d'échec affiché : la vue attend la correction déjà en cours.
     expect(result.current.submitError).toBeNull();
     expect(result.current.reconciling).toBe(true);
@@ -456,16 +479,186 @@ describe('réconciliation via polling de secours', () => {
     // Un verdict d'une tentative DÉJÀ connue (#5) n'est pas celui attendu…
     outcome = { quizId: QUIZ_ID, attemptId: 5, ok: true };
     rerender();
-    // Plusieurs pas de l'attente (250 ms) : le verdict a eu le temps d'être examiné.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
     expect(result.current.phase).toBe('taking');
     expect(result.current.reconciling).toBe(true);
     // … celui de la tentative en correction (#6, id inconnu jusque-là) ouvre son résumé.
     outcome = { quizId: QUIZ_ID, attemptId: 6, ok: true };
     rerender();
-    await waitFor(() => expect(result.current.result?.attemptId).toBe(6));
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(6));
     expect(result.current.phase).toBe('summary');
     expect(result.current.submitError).toBeNull();
+    // Aucun sondage (premier prévu à 1,5 s) : seule la lecture du résumé a relu l'historique.
+    expect(onFetchAttempts.mock.calls.length).toBe(callsBefore + 1);
+    vi.useRealTimers();
+  });
+
+  it('409 « relance » (recorrection par l’enseignant) → message dédié, refus, pas d’attente, brouillon gardé', async () => {
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz: vi.fn(async () => {
+          throw new SubmissionRejectedError('', 'regrading');
+        }),
+        submitRegradingMessage: 'RELANCE',
+        submitErrorMessage: 'POST_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
+    await act(async () => { await result.current.submit(); });
+    expect(result.current.submitError).toBe('RELANCE');
+    expect(result.current.submitRejected).toBe(true);
+    expect(result.current.reconciling).toBe(false);
+    expect(result.current.phase).toBe('taking');
+    expect(result.current.answers[101]).toEqual({ kind: 'choice', answerIds: [1] });
+    expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).not.toBeNull();
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+  });
+
+  it('marqueur « en vol » écrit AVANT le POST : il porte les tentatives déjà connues', async () => {
+    // Vue démontée pendant le POST (changement de canal) : le marqueur reste sans id de
+    // tentative ; sans la liste des tentatives connues, n'importe quel verdict le concluait.
+    const { result, unmount } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [summary(10)]),
+        onFetchAttemptResult: vi.fn(async () => makeResult(10)),
+        onSubmitQuiz: vi.fn(() => new Promise<{ attemptId: number }>(() => {})),
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(10));
+    act(() => result.current.retry());
+    act(() => { void result.current.submit(); });
+    unmount();
+    const marker = JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!);
+    expect(marker.attemptId).toBeUndefined();
+    expect(marker.knownAttemptIds).toEqual([10]);
+  });
+
+  it('marqueur sans id ni tentatives connues (ancien format) : aucun verdict poussé ne le conclut', async () => {
+    // On ne sait pas distinguer la nouvelle tentative d'une ancienne : seul l'historique conclut.
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 1 })
+    );
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [summary(10)];
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    // Un verdict reçu APRÈS le montage (ex. relance d'une ancienne tentative) : pas le sien.
+    outcome = { quizId: QUIZ_ID, attemptId: 10, ok: true };
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(result.current.phase).toBe('taking');
+    expect(result.current.reconciling).toBe(true);
+    history = [summary(10), summary(11, 2)];
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(11), { timeout: 3000 });
+  });
+
+  it.each([
+    // Ancien format (ni id ni tentatives connues).
+    ['marqueur sans id ni tentatives connues', { attemptsBefore: 1 }],
+    // Tentatives connues, mais le verdict présent au montage est celui d'AVANT l'envoi.
+    ['verdict déjà présent au montage', { attemptsBefore: 1, knownAttemptIds: [] }],
+  ])('remontage pendant une correction (%s) : le verdict d’avant ne conclut pas', async (_case, marker) => {
+    // Tentative #1 (id 10) corrigée ; « Refaire », envoi, changement de canal pendant le POST,
+    // retour : le Dashboard garde le dernier verdict reçu, celui de #1.
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, ...marker })
+    );
+    let outcome: AttemptOutcome | null = { quizId: QUIZ_ID, attemptId: 10, ok: true };
+    let history: AttemptSummary[] = [summary(10)];
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(result.current.phase).toBe('taking');
+    expect(result.current.reconciling).toBe(true);
+
+    // La nouvelle tentative (#2, id 11) apparaît : le sondage l'ouvre.
+    history = [summary(10), summary(11, 2)];
+    outcome = null;
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(11), { timeout: 3000 });
+  });
+
+  it('second envoi pendant l’envoi ou l’attente de la correction : ignoré', async () => {
+    let resolvePost!: (v: { attemptId: number }) => void;
+    const onSubmitQuiz = vi.fn(() => new Promise<{ attemptId: number }>((r) => { resolvePost = r; }));
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz()),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz,
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { void result.current.submit(); });
+    act(() => { void result.current.submit(); }); // pendant le POST
+    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+    await act(async () => { resolvePost({ attemptId: 9 }); });
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    act(() => { void result.current.submit(); }); // pendant l'attente de la correction
+    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!).attemptId).toBe(9);
+  });
+
+  it('verdict arrivé pendant la DERNIÈRE lecture avant le plafond : consommé, pas « non confirmée »', async () => {
+    vi.useFakeTimers();
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [];
+    let releaseLastPoll!: (h: AttemptSummary[]) => void;
+    const onFetchAttempts = vi.fn(async () => history);
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz()),
+        onFetchAttempts,
+        onFetchAttemptResult: vi.fn(async () => makeResult(9)),
+        onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+        attemptOutcome: outcome,
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { void result.current.submit(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // Juste avant le plafond, le prochain sondage reste en vol…
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60_000 - 10_000); });
+    onFetchAttempts.mockImplementationOnce(() => new Promise((r) => { releaseLastPoll = r; }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(releaseLastPoll).toBeDefined();
+    // … le verdict arrive pendant cette lecture, puis elle répond (plafond dépassé).
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    history = [summary(9)];
+    await act(async () => { releaseLastPoll([]); await vi.advanceTimersByTimeAsync(0); });
+    await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
+    expect(result.current.result?.attemptId).toBe(9);
+    expect(result.current.submitError).toBeNull();
+    vi.useRealTimers();
   });
 });
 

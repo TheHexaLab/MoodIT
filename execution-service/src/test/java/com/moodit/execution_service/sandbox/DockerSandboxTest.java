@@ -197,6 +197,9 @@ class DockerSandboxTest {
         // État OOMKilled illisible (non simulé ici) : faux, sans faire échouer la notation.
         assertThat(run.oomKilled()).isFalse();
         org.mockito.Mockito.verify(remove).exec(); // conteneur détruit, succès ou non
+        // Étiquette EXACTE des runners : le balayage des orphelins (OrphanSweeper) et le test
+        // d'intégration interrupted_run_leaves_no_container la cherchent avec la valeur « 1 ».
+        org.mockito.Mockito.verify(create).withLabels(Map.of(DockerSandbox.RUNNER_LABEL, "1"));
     }
 
     @Test
@@ -491,7 +494,7 @@ class DockerSandboxTest {
         // Et l'étiquette des runners : sans elle, le balayage viserait tout conteneur arrêté.
         org.mockito.Mockito.verify(list).withLabelFilter(
                 org.mockito.ArgumentMatchers.<Map<String, String>>argThat(
-                        m -> m != null && m.containsKey("moodit.runner")));
+                        m -> Map.of(DockerSandbox.RUNNER_LABEL, "1").equals(m)));
     }
 
     @Test

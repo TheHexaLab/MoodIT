@@ -346,6 +346,32 @@ describe('QuizEditor — navigation question/harnais', () => {
     expect(screen.getByText(qT.harnessCount(1))).toBeTruthy();
   });
 
+  it('harnais d\'une question Code Java : « Ajouter » insère le gabarit booléen du langage', async () => {
+    // Branchement réel de defaultHarness (QuizEditor → HarnessBody) : l'ancien gabarit Java
+    // (« lève une exception ») décrivait une forme que le runner refuse.
+    const java = { id: 5, name: 'Java' };
+    renderEditor({
+      languages: [{ id: 1, name: 'Python' }, java],
+      quizzes: [
+        makeQuiz({
+          id: 1,
+          title: 'Q',
+          questions: [
+            { id: 7, qType: 'coding', prompt: 'Écris doubler', totalScore: 1, language: java, testCases: [] },
+          ],
+        } as Partial<Quiz>),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByLabelText(formT.editQuestionAria));
+    fireEvent.click(screen.getByText(qT.manageHarness));
+    expect(await screen.findByText(editorT.harnessTitle)).toBeTruthy();
+    fireEvent.click(screen.getByText(`+ ${hT.add}`));
+    const code = (screen.getByLabelText(hT.codeAria(1)) as HTMLTextAreaElement).value;
+    expect(code).toMatch(/renvoie true/);
+    expect(code).not.toMatch(/exception/);
+  });
+
   it('chevron retour depuis la question revient au formulaire', async () => {
     renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Q' })] });
     fireEvent.click(screen.getByLabelText(listT.editAria('Q')));

@@ -109,7 +109,9 @@ public class QuizController {
      * par WebSocket ({@code quiz:attempt-graded} / {@code quiz:attempt-failed}) ; le client le
      * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. 409 en JSON
      * {@code {"cause":"en_cours",…}} si une correction de ce quiz est déjà en cours (le client
-     * rejoint son attente), 409 en texte si la tentative unique est déjà consommée.
+     * rejoint son attente), 409 en JSON {@code {"cause":"relance",…}} si c'est l'enseignant qui
+     * relance la correction d'une tentative de l'étudiant, 409 en texte si la tentative unique est
+     * déjà consommée.
      * `X-User-Email` injecté par la gateway.
      */
     @PostMapping("/{quizId}/submissions")

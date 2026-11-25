@@ -222,6 +222,54 @@ describe('QuizView — pied de navigation', () => {
     expect(Boolean(screen.queryByRole('button', { name: 'Réessayer' }))).toBe(retryOffered);
   });
 
+  it('409 « relance » : message de recorrection, sans « Réessayer », réponses gardées en passation', async () => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw new SubmissionRejectedError('', 'regrading');
+    });
+    renderView({ onSubmitQuiz });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('A'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard : vos réponses sont conservées.'
+        )
+      ).toBeTruthy()
+    );
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    expect(screen.getByText('Question trois')).toBeTruthy();
+    expect(screen.queryByText('Correction en cours', { exact: false })).toBeNull();
+    expect(localStorage.getItem('moodit:quiz-draft:55')).not.toBeNull();
+  });
+
+  it('attente de la correction : texte d’état, contenu inerte, « Soumettre » désactivé', async () => {
+    // L'attente peut durer de longues minutes : la région d'état le dit, et rien sous le voile
+    // n'est actionnable (un second envoi lançait une seconde attente).
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 9 }));
+    const { container } = renderView({ onSubmitQuiz });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    const submit = screen.getByText('Soumettre').closest('button') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    const status = await screen.findByRole('status');
+    await waitFor(() =>
+      expect(status.textContent).toContain(
+        'Correction en cours… cela peut prendre plusieurs minutes ; vous pouvez quitter cette page et revenir.'
+      )
+    );
+    expect(container.querySelector('[inert]')?.contains(submit)).toBe(true);
+    expect(submit.disabled).toBe(true);
+    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+  });
+
   it('« Soumettre » actif quand la tentative n’est pas consommée', async () => {
     renderView();
     await waitLoaded();

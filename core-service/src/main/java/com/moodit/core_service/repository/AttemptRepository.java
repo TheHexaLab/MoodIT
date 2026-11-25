@@ -29,6 +29,14 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
     boolean existsByQuiz_IdAndUser_IdAndStatus(Integer quizId, Integer userId, String status);
 
     /**
+     * Comme {@link #existsByQuiz_IdAndUser_IdAndStatus}, restreint au marqueur de relance : un
+     * {@code "pending"} avec {@code regrade = true} est une RELANCE de l'enseignant, pas la
+     * correction d'une soumission de l'étudiant (409 « relance » au lieu de « en_cours »).
+     */
+    boolean existsByQuiz_IdAndUser_IdAndStatusAndRegrade(
+            Integer quizId, Integer userId, String status, boolean regrade);
+
+    /**
      * Tentatives d'un statut donné, plus anciennes d'abord : au démarrage de core, les
      * {@code "pending"} dont la correction a été perdue (cf. QuizGradingListener).
      */

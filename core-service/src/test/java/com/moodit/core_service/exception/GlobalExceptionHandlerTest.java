@@ -63,6 +63,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Relance de l'enseignant en cours → 409 en JSON, cause « relance » et message français")
+    void regradeInProgress_409Json() {
+        ResponseEntity<java.util.Map<String, String>> r =
+                handler.handleRegradeInProgress(new RegradeInProgressException());
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        assertThat(r.getBody()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                "cause", "relance",
+                "message", "Votre tentative précédente est en cours de recorrection par votre"
+                        + " enseignant. Réessayez plus tard."));
+    }
+
+    @Test
     @DisplayName("Vérification du code indisponible → 503 (échec transitoire)")
     void verificationIndisponible_503() {
         assertResponse(handler.handleCodeVerificationUnavailable(new CodeVerificationUnavailableException()),

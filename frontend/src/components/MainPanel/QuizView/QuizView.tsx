@@ -90,6 +90,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     submitErrorMessage: t.submitError,
     submitRejectedMessage: t.submitRejected,
     submitTooLargeMessage: t.submitTooLarge,
+    submitRegradingMessage: t.submitRegrading,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
   });
@@ -197,6 +198,9 @@ const QuizView: React.FC<QuizViewProps> = ({
       {busy && (
         <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">
           <Spinner size={44} />
+          {/* Attente de la correction : elle peut durer plusieurs minutes, sans un mot jusque-là
+              (le spinner est purement visuel). */}
+          {attempt.reconciling && <p className={styles.busyText}>{t.gradingInProgress}</p>}
         </div>
       )}
 
@@ -210,39 +214,43 @@ const QuizView: React.FC<QuizViewProps> = ({
         />
       )}
 
-      <header className={styles.header}>
-        <div className={styles.headerTitle}>
-          <span className={styles.bolt}>
-            <ChannelTypeIcon type="quiz" />
-          </span>
-          <span className={styles.titleText}>
-            <span className={styles.title}>{headerTitle}</span>
-          </span>
+      {/* Sous le voile, le contenu reste atteignable au clavier : `inert` le retire du parcours
+          (sinon « Soumettre » restait actionnable pendant l'attente de la correction). */}
+      <div className={styles.content} inert={busy}>
+        <header className={styles.header}>
+          <div className={styles.headerTitle}>
+            <span className={styles.bolt}>
+              <ChannelTypeIcon type="quiz" />
+            </span>
+            <span className={styles.titleText}>
+              <span className={styles.title}>{headerTitle}</span>
+            </span>
+          </div>
+
+          {phase === 'review' ? (
+            <button type="button" className={styles.backButton} onClick={attempt.backToSummary}>
+              <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
+              {t.backToSummary}
+            </button>
+          ) : (
+            <span className={styles.status}>
+              {attempt.awaitingReview
+                ? t.awaitingReviewStatus
+                : phase === 'summary'
+                  ? t.finished
+                  : t.questionStatus(currentIndex + 1, total)}
+            </span>
+          )}
+        </header>
+
+        <div className={styles.progressTrack}>
+          <div className={styles.progressFill} style={{ width: `${progress * 100}%` }} />
         </div>
 
-        {phase === 'review' ? (
-          <button type="button" className={styles.backButton} onClick={attempt.backToSummary}>
-            <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-            {t.backToSummary}
-          </button>
-        ) : (
-          <span className={styles.status}>
-            {attempt.awaitingReview
-              ? t.awaitingReviewStatus
-              : phase === 'summary'
-                ? t.finished
-                : t.questionStatus(currentIndex + 1, total)}
-          </span>
-        )}
-      </header>
+        {renderBody()}
 
-      <div className={styles.progressTrack}>
-        <div className={styles.progressFill} style={{ width: `${progress * 100}%` }} />
+        {renderFooter()}
       </div>
-
-      {renderBody()}
-
-      {renderFooter()}
     </div>
   );
 
@@ -425,7 +433,8 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (isLast) {
       // Grisé pendant l'envoi ET si la tentative unique est déjà consommée (miroir du
       // 409 backend : évite le double-clic / rejeu qui serait de toute façon rejeté).
-      const disabled = attempt.submitting || attempt.alreadySubmitted;
+      // `reconciling` : une correction est attendue (jusqu'à 30 min) — pas de second envoi.
+      const disabled = attempt.submitting || attempt.reconciling || attempt.alreadySubmitted;
       return (
         <button
           type="button"

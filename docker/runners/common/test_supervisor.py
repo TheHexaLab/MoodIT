@@ -4921,6 +4921,14 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertFalse(supervisor.oom_killed_during(None, 1))
         self.assertFalse(supervisor.oom_killed_during(1, None))
 
+    def test_box_keeps_room_for_the_grader_build(self):
+        # /box rempli à 566 Mo (seuil de 48 Mo libres) par le cache Go de l'étudiant : le noteur
+        # Go à cache froid y écrivait 48 Mo et ne laissait qu'1 Mo libre, au bord d'un « no space
+        # left on device » présenté comme « Le harnais ne compile pas ». Le seuil réserve sa place.
+        self.assertGreaterEqual(supervisor.BOX_MIN_FREE_BYTES, 96 * 1024 * 1024)
+        self.assertTrue(supervisor.free_bytes_under(
+            (64 * 1024 * 1024) // 4096, 4096, supervisor.BOX_MIN_FREE_BYTES))
+
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes
         # et 10 s de `nm` par cas, 10 s de préprocesseur par job — et non 90 s chacun.

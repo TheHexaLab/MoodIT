@@ -761,8 +761,8 @@ class ExecutionServiceTest {
     @Test
     void timeout_is_forwarded_to_the_runner_for_interpreted_and_sql() {
         // Un retour silencieux au défaut (3 s) passerait avec any() : on épingle eq(42_000)
-        // sur le chemin interprété, sur le chemin SQL en lecture seule (un conteneur) ET sur le
-        // chemin SQL en modification (runSqlIsolated : un conteneur par phase).
+        // sur le chemin interprété et sur le chemin SQL en lecture seule (un conteneur). Le SQL
+        // en modification (deux phases) : timeout_is_forwarded_to_both_isolated_sql_phases.
         runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         service.evaluate(new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("t", "return True", 1)), 42_000));

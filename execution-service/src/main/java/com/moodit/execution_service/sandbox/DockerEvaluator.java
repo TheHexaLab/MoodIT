@@ -21,8 +21,9 @@ import java.util.Map;
  * JSON illisible ou des canaris incohérents ne deviennent JAMAIS un « réussi ».
  *
  * Les ÉVÉNEMENTS du superviseur (compilation rejouée, erreur interne, cas sauté…) sont
- * journalisés côté serveur seulement : ils portent l'index du cas pour le journal, mais ne sont
- * jamais annexés aux verdicts et n'en modifient aucun. Des canaris incohérents, eux, invalident les verdicts (« Incohérence détectée »).
+ * journalisés côté serveur seulement : ils portent l'index du cas quand ils en concernent un
+ * (pas {@code canari_incoherent}, qui porte sur tout le job), mais ne sont jamais annexés aux
+ * verdicts et n'en modifient aucun. Des canaris incohérents, eux, invalident les verdicts (« Incohérence détectée »).
  */
 @Component
 public class DockerEvaluator {
