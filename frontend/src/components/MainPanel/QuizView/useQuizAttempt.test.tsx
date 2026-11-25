@@ -179,7 +179,7 @@ describe('submit refusé par le serveur', () => {
     ['413 du gateway → libellé « trop volumineux »', new SubmissionRejectedError('', 'tooLarge'),
       'TROP_GROS', true],
     ['autre échec (réseau, 409, 5xx) → message générique, pas un refus', new Error('boom'), 'POST_KO', false],
-  ])('%s, rien en vol', async (_cas, error, expected, rejected) => {
+  ])('%s, rien en vol', async (_case, error, expected, rejected) => {
     const onFetchQuiz = vi.fn(async () => makeQuiz());
     const onFetchAttempts = vi.fn(async () => [] as AttemptSummary[]);
     const onSubmitQuiz = vi.fn(async () => {

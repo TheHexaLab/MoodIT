@@ -210,11 +210,11 @@ describe('EditorShell — en-tête et navigation', () => {
     rerender(view('b'));
     expect(document.activeElement).toBe(screen.getByLabelText('Retour'));
     // Focus dans une autre fenêtre modale ouverte par-dessus (revue #246) : il y reste.
-    const autre = document.createElement('button');
-    document.body.appendChild(autre);
-    autre.focus();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
     rerender(view('c'));
-    expect(document.activeElement).toBe(autre);
-    autre.remove();
+    expect(document.activeElement).toBe(other);
+    other.remove();
   });
 });

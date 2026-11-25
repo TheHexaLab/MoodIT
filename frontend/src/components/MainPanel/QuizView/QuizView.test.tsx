@@ -180,7 +180,7 @@ describe('QuizView — pied de navigation', () => {
       'Question 2 : le code soumis dépasse 100000 caractères.', false],
     ['échec ordinaire → message générique, avec « Réessayer »', new Error('réseau'),
       'La soumission a échoué. Réessayez.', true],
-  ])('%s', async (_cas, error, message, retryOffered) => {
+  ])('%s', async (_case, error, message, retryOffered) => {
     const onSubmitQuiz = vi.fn(async () => {
       throw error;
     });

@@ -126,6 +126,9 @@ export function QuizEditor({
   // d'affichage immédiat le temps du fetch.
   const fetchQuizzes = handlers.onFetchQuizzes;
   const showingList = view.kind === 'list';
+  // Relecture DEMANDÉE de la liste (cf. markRegraded) : elle passe par cet effet, qui annule
+  // une lecture devenue périmée — vue quittée, ou lecture plus récente lancée entre-temps.
+  const [listReload, setListReload] = useState(0);
   useEffect(() => {
     if (!fetchQuizzes || !showingList) return;
     let cancelled = false;
@@ -145,7 +148,7 @@ export function QuizEditor({
     return () => {
       cancelled = true;
     };
-  }, [courseId, fetchQuizzes, showingList]);
+  }, [courseId, fetchQuizzes, showingList, listReload]);
 
   // Langages : AUCUN cache. Chaque accès à une question Code refetch les langages
   // (« fetch tout le temps »). `effectiveLanguages` = langages chargés > prop ; sinon
@@ -408,14 +411,11 @@ export function QuizEditor({
     if (viewRef.current.kind !== 'review' || viewRef.current.quizId !== quizId) {
       // Revenu à la LISTE pendant la relance : sa lecture a pu être servie avant que la relance
       // soit enregistrée, et garder un « à revoir » de trop. On la relit une fois la relance
-      // acceptée. (Ailleurs, le retour à la liste la relira de toute façon.)
-      if (viewRef.current.kind === 'list' && fetchQuizzes) {
-        Promise.resolve(fetchQuizzes(courseId))
-          .then((all) => setQuizzes(all))
-          .catch(() => {
-            /* échec : la liste affichée reste ; le prochain retour la recale */
-          });
-      }
+      // acceptée — par l'effet de liste, jamais directement : une réponse arrivée après
+      // l'ouverture d'un quiz y remplaçait le quiz complet par sa version sans questions, et un
+      // enregistrement aurait supprimé ces questions au serveur. (Ailleurs, le retour à la
+      // liste la relira de toute façon.)
+      if (viewRef.current.kind === 'list') setListReload((n) => n + 1);
       return;
     }
     setQuizzes((list) =>

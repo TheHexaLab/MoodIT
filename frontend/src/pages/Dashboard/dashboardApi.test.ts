@@ -373,7 +373,7 @@ describe('submitQuiz', () => {
     ['erreur JSON de Spring', '{"status":400,"detail":"Failed to read request"}', ''],
     ['JSON illisible', '{pas du json', ''],
     ['corps vide', '', ''],
-  ])('400 (%s) → SubmissionRejectedError avec le message lisible', async (_cas, body, message) => {
+  ])('400 (%s) → SubmissionRejectedError avec le message lisible', async (_case, body, message) => {
     mockedApiFetch.mockResolvedValueOnce({
       ok: false,
       status: 400,

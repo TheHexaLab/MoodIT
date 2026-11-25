@@ -211,6 +211,53 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
   });
 
+  it('relecture après relance arrivée APRÈS l\'ouverture d\'un quiz : le quiz ouvert garde ses questions', async () => {
+    // Revue #246 : la réponse tardive remplaçait le quiz complet (formulaire ouvert) par sa
+    // version de liste, sans questions — un enregistrement les aurait supprimées au serveur.
+    let resolveRegrade!: () => void;
+    const onRegradeAttempt = vi.fn(
+      () => new Promise<void>((resolve) => { resolveRegrade = resolve; })
+    );
+    let resolveLate!: (q: Quiz[]) => void;
+    const onFetchQuizzes = vi
+      .fn()
+      .mockResolvedValueOnce([makeQuiz({ reviewAttemptCount: 2 })])
+      .mockResolvedValueOnce([makeQuiz({ reviewAttemptCount: 2 })])
+      .mockImplementationOnce(() => new Promise<Quiz[]>((resolve) => { resolveLate = resolve; }))
+      .mockResolvedValue([makeQuiz({ reviewAttemptCount: 1 })]);
+    const full = makeQuiz({
+      questions: [{ id: 7, qType: 'true_false', prompt: 'Question gardée', totalScore: 1 }],
+    } as Partial<Quiz>);
+    render(
+      <QuizEditor
+        courseId={42}
+        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
+        onClose={vi.fn()}
+        handlers={{
+          onFetchQuizzes,
+          onFetchQuiz: vi.fn(async () => full),
+          onFetchReviewAttempts: vi.fn(async () => [EVA, BOB]),
+          onRegradeAttempt,
+        }}
+      />
+    );
+    fireEvent.click(await screen.findByLabelText(listT.reviewAria('Quiz A', 2)));
+    fireEvent.click(await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2)));
+    fireEvent.click(screen.getByLabelText(/retour/i));
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveRegrade();
+    });
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(3));
+    // L'enseignant ouvre le quiz avant la réponse de la relecture.
+    fireEvent.click(screen.getByLabelText(listT.editAria('Quiz A')));
+    expect(await screen.findByText('Question gardée')).toBeTruthy();
+    await act(async () => {
+      resolveLate([makeQuiz({ reviewAttemptCount: 1 })]);
+    });
+    expect(screen.getByText('Question gardée')).toBeTruthy();
+  });
+
   it('retour à la liste pendant la relance : la liste est relue une fois la relance acceptée', async () => {
     // Revue #246 : la lecture de la liste au retour peut passer AVANT que la relance soit
     // enregistrée au serveur, et garder un « à revoir » de trop.
