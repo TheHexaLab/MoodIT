@@ -22,10 +22,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>l'étudiant ne peut ni LIRE ni MODIFIER le harnais du prof.</li>
  * </ol>
  *
- * <p>Les attaques rejouées sont celles qui MARCHAIENT contre le chemin framework (sortie forgée,
- * rapport forgé, sortie en zéro, jeton lu dans un artefact, jeton lu dans sa propre mémoire,
- * interposition de {@code printf}). Elles doivent échouer parce qu'il n'y a plus RIEN à attaquer
- * dans le processus de l'étudiant — pas parce qu'on les détecte.
+ * <p>Les attaques rejouées sont celles qui MARCHAIENT contre le chemin framework : sortie forgée
+ * et réponse devancée, interposition de {@code printf} (section 2), sortie en zéro anticipée
+ * (submitted_code_exiting_zero_early_fails_in_the_six_compiled_languages), lecture du harnais et
+ * du nonce dans les fichiers du noteur (section 3). Elles doivent échouer parce qu'il n'y a plus
+ * RIEN à attaquer dans le processus de l'étudiant — pas parce qu'on les détecte. La lecture du
+ * jeton dans sa propre mémoire n'est plus rejouée : le nonce vit dans un autre processus, sous un
+ * autre UID (cf. java_forged_answer_and_token_fail).
  */
 class RpcGradingIntegrationTest {
 
@@ -1282,6 +1285,80 @@ class RpcGradingIntegrationTest {
             TestResult crash = note(c.lang(), c.harness(), c.code().replace("999", "5"));
             assertThat(crash.passed()).as(c.lang() + " : plantage").isFalse();
             assertThat(crash.detail()).as(c.lang() + " : plantage")
+                    .isNotBlank().doesNotContainIgnoringCase("compilation");
+        }
+    }
+
+    @Test
+    void submitted_code_exiting_zero_early_fails_in_the_six_compiled_languages() {
+        // Sortie en ZÉRO anticipée : sur le chemin framework, un code qui terminait le processus
+        // en succès avant les assertions passait pour un test réussi. Ici, le code soumis quitte
+        // en 0 PENDANT l'appel du harnais : le noteur n'a pas de réponse, son harnais ne rend
+        // jamais vrai, et seul le nonce qu'il émet fait le verdict. Le témoin ne quitte que sur
+        // 999 et réussit ; la variante quitte sur l'appel du harnais. Elle doit échouer à
+        // l'EXÉCUTION : un échec de compilation ferait passer ce test sans rien mesurer.
+        record EarlyExit(String lang, String harness, String code) { }
+        List<EarlyExit> exits = List.of(
+                new EarlyExit("Go", "return doubler(5) == 10", """
+                        package main
+
+                        import "os"
+
+                        func doubler(n int) int {
+                        \tif n == 999 {
+                        \t\tos.Exit(0)
+                        \t}
+                        \treturn n * 2
+                        }
+
+                        func main() {}
+                        """),
+                new EarlyExit("Rust", "doubler(5) == 10", """
+                        fn doubler(n: i32) -> i32 {
+                            if n == 999 { std::process::exit(0); }
+                            n * 2
+                        }
+
+                        fn main() {}
+                        """),
+                new EarlyExit("C", "return doubler(5) == 10;", """
+                        #include <stdlib.h>
+
+                        int doubler(int n) {
+                            if (n == 999) { exit(0); }
+                            return n * 2;
+                        }
+                        """),
+                new EarlyExit("C++", "return doubler(5) == 10;", """
+                        #include <cstdlib>
+
+                        int doubler(int n) {
+                            if (n == 999) { std::exit(0); }
+                            return n * 2;
+                        }
+                        """),
+                new EarlyExit("C#", "return Solution.doubler(5) == 10;", """
+                        class Solution {
+                            public static int doubler(int n) {
+                                if (n == 999) { System.Environment.Exit(0); }
+                                return n * 2;
+                            }
+                        }
+                        """),
+                new EarlyExit("Java", "return Solution.doubler(5) == 10;", """
+                        class Solution {
+                            static int doubler(int n) {
+                                if (n == 999) { System.exit(0); }
+                                return n * 2;
+                            }
+                        }
+                        """));
+        for (EarlyExit e : exits) {
+            TestResult ok = note(e.lang(), e.harness(), e.code());
+            assertThat(ok.passed()).as(e.lang() + " : témoin " + ok.detail()).isTrue();
+            TestResult exit = note(e.lang(), e.harness(), e.code().replace("999", "5"));
+            assertThat(exit.passed()).as(e.lang() + " : sortie en zéro").isFalse();
+            assertThat(exit.detail()).as(e.lang() + " : sortie en zéro")
                     .isNotBlank().doesNotContainIgnoringCase("compilation");
         }
     }

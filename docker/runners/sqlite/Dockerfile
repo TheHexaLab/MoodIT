@@ -2,7 +2,7 @@
 # par execution-service — deux conteneurs par harnais de modification).
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner vide la liste des paquets (cette image tire de
 # deb.debian.org ; le cas d'archive.ubuntu.com, a grosse reponse DNS, ne concerne que les
 # images java et csharp, qui basculent sur un miroir dedie).

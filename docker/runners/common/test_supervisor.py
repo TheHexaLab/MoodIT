@@ -758,13 +758,16 @@ class SignatureFormsTest(unittest.TestCase):
         # Revue #246 : toute la sortie de `gcc -E` était décodée et découpée avant la borne ; des
         # millions de lignes courtes coûtaient plus de 500 Mio au superviseur. En flux, la
         # mémoire reste bornée par le budget, quelle que soit la longueur de la sortie.
+        # La lecture s'arrête aussi au premier octet au-delà du budget : 10 000 octets de lignes
+        # de 2 octets, soit 5 001 lignes consommées, jamais les 2 000 000.
         import tracemalloc
-        produced = []
+        consumed = 0
 
         def lines():
+            nonlocal consumed
             yield b'# 1 "pp.c"\n'
             for _ in range(2_000_000):
-                produced.append(1) if len(produced) < 1 else None
+                consumed += 1
                 yield b"x\n"
         tracemalloc.start()
         try:
@@ -774,6 +777,7 @@ class SignatureFormsTest(unittest.TestCase):
             tracemalloc.stop()
         self.assertIsNone(result)
         self.assertLess(peak, 2 * 1024 * 1024)
+        self.assertEqual(5_001, consumed)
 
     def test_cpp_const_overload_gives_one_stub(self):
         api = {n: m for n, _c, m in supervisor.cpp_object_api(
@@ -953,12 +957,15 @@ class IsolationInvariantsTest(unittest.TestCase):
         try:
             os.makedirs(os.path.join(directory, "sous"))
             open(os.path.join(directory, "sous", "harnais_rpc.c"), "w").close()
-            with unittest.mock.patch.object(supervisor.os, "chown", create=True), \
+            with unittest.mock.patch.object(supervisor.os, "chown", create=True) as chown, \
                     unittest.mock.patch.object(supervisor.os, "chmod") as chmod:
                 supervisor.lock_sources(directory)
             modes = {call.args[1] for call in chmod.call_args_list}
             self.assertEqual({0o700}, modes)
             self.assertEqual(3, len(chmod.call_args_list))   # racine, dossier, fichier
+            # Propriétaire root : un chown vers l'UID étudiant laisserait le harnais lisible.
+            self.assertEqual({(0, 0)}, {call.args[1:3] for call in chown.call_args_list})
+            self.assertEqual(3, len(chown.call_args_list))
         finally:
             supervisor.remove_tree(directory)
 
@@ -2394,6 +2401,44 @@ class Review28Test(unittest.TestCase):
             supervisor.rust_signatures(supervisor.blank_code(src, rust=True))
             supervisor.rust_without_main(src)
             self.assertLess(time.perf_counter() - begin, 3.0)
+
+    def test_attribute_lines_and_trait_headers_are_linear(self):
+        # Revue #246 : la répétition des attributs franchissait les fins de ligne, et chaque ligne
+        # d'attribut faisait relire tout le reste — 80 s (C++) et 130 s (Rust) par cas pour
+        # 100 Ko, hors de tout délai ; `trait a` sans accolade, 3,5 s.
+        cpp = "[[a]]\n" * 16_000 + "int f(int x) { return x; }\n"
+        rust = "#[a]\n" * 19_000 + "pub struct S { pub a: i64 }\nfn f(x: i64) -> i64 { x }\n"
+        begin = time.perf_counter()
+        self.assertEqual(supervisor.c_signatures(supervisor.blank_code(cpp), cpp=True),
+                         [("int", "f", ["int"])])
+        ext = supervisor.blank_code(rust, rust=True)
+        supervisor.rust_signatures(ext)
+        supervisor.rust_object_api(ext)
+        supervisor.rust_capture_fields(ext)
+        supervisor.rust_object_api(supervisor.blank_code("trait a\n" * 12_000, rust=True))
+        self.assertLess(time.perf_counter() - begin, 3.0)
+        # Un attribut seul sur sa ligne, ou plusieurs devant la signature : toujours reconnus.
+        self.assertEqual(supervisor.c_signatures(supervisor.blank_code(
+            "[[nodiscard]]\nint f(int x) { return x; }\n"
+            "[[nodiscard]] [[maybe_unused]] int g(int x) { return x; }\n"), cpp=True),
+            [("int", "f", ["int"]), ("int", "g", ["int"])])
+        self.assertEqual(supervisor.rust_object_api(supervisor.blank_code(
+            "#[derive(Debug)]\n#[allow(dead_code)]\npub struct R { pub a: i64 }\n"
+            "impl R { pub fn new(a: i64) -> Self { R { a } } pub fn g(&self) -> i64 { self.a } }\n",
+            rust=True)), [("R", [("new", ["i64"])], [("i64", "g", [])])])
+
+    def test_harness_mentions_blanks_the_harness_once(self):
+        # Revue #246 : le harnais était reblanchi pour CHAQUE nom soumis (3,8 s par cas pour
+        # 4 000 fonctions soumises).
+        harness = "// commentaire max\nreturn f(1) == 1 && g(2) == 2;\n" * 1_000
+        with unittest.mock.patch.object(supervisor, "blank_code",
+                                        wraps=supervisor.blank_code) as blank:
+            supervisor._harness_words.cache_clear()
+            hits = [n for n in ("f%d" % i for i in range(4_000)) if supervisor.harness_mentions(harness, n)]
+            self.assertTrue(supervisor.harness_mentions(harness, "g"))
+            self.assertFalse(supervisor.harness_mentions(harness, "max"))
+        self.assertEqual([], hits)
+        self.assertEqual(1, blank.call_count)
 
     def test_rust_visibility_and_attributes_still_recognised(self):
         self.assertEqual(

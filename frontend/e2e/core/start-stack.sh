@@ -35,7 +35,15 @@ done
 echo "→ Image runner Python (questions de code)"
 # Seul langage des quiz de code testés ; les 10 images (docker/runners/build.sh) seraient bien
 # plus longues à construire. execution-service la lance via le démon Docker de l'hôte.
-docker build -t moodit-runner-python:latest -f docker/runners/python/Dockerfile docker/runners
+# En CI (jeton du runtime Actions exposé par crazy-max/ghaction-github-runtime), cache de build
+# gha comme les images de service (docker-compose-ci-cache.yml) : sans lui, chaque job retéléchargeait
+# numpy, pandas, scipy et sympy depuis PyPI, une dépendance réseau sur le chemin critique.
+RUNNER_CACHE=""
+if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+  RUNNER_CACHE="--load --cache-from type=gha,scope=moodit-runner-python --cache-to type=gha,scope=moodit-runner-python,mode=max,ignore-error=true"
+fi
+# shellcheck disable=SC2086 # découpage en mots voulu (options de cache)
+docker build $RUNNER_CACHE -t moodit-runner-python:latest -f docker/runners/python/Dockerfile docker/runners
 
 sh frontend/e2e/core/bootstrap.sh
 

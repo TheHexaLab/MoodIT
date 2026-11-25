@@ -289,7 +289,8 @@ rollback() {
 step "4/5 · Build des images"
 printf '   %sPatiente : les services Java compilent — c'\''est normal que ce soit long.%s\n' "$DIM" "$RST"
 if ! stream "Build des images" $COMPOSE build --progress=plain; then rollback; fi
-# Images du RUNNER des langages compilés (#116) — en cache Docker, rapide quand rien n'a changé.
+# Images du RUNNER (#116), dont dépend TOUTE exécution (compilés, interprétés, SQL, vues) —
+# en cache Docker, rapide quand rien n'a changé.
 # Seulement si la version déployée en a : un retour à une version d'avant #116 (revert de la
 # fusion) n'a pas `docker/runners/`, et exiger son build faisait annuler ce retour à chaque fois.
 if [ -f docker/runners/build.sh ]; then

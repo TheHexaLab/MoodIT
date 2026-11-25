@@ -19,12 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Compléments aux tests de {@link CodeAssemblerTest} (mêmes conventions : aucun Piston, on vérifie
- * le programme assemblé) : langages compilés non encore exercés (Go, Rust, C#), HTML (bundle
- * vendor), exécution simple (« run ») de chaque langage, alias, proxys de classes (JS/PHP) et cas
- * limites du découpage SQL. Pour les langages compilés, on vérifie des PROPRIÉTÉS (point d'entrée
- * unique, code étudiant intact, harnais et nonce dans le noteur) plutôt que le texte exact ; le
- * fait que le programme s'exécute et note correctement relève d'ExecutionIntegrationTest.
+ * Compléments aux tests de {@link CodeAssemblerTest} (mêmes conventions : aucun conteneur, on
+ * vérifie le programme assemblé) : HTML (bundle vendor), proxys de classes et filtrage des symboles
+ * internes (JS/PHP/Python/Bash), alias, exécution simple (« run ») de chaque langage et cas limites
+ * du découpage SQL. Les langages COMPILÉS ne sont plus assemblés ici pour la notation (#116 :
+ * l'assembleur les refuse, DockerEvaluator les note) ; seul leur « run » l'est encore. Le fait que
+ * le programme s'exécute et note correctement relève d'ExecutionIntegrationTest (interprétés, SQL,
+ * vues) et de RpcGradingIntegrationTest (compilés).
  */
 class CodeAssemblerLanguagesTest {
 
@@ -189,7 +190,8 @@ class CodeAssemblerLanguagesTest {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"cplusplus", "cs", "c-sharp", "golang", "Java", "Rust", "C"})
     void compiled_aliases_rejected_by_assembler_graded_by_docker_runner(String language) {
-        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par
+        // l'assembleur du mode exec.
         assertThatThrownBy(() -> assembler.assemble(language, "", "", "N"))
                 .isInstanceOf(UnsupportedLanguageException.class);
     }

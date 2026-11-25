@@ -14,11 +14,15 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Archive tar du job runner (#116) : chemins sous /box, fichiers 0600, sentinelle en dernier. */
+/**
+ * Conteneur runner (#116) : archive tar du job (chemins sous staging/, extraite dans /opt/moodit
+ * puis déplacée vers /box par le superviseur ; fichiers 0600 ; sentinelle en dernier), cycle de
+ * vie du conteneur et balayage des orphelins.
+ */
 class DockerSandboxTest {
 
     @Test
-    void tar_places_files_under_box_0600_and_ready_last() throws IOException {
+    void tar_places_files_under_staging_0600_and_ready_last() throws IOException {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("job.json", "{}");
         files.put("cases/0/src/main.go", "package main");
@@ -450,9 +454,10 @@ class DockerSandboxTest {
     }
 
     @Test
-    void orphan_containers_swept_at_startup() {
+    void orphan_containers_swept_by_the_periodic_sweep() {
         // Si la JVM meurt pendant une notation, le nettoyage du finally n'a pas lieu : les
-        // conteneurs survivants portent l'étiquette moodit.runner et sont balayés au démarrage.
+        // conteneurs survivants portent l'étiquette moodit.runner et sont balayés par
+        // OrphanSweeper — dès le démarrage, puis périodiquement (app.sandbox.orphan-sweep-ms).
         com.github.dockerjava.api.DockerClient docker =
                 org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class);
         var list = org.mockito.Mockito.mock(

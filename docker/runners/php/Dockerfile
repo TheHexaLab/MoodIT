@@ -1,7 +1,7 @@
 # Runner PHP (#116, mode exec).
 FROM php:8.2-cli-bookworm@sha256:ce09ca1d4b532edf9b0347b44a1968a80d9175addb581c450ba0c9a43fa0c5ea
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner vide la liste des paquets (cette image tire de
 # deb.debian.org ; le cas d'archive.ubuntu.com, a grosse reponse DNS, ne concerne que les
 # images java et csharp, qui basculent sur un miroir dedie).

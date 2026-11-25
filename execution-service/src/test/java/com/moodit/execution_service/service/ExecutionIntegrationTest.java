@@ -767,8 +767,9 @@ class ExecutionIntegrationTest {
     @Test
     void sql_etat_de_plus_de_100_ko_recu_complet() {
         // Phase 1 : l'étudiant remplit la table de 2 000 lignes de 50 caractères ; le dump renvoyé
-        // par Piston dépasse 100 Ko. Avec la limite de sortie par défaut de Piston (1 024 caractères),
-        // il serait tronqué et la phase 2 ne retrouverait pas toutes les lignes.
+        // par le runner dépasse 100 Ko. Le mode exec du superviseur garde jusqu'à EXEC_OUTPUT_CAP
+        // (1,2 Mo) par flux : avec une limite plus basse (celle de Piston était de 1 024
+        // caractères), le dump serait tronqué et la phase 2 ne retrouverait pas toutes les lignes.
         requireRuntime("sqlite3");
         String harness = "CREATE TABLE t(v TEXT);\n-- @student\n"
                 + "SELECT (SELECT count(*) FROM t) = 2000 AND (SELECT sum(length(v)) FROM t) = 100000;";

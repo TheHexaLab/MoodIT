@@ -4,7 +4,12 @@ import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
 import org.junit.jupiter.api.Test;
 
+import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -12,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -353,6 +359,37 @@ class DockerEvaluatorTest {
         // 30 s de base + (1 cas + 2 canaris) × (5 s + 10 s de marge + DEUX compilations de 90 s
         // — le noteur et le code soumis sont deux programmes — + 5 s d'inventaire) = 630 s.
         verify(sandbox).run(eq("moodit-runner-c:latest"), anyMap(), eq(630_000L));
+        // Ce que le SUPERVISEUR reçoit : le temps limite par cas tel quel, et le budget du job
+        // dérivé du même mur (sans lui, le superviseur ne s'arrête pas avant le mur et le démon
+        // tue le conteneur : tout le travail est perdu).
+        JsonNode job = lastJob();
+        assertThat(job.path("timeout_ms").asLong()).isEqualTo(5_000);
+        assertThat(job.path("budget_ms").asLong())
+                .isEqualTo(DockerEvaluator.walls("cpp", 1, 5_000, Long.MAX_VALUE).budgetMs());
+    }
+
+    @Test
+    void java_short_time_limit_raised_to_the_vm_floor_in_the_job() {
+        supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
+        // 1 s demandée par le prof : la JVM froide met 2 à 5 s à démarrer. Le superviseur relève
+        // déjà son temps limite à 10 s, mais le job doit porter la MÊME valeur que celle qui
+        // dimensionne le mur et le budget — sinon le mur ne couvre pas le temps réellement
+        // accordé par cas.
+        evaluator.evaluate("Java", "code",
+                List.of(new TestCaseInput("t", "return Solution.doubler(5) == 10;", 1)), 1_000);
+        JsonNode job = lastJob();
+        assertThat(job.path("timeout_ms").asLong()).isEqualTo(10_000);
+        DockerEvaluator.Walls walls = DockerEvaluator.walls("java", 1, 10_000, Long.MAX_VALUE);
+        assertThat(job.path("budget_ms").asLong()).isEqualTo(walls.budgetMs());
+        verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(walls.wallMs()));
+    }
+
+    /** {@code job.json} du DERNIER conteneur demandé au sandbox. */
+    private JsonNode lastJob() {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
+        verify(sandbox, atLeastOnce()).run(any(), files.capture(), anyLong());
+        return JsonMapper.builder().build().readTree(files.getValue().get("job.json"));
     }
 
     @Test
@@ -367,12 +404,20 @@ class DockerEvaluatorTest {
         // PLAFONNÉ au mur maximal de 15 min — trois compilations par cas coûtent cher, et une
         // question à plusieurs cas lents est notée partiellement plutôt que tuée au mur.
         verify(sandbox).run(eq("moodit-runner-java:latest"), anyMap(), eq(15 * 60_000L));
+        JsonNode javaJob = lastJob();
+        assertThat(javaJob.path("timeout_ms").asLong()).isEqualTo(10_000);
+        assertThat(javaJob.path("budget_ms").asLong())
+                .isEqualTo(DockerEvaluator.walls("java", 1, 10_000, Long.MAX_VALUE).budgetMs());
 
         // Au-delà du plafond de l'éditeur (60 s) : ramené à 60 s par cas.
         evaluator.evaluate("Go", "code",
                 List.of(new TestCaseInput("t", "return doubler(5) == 10", 1)), 999_999);
         // 60 s plafonnés + 10 s + 2 × 90 s + 5 s = 255 s par cas, × 3, + 30 s = 795 s.
         verify(sandbox).run(eq("moodit-runner-go:latest"), anyMap(), eq(795_000L));
+        JsonNode goJob = lastJob();
+        assertThat(goJob.path("timeout_ms").asLong()).isEqualTo(60_000);
+        assertThat(goJob.path("budget_ms").asLong())
+                .isEqualTo(DockerEvaluator.walls("go", 1, 60_000, Long.MAX_VALUE).budgetMs());
     }
 
     @Test
@@ -605,16 +650,15 @@ class DockerEvaluatorTest {
         assertThat(java.budgetMs()).isEqualTo(585_000);
         long worstCaseJava = 10_000 + 10_000 + 3 * 90_000 + 5_000;
         assertThat(java.budgetMs() + worstCaseJava + 20_000).isLessThanOrEqualTo(java.wallMs());
-        // Et même au plancher proportionnel, l'invariant tient sur tout mur NON plafonné :
-        // mur candidat = 30 s + (N+2) × pireCas ≥ 3 × pireCas, donc la marge de 40 % couvre
-        // toujours un cas entier. Vérifié sur le plus petit job possible.
-        // Et au temps limite MAXIMAL (60 s, Java, 3 compilations) : le plancher proportionnel
-        // l'emportait des 56 s sous le plafond interne et rompait l'invariant de quelques
-        // secondes. Il est reserve au chemin public : ici la formule stricte, l'invariant exact.
+        // Au temps limite MAXIMAL (60 s, Java, 3 compilations) : le plancher proportionnel
+        // l'emportait dès 56 s sous le plafond interne et rompait l'invariant de quelques
+        // secondes. Il est réservé au chemin public : ici la formule stricte, l'invariant exact.
         DockerEvaluator.Walls javaLong = DockerEvaluator.walls("java", 3, 60_000, Long.MAX_VALUE);
         long worstCaseJavaLong = 60_000 + 10_000 + 3 * 90_000 + 5_000;
         assertThat(javaLong.budgetMs() + worstCaseJavaLong + 20_000)
                 .isLessThanOrEqualTo(javaLong.wallMs());
+        // Le plus petit job possible (un cas, mur NON plafonné) : budget = mur − pireCas − marge
+        // de clôture, exactement — sans plancher proportionnel.
         DockerEvaluator.Walls go = DockerEvaluator.walls("go", 1, 10_000, Long.MAX_VALUE);
         long worstCaseGo = 10_000 + 10_000 + 2 * 90_000 + 5_000;
         assertThat(go.budgetMs() + worstCaseGo).isLessThanOrEqualTo(go.wallMs());

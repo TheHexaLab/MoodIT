@@ -1,7 +1,7 @@
 # Runner de notation Java (#116) : JDK + superviseur. Le harnais booléen est compilé dans
 # un programme séparé (le noteur), le code soumis dans un autre (le serveur).
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
-# /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
+# /box, /tmp et /dev/shm (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
 FROM eclipse-temurin:25-jdk@sha256:83f4a7fc27df94dcc7b8de04d14cbbba8da14406f921e966969c3b09000aa507
 
 
@@ -22,7 +22,7 @@ RUN sed -i 's|//archive.ubuntu.com|//azure.archive.ubuntu.com|g; s|//security.ub
     || { echo "ERREUR: la bascule vers azure.archive.ubuntu.com n'a pas porte sur TOUTES" >&2; \
          echo "       les sources (disposition inattendue, ou base non amd64)." >&2; exit 1; }
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner (archive.ubuntu.com non resolu) vide la liste des
 # paquets. `Error-Mode=any` est indispensable : sans lui, `apt-get update` rend 0 alors
 # qu'il n'a RIEN telecharge, le repli ne se declenche jamais, et l'echec ressort plus loin

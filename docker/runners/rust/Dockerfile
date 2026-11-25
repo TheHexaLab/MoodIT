@@ -1,9 +1,9 @@
 # Runner de notation Rust (#116) : toolchain Rust (rustc) + superviseur.
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
-# /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
+# /box, /tmp et /dev/shm (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
 FROM rust:1.82-bookworm@sha256:d9c3c6f1264a547d84560e06ffd79ed7a799ce0bff0980b26cf10d29af888377
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner vide la liste des paquets (cette image tire de
 # deb.debian.org ; le cas d'archive.ubuntu.com, a grosse reponse DNS, ne concerne que les
 # images java et csharp, qui basculent sur un miroir dedie).

@@ -767,7 +767,10 @@ public class QuizService {
      * Exécute SYNCHRONEMENT (mais HORS transaction) les harnais de chaque question Code et renvoie
      * les verdicts par question ({@code questionId → (testCaseId → réussi)}). Lève
      * {@link CodeVerificationUnavailableException} dès qu'une question ne peut pas être évaluée
-     * (service injoignable, réponse incohérente) : la soumission est alors refusée sans rien persister.
+     * (service injoignable, réponse incohérente), ou sa sous-classe
+     * {@link CodeVerificationNoVerdictException} quand le conteneur a tourné sans rendre de verdict :
+     * la tentative pending est alors supprimée, ou gardée « à revoir » (cf. la gestion des échecs
+     * de correction et son plafond).
      */
     private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();

@@ -129,15 +129,24 @@ export function QuizEditor({
   // Relecture DEMANDÉE de la liste (cf. markRegraded) : elle passe par cet effet, qui annule
   // une lecture devenue périmée — vue quittée, ou lecture plus récente lancée entre-temps.
   const [listReload, setListReload] = useState(0);
+  // Génération de la lecture de liste en cours. L'annulation par l'effet n'a lieu qu'au rendu
+  // suivant : après le détail chargé par openEdit (suite asynchrone, rendu différé), une réponse
+  // de liste arrivée avant ce rendu remplaçait le quiz complet par sa version sans questions, et
+  // un enregistrement aurait supprimé ces questions. openEdit l'invalide donc tout de suite.
+  const listReadGen = useRef(0);
+  const invalidateListRead = () => {
+    listReadGen.current += 1;
+  };
   useEffect(() => {
     if (!fetchQuizzes || !showingList) return;
+    const gen = ++listReadGen.current;
     let cancelled = false;
     // État de chargement posé avant le fetch asynchrone (pattern fetch-in-effect assumé).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingQuizzes(true);
     Promise.resolve(fetchQuizzes(courseId))
       .then((all) => {
-        if (!cancelled) setQuizzes(all);
+        if (!cancelled && gen === listReadGen.current) setQuizzes(all);
       })
       .catch(() => {
         /* échec : on garde la liste affichée */
@@ -217,6 +226,7 @@ export function QuizEditor({
       setOpeningQuizId(quiz.id); // spinner sur le crayon de CE quiz pendant le fetch
       try {
         full = await handlers.onFetchQuiz(quiz.id);
+        invalidateListRead();
         upsertQuiz(full);
       } catch {
         // Échec : on NE navigue PAS vers le formulaire (sinon message inline). On reste sur la

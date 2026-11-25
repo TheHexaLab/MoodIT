@@ -181,9 +181,13 @@ class RunnerSandboxIntegrationTest {
         assertThat(r.get(1).passed()).isFalse();
         assertThat(r.get(2).passed()).isFalse();
         assertThat(r.get(3).passed()).isFalse();
+        // Le superviseur MÉLANGE l'ordre des cas : le témoin n'est pas forcément noté après les
+        // sondes. Sa réussite prouve que le programme compile et tourne (sans quoi les refus
+        // ci-dessus ne prouveraient rien) ; la survie du conteneur, elle, est prouvée par le
+        // simple retour d'evaluate (un superviseur tué lève une SandboxException).
         assertThat(r.get(4).passed())
-                .withFailMessage("le témoin, noté APRÈS les sondes, doit réussir : le conteneur a "
-                        + "survécu et le programme compile : %s", r.get(4))
+                .withFailMessage("le témoin doit réussir : le programme compile et tourne : %s",
+                        r.get(4))
                 .isTrue();
     }
 
@@ -193,7 +197,10 @@ class RunnerSandboxIntegrationTest {
         // `size=` d'un tmpfs ne borne que les octets : sans `nr_inodes`, des centaines de milliers
         // de fichiers VIDES consommaient la mémoire noyau du cgroup jusqu'à faire tuer le
         // superviseur (conteneur mort sans JSON → SandboxException ici, 502 en prod). La sonde
-        // tente 400 000 créations sur chacun des deux tmpfs que l'UID étudiant écrit librement.
+        // tente 400 000 créations sur /tmp et sur /dev/shm, les deux tmpfs monde-inscriptibles.
+        // Le troisième, /box, où l'UID étudiant n'écrit que dans son dossier work/ (HOME et
+        // TMPDIR), porte son propre plafond (BOX_INODES) : il n'est pas sondé ici, le remplir
+        // jusqu'à 32 768 inodes allongerait le test sans rien vérifier de plus du mécanisme.
         DockerEvaluator small = new DockerEvaluator(
                 new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
                 System.getenv().getOrDefault("MOODIT_RUNNER_TAG", "latest"));
@@ -239,10 +246,105 @@ class RunnerSandboxIntegrationTest {
                 .withFailMessage("la création de fichiers doit être arrêtée par nr_inodes, après "
                         + "avoir commencé : %s", r.get(0))
                 .isTrue();
+        // Ordre des cas MÉLANGÉ par le superviseur, et le témoin ne touche ni /tmp ni /dev/shm :
+        // il prouve seulement que le programme compile et tourne. La survie du conteneur est
+        // prouvée par le retour d'evaluate ; la purge des tmpfs entre deux cas, par
+        // shared_tmpfs_are_purged_between_cases.
         assertThat(r.get(1).passed())
-                .withFailMessage("le témoin, noté APRÈS la sonde, doit réussir : le conteneur a "
-                        + "survécu et les tmpfs ont été purgés : %s", r.get(1))
+                .withFailMessage("le témoin doit réussir : le programme compile et tourne : %s",
+                        r.get(1))
                 .isTrue();
+    }
+
+    @Test
+    void shared_tmpfs_are_purged_between_cases() {
+        require("C");
+        // Isolation entre les cas : /tmp et /dev/shm sont communs à tout le conteneur, et le
+        // dossier du cas sous /box (dont work/tmp, le TMPDIR de l'étudiant) survivrait s'il
+        // n'était pas libéré. Un fichier déposé au cas N (nonce exfiltré, relais) serait lisible
+        // au cas N+1. Le superviseur purge /tmp et /dev/shm à la fin de chaque exécution
+        // (run_proc, run_pair) et entre deux cas (after_case_cleanup), puis supprime
+        // /box/cases/<N>.
+        //
+        // Même motif que no_submitted_process_survives_into_the_next_case : le superviseur
+        // MÉLANGE l'ordre des cas, donc trois cas IDENTIQUES. Chacun vérifie EN ENTRÉE qu'aucune
+        // marque d'un autre cas n'est visible, puis pose les siennes ; quel que soit l'ordre
+        // tiré, deux d'entre eux en suivent un autre. On cherche la MARQUE plutôt qu'un dossier
+        // strictement vide : un outil du conteneur peut légitimement y laisser une entrée (la JVM
+        // pose hsperfdata dans /tmp), et ce n'est pas ce qu'on vérifie ici.
+        String probe = """
+                #include <dirent.h>
+                #include <fcntl.h>
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <string.h>
+                #include <unistd.h>
+
+                #define MARQUE "sonde-purge"
+
+                /* Vrai si `dossier` contient une marque, ou s'il est illisible (la sonde ne
+                   prouverait alors rien : on échoue plutôt que de passer à vide). */
+                static int marque_dans(const char *dossier) {
+                    DIR *d = opendir(dossier);
+                    if (!d) { return 1; }
+                    struct dirent *e;
+                    int trouve = 0;
+                    while (!trouve && (e = readdir(d))) {
+                        trouve = strncmp(e->d_name, MARQUE, strlen(MARQUE)) == 0;
+                    }
+                    closedir(d);
+                    return trouve;
+                }
+
+                /* Vrai si le TMPDIR d'un AUTRE cas (/box/cases/<k>/work/tmp) porte encore une
+                   marque : son dossier de cas a survécu. */
+                static int marque_dans_un_autre_cas(int mien) {
+                    DIR *d = opendir("/box/cases");
+                    if (!d) { return 1; }
+                    struct dirent *e;
+                    char chemin[512];
+                    int trouve = 0;
+                    while (!trouve && (e = readdir(d))) {
+                        if (e->d_name[0] < '0' || e->d_name[0] > '9' || atoi(e->d_name) == mien) {
+                            continue;
+                        }
+                        snprintf(chemin, sizeof chemin, "/box/cases/%s/work/tmp/" MARQUE,
+                                 e->d_name);
+                        trouve = access(chemin, F_OK) == 0;
+                    }
+                    closedir(d);
+                    return trouve;
+                }
+
+                static int poser(const char *dossier) {
+                    char chemin[512];
+                    snprintf(chemin, sizeof chemin, "%s/" MARQUE, dossier);
+                    int fd = open(chemin, O_CREAT | O_WRONLY, 0600);
+                    if (fd < 0) { return 0; }
+                    close(fd);
+                    return 1;
+                }
+
+                int sonde(int n) {
+                    const char *tmpdir = getenv("TMPDIR");
+                    int mien = -1;
+                    if (!tmpdir || sscanf(tmpdir, "/box/cases/%d/", &mien) != 1) { return 0; }
+                    int propre = !marque_dans("/tmp") && !marque_dans("/dev/shm")
+                            && !marque_dans_un_autre_cas(mien);
+                    /* Les marques DOIVENT être posées : sinon le cas suivant ne trouverait rien
+                       à voir, et le test passerait à vide. */
+                    int pose = poser("/tmp") && poser("/dev/shm") && poser(tmpdir);
+                    return propre && pose ? n * 2 : 0;
+                }
+                """;
+        List<TestResult> r = evaluator.evaluate("C", probe, List.of(
+                new TestCaseInput("un", "return sonde(1) == 2;", 1),
+                new TestCaseInput("deux", "return sonde(2) == 4;", 1),
+                new TestCaseInput("trois", "return sonde(3) == 6;", 1)), null);
+        assertThat(r)
+                .withFailMessage("chaque cas doit démarrer sans marque d'un autre cas dans /tmp, "
+                        + "/dev/shm ni dans le TMPDIR d'un autre cas sous /box : %s", r)
+                .extracting(TestResult::passed).containsExactly(true, true, true);
     }
 
     @Test

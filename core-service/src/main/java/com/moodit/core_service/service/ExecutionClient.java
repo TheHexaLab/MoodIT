@@ -31,7 +31,9 @@ import java.util.Map;
  * Appelle le service d'EXÉCUTION (conteneurs runner Docker, #116) pour corriger une question Code. Endpoint
  * INTERNE (non exposé par le gateway), authentifié par un jeton partagé {@code X-Internal-Token}.
  * Renvoie le verdict {@code passed} ALIGNÉ sur l'ordre des harnais fournis ; {@code null} en cas
- * d'échec d'appel (la tentative est alors supprimée par {@code QuizService}).
+ * d'échec d'appel, et {@link CodeVerificationNoVerdictException} quand le service répond 502
+ * {@code sans_verdict} (le conteneur a tourné sans rendre de verdict). {@code QuizService} supprime
+ * alors la tentative, ou la garde « à revoir » une fois le plafond d'échecs sans verdict atteint.
  *
  * <p>Un service INJOIGNABLE (connexion refusée, nom introuvable : il redémarre ou n'a pas fini de
  * démarrer) est retenté pendant {@code app.execution-service.unreachable-retry-ms} avant de
@@ -117,10 +119,12 @@ public class ExecutionClient {
      *       {@code EXEC_INTERNAL_QUEUE_WAIT_MS}, comme {@code EXEC_INTERPRETED_BUDGET_MS} pour
      *       le budget serveur : surcharger l'une ou l'autre d'un côté impose la même valeur de
      *       l'autre), plus {@code max(per-test-timeout-ms, temps limite + marge)}, plus le
-     *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris) ;</li>
+     *       MUR du runner (75 s : démarrage du conteneur, compilation exec — tsc compris), plus
+     *       35 s de cycle de vie du conteneur (création, copie, arrêt) ;</li>
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
-     *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + 90 s de
-     *       compilation par cas + 5 s d'inventaire {@code --list})).</li>
+     *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + compilations
+     *       × 90 s + 5 s d'inventaire {@code --list}), 3 compilations par cas en Java et 2
+     *       ailleurs), plus 35 s de cycle de vie du conteneur.</li>
      * </ul>
      * Surestimer est sans danger (la correction tourne en tâche de fond) ; sous-estimer supprime
      * la tentative d'un étudiant pendant une correction encore en cours — le bug de #216.
@@ -136,7 +140,7 @@ public class ExecutionClient {
         if (compiled(language)) {
             // UN conteneur pour tout le job (une seule attente de file, une seule place) :
             // miroir du mur de DockerEvaluator — 30 s de base + (N cas + 2 canaris) ×
-            // (run planché VM + 10 s de marge + 90 s de compilation par cas + 5 s d'inventaire).
+            // (run planché VM + 10 s de marge + compilations × 90 s + 5 s d'inventaire).
             // CHAQUE terme du perCase serveur doit avoir son miroir ici : il est multiplié par
             // le nombre de cas, donc en oublier un creuse un écart proportionnel.
             long cases = (Math.max(workUnits, 2) + 2L) / 2;   // unités 2N+2 → N+2

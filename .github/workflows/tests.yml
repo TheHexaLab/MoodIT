@@ -504,15 +504,17 @@ jobs:
         run: bash docker/runners/build.sh
 
       # Filet de régression du confinement : la propriété « écritures étudiantes confinées aux
-      # tmpfs » repose sur le verrouillage des répertoires monde-inscriptibles des images — une
-      # mise à jour de digest pourrait en réintroduire un sans aucun signal.
-      - name: Aucun répertoire monde-inscriptible dans les images (hors tmpfs bornés)
+      # tmpfs » repose sur l'absence de tout emplacement monde-inscriptible dans les images (le
+      # rootfs n'est pas en lecture seule) — une mise à jour de digest pourrait réintroduire un
+      # répertoire, ou un FICHIER en 0666 que l'UID étudiant ferait grossir sur le disque de
+      # l'hôte, sans aucun signal. Les périphériques (/dev/null…) ne sont pas concernés.
+      - name: Aucun emplacement monde-inscriptible dans les images (hors tmpfs bornés)
         run: |
           for lang in java csharp go rust c python node php bash sqlite; do
             # -xdev ne traverse pas les autres montages : /dev (donc /dev/shm, tmpfs 1777 monté
             # d'office par Docker et borné par withTmpFs) doit être inspecté explicitement.
             all=$(docker run --rm --entrypoint sh "moodit-runner-$lang:latest" \
-              -c "find / /dev -xdev -type d -perm -0002 2>/dev/null | sort -u")
+              -c "find / /dev -xdev \( -type d -o -type f -o -type p -o -type s \) -perm -0002 2>/dev/null | sort -u")
             # ASSERTION DE VIVACITÉ : /tmp est 1777 dans toutes ces images, donc un inventaire
             # VIDE ne veut pas dire « rien à signaler », il veut dire que rien n'a été
             # inspecté (image absente, langage mal orthographié ci-dessus, démon en erreur).
@@ -524,7 +526,7 @@ jobs:
             fi
             extra=$(printf '%s\n' "$all" | grep -vE '^(/tmp|/dev/shm|/dev/mqueue)$' || true)
             if [ -n "$extra" ]; then
-              echo "::error::Répertoires monde-inscriptibles dans moodit-runner-$lang : $extra"
+              echo "::error::Emplacements monde-inscriptibles dans moodit-runner-$lang : $extra"
               exit 1
             fi
           done

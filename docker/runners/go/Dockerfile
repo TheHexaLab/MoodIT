@@ -1,12 +1,12 @@
 # Runner de notation Go (#116) : toolchain Go (go build) + superviseur.
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
-# /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
+# /box, /tmp et /dev/shm (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
 # cgo inutile aux harnais et surface en moins pour la compilation ROOT de sources non fiables.
 FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
 
 ENV CGO_ENABLED=0
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner vide la liste des paquets (cette image tire de
 # deb.debian.org ; le cas d'archive.ubuntu.com, a grosse reponse DNS, ne concerne que les
 # images java et csharp, qui basculent sur un miroir dedie).

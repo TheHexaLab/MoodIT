@@ -34,7 +34,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Compléments à {@link ExecutionServiceTest} (Piston mocké, assembleur réel) : exécution simple
+ * Compléments à {@link ExecutionServiceTest} (RunnerExec mocké, assembleur réel) : exécution simple
  * (« run »), messages d'échec exposés au prof, verdict SQL (cas dégradés) et chemins d'échec de
  * l'exécution SQL isolée en deux phases. Chaque test fige le MESSAGE exact renvoyé : c'est ce que
  * voit le prof qui met au point son harnais.
@@ -59,16 +59,16 @@ class ExecutionServiceEdgeCasesTest {
         return new RunnerExec.Stage(stdout, stderr, code, signal, message);
     }
 
-    /** Piston renvoie le résultat calculé à partir des fichiers soumis. */
-    private void piston(Function<List<RunnerExec.File>, RunnerExec.Result> fn) {
+    /** Le runner (mode exec) renvoie le résultat calculé à partir des fichiers soumis. */
+    private void runnerReturns(Function<List<RunnerExec.File>, RunnerExec.Result> fn) {
         // Re-programmation : on repart d'un mock vierge (sinon when(...) rappelle l'ancienne réponse).
         reset(runner);
         when(runner.execute(anyString(), any(), any(), any())).thenAnswer((Answer<RunnerExec.Result>) inv ->
                 fn.apply(inv.getArgument(1)));
     }
 
-    private void pistonRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
-        piston(files -> new RunnerExec.Result(null, runFn.apply(files), null));
+    private void runnerRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
+        runnerReturns(files -> new RunnerExec.Result(null, runFn.apply(files), null));
     }
 
     @Test
@@ -117,7 +117,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_exception_du_programme_n_est_pas_une_erreur_et_garde_stderr() {
-        pistonRun(f -> stage("", "Traceback: ZeroDivisionError", 1, null, null));
+        runnerRun(f -> stage("", "Traceback: ZeroDivisionError", 1, null, null));
 
         RunResult r = service.run(new RunRequest("Python", null, "1/0"));
 
@@ -126,7 +126,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_echec_de_compilation_remonte_la_sortie_de_compilation() {
-        piston(f -> new RunnerExec.Result(stage("", "main.c:1: erreur", 1, null, null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("", "main.c:1: erreur", 1, null, null), null, null));
 
         RunResult r = service.run(new RunRequest("C", null, "int main( {"));
 
@@ -135,12 +135,12 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_echec_de_compilation_sans_stderr_utilise_le_message_puis_un_libelle_par_defaut() {
-        piston(f -> new RunnerExec.Result(stage("sortie compil", "  ", 2, "SIGTERM", "msg Piston"), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("sortie compil", "  ", 2, "SIGTERM", "msg du runner"), null, null));
         RunResult withMessage = service.run(new RunRequest("C", null, "x"));
         // stderr vide → message ; la sortie de compil retombe sur stdout ; le signal est transmis.
-        assertThat(withMessage).isEqualTo(new RunResult("", "msg Piston", 2, "SIGTERM", "sortie compil", false));
+        assertThat(withMessage).isEqualTo(new RunResult("", "msg du runner", 2, "SIGTERM", "sortie compil", false));
 
-        piston(f -> new RunnerExec.Result(stage(null, null, 1, null, null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage(null, null, 1, null, null), null, null));
         RunResult bare = service.run(new RunRequest("C", null, "x"));
         assertThat(bare).isEqualTo(new RunResult("", "Échec de compilation", 1, null, null, false));
     }
@@ -148,7 +148,7 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void run_killed_compilation_reported_as_interrupted() {
         // Le superviseur rend une compilation tuée SANS code, avec un signal, et sans étape run.
-        piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
 
         RunResult r = service.run(new RunRequest("TypeScript", null, "let x = 1"));
 
@@ -159,7 +159,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_killed_compilation_fails_case_with_interrupted_detail() {
-        piston(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("", "", null, "SIGKILL", null), null, null));
 
         List<TestResult> r = service.evaluate(new EvaluateRequest("TypeScript", null, "let x = 1",
                 List.of(new TestCaseInput("cas", "return true;", 1))));
@@ -172,7 +172,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_compilation_reussie_transmet_sa_sortie_avec_celle_du_programme() {
-        piston(f -> new RunnerExec.Result(stage("", "warning: unused", 0, null, null),
+        runnerReturns(f -> new RunnerExec.Result(stage("", "warning: unused", 0, null, null),
                 stage("42", "", 0, null, null), null));
 
         RunResult r = service.run(new RunRequest("C", null, "int main(){}"));
@@ -182,14 +182,14 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_compilation_au_code_absent_n_est_pas_un_echec() {
-        piston(f -> new RunnerExec.Result(stage("", "", null, null, null), stage("ok", "", 0, null, null), null));
+        runnerReturns(f -> new RunnerExec.Result(stage("", "", null, null, null), stage("ok", "", 0, null, null), null));
 
         assertThat(service.run(new RunRequest("Rust", null, "fn main(){}")).stdout()).isEqualTo("ok");
     }
 
     @Test
     void run_sans_etape_run_renvoie_un_message_explicite() {
-        piston(f -> new RunnerExec.Result(null, null, null));
+        runnerReturns(f -> new RunnerExec.Result(null, null, null));
 
         RunResult r = service.run(new RunRequest("Python", null, ""));
 
@@ -198,7 +198,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void run_interrompu_par_un_signal_est_marque_timedOut_et_sorties_nulles_vides() {
-        pistonRun(f -> stage(null, null, null, "SIGKILL", null));
+        runnerRun(f -> stage(null, null, null, "SIGKILL", null));
 
         RunResult r = service.run(new RunRequest("Python", null, "while True: pass"));
 
@@ -209,7 +209,7 @@ class ExecutionServiceEdgeCasesTest {
     void run_tronque_les_sorties_trop_longues() {
         String big = "a".repeat(20_001);
         String exact = "b".repeat(20_000);
-        pistonRun(f -> stage(big, exact, 0, null, null));
+        runnerRun(f -> stage(big, exact, 0, null, null));
 
         RunResult r = service.run(new RunRequest("Python", null, "print('a'*20001)"));
 
@@ -218,7 +218,7 @@ class ExecutionServiceEdgeCasesTest {
     }
 
     @Test
-    void run_langage_non_supporte_n_appelle_pas_piston() {
+    void run_unsupported_language_starts_no_container() {
         assertThatThrownBy(() -> service.run(new RunRequest("HTML", null, "<p>")))
                 .isInstanceOf(UnsupportedLanguageException.class);
         verify(runner, never()).execute(anyString(), any(), any(), any());
@@ -236,7 +236,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_passes_normalized_runtime_to_runner() {
-        pistonRun(f -> stage("", nonceIn(f), 0, null, null));
+        runnerRun(f -> stage("", nonceIn(f), 0, null, null));
 
         service.evaluate(new EvaluateRequest("Python", null, "def f(): pass",
                 List.of(new TestCaseInput("t", "return True", 1))));
@@ -246,7 +246,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_nonce_sur_stdout_vaut_aussi_reussite() {
-        pistonRun(f -> stage("bruit " + nonceIn(f), "", 0, null, null));
+        runnerRun(f -> stage("bruit " + nonceIn(f), "", 0, null, null));
 
         TestResult t = single("Python", "def f(): pass", "return True");
 
@@ -256,7 +256,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_nonce_present_mais_signal_vaut_echec() {
-        pistonRun(f -> stage("", nonceIn(f), null, "SIGKILL", null));
+        runnerRun(f -> stage("", nonceIn(f), null, "SIGKILL", null));
 
         TestResult t = single("Python", "def f(): pass", "return True");
 
@@ -268,7 +268,7 @@ class ExecutionServiceEdgeCasesTest {
     void evaluate_chaque_harnais_a_son_propre_nonce() {
         // Anti-triche : le nonce d'un test ne permet pas de réussir un autre test.
         List<String> nonces = new ArrayList<>();
-        pistonRun(f -> {
+        runnerRun(f -> {
             nonces.add(nonceIn(f));
             // Le 2e appel renvoie le nonce du 1er : doit échouer.
             return stage("", nonces.get(0), 0, null, null);
@@ -286,7 +286,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_sans_etape_run_echoue_avec_message() {
-        piston(f -> new RunnerExec.Result(null, null, null));
+        runnerReturns(f -> new RunnerExec.Result(null, null, null));
 
         TestResult t = single("Python", "", "return True");
 
@@ -296,19 +296,19 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void evaluate_detail_d_echec_stderr_puis_message_puis_libelle_par_defaut() {
-        pistonRun(f -> stage("", "AssertionError", 1, null, "msg"));
+        runnerRun(f -> stage("", "AssertionError", 1, null, "msg"));
         assertThat(single("Python", "", "return False").detail()).isEqualTo("AssertionError");
 
-        pistonRun(f -> stage("", " ", 1, null, "msg"));
+        runnerRun(f -> stage("", " ", 1, null, "msg"));
         assertThat(single("Python", "", "return False").detail()).isEqualTo("msg");
 
-        pistonRun(f -> stage("", null, 1, null, null));
+        runnerRun(f -> stage("", null, 1, null, null));
         assertThat(single("Python", "", "return False").detail()).isEqualTo("Le harnais a renvoyé faux");
     }
 
     @Test
     void evaluate_detail_d_echec_est_borne_a_2000_caracteres() {
-        pistonRun(f -> stage("", "e".repeat(5000), 1, null, null));
+        runnerRun(f -> stage("", "e".repeat(5000), 1, null, null));
 
         assertThat(single("Python", "", "return False").detail()).isEqualTo("e".repeat(2000));
     }
@@ -320,15 +320,15 @@ class ExecutionServiceEdgeCasesTest {
         // moodit-runner-node), et le superviseur n'alimente jamais `message` — cf.
         // RunnerExec.Stage. Seul stderr était lu : le détail se réduisait à « Échec de
         // compilation », sans dire où.
-        piston(f -> new RunnerExec.Result(
+        runnerReturns(f -> new RunnerExec.Result(
                 stage("main.ts(1,12): error TS1138", "", 2, null, null), null, null));
         assertThat(single("TypeScript", "", "return true;").detail())
                 .isEqualTo("main.ts(1,12): error TS1138");
         // stderr garde la priorité quand il est renseigné.
-        piston(f -> new RunnerExec.Result(stage("bruit", "erreur tsc", 1, null, null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("bruit", "erreur tsc", 1, null, null), null, null));
         assertThat(single("TypeScript", "", "return true;").detail()).isEqualTo("erreur tsc");
 
-        piston(f -> new RunnerExec.Result(stage("", "", 1, null, null), null, null));
+        runnerReturns(f -> new RunnerExec.Result(stage("", "", 1, null, null), null, null));
         TestResult t = single("TypeScript", "", "return true;");
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Échec de compilation");
@@ -338,7 +338,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_sans_etape_run() {
-        piston(f -> new RunnerExec.Result(null, null, null));
+        runnerReturns(f -> new RunnerExec.Result(null, null, null));
 
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
 
@@ -348,7 +348,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_interrompu_par_un_signal() {
-        pistonRun(f -> stage(sqlFenced(f, "1"), "", null, "SIGKILL", null));
+        runnerRun(f -> stage(sqlFenced(f, "1"), "", null, "SIGKILL", null));
 
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
 
@@ -358,22 +358,22 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_erreur_d_execution_remonte_stderr_sinon_message_sinon_libelle() {
-        pistonRun(f -> stage("", "no such table: t", 1, null, null));
+        runnerRun(f -> stage("", "no such table: t", 1, null, null));
         assertThat(single("SQL", "SELECT * FROM t", "SELECT 1;").detail()).isEqualTo("no such table: t");
 
-        pistonRun(f -> stage("", "", 1, null, "msg"));
+        runnerRun(f -> stage("", "", 1, null, "msg"));
         assertThat(single("SQL", "SELECT 1", "SELECT 1;").detail()).isEqualTo("msg");
 
-        pistonRun(f -> stage("", "", 1, null, null));
+        runnerRun(f -> stage("", "", 1, null, null));
         assertThat(single("SQL", "SELECT 1", "SELECT 1;").detail()).isEqualTo("Erreur SQL");
     }
 
     @Test
     void sql_verdict_introuvable_remonte_stderr_sinon_message_par_defaut() {
-        pistonRun(f -> stage("1\n", "Parse error near line 3", 0, null, null));
+        runnerRun(f -> stage("1\n", "Parse error near line 3", 0, null, null));
         assertThat(single("SQL", "SELECT 1", "SELECT 1;").detail()).isEqualTo("Parse error near line 3");
 
-        pistonRun(f -> stage(null, null, 0, null, null));
+        runnerRun(f -> stage(null, null, 0, null, null));
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Verdict du harnais introuvable (sortie corrompue ?)");
@@ -381,7 +381,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_sentinelle_de_fin_absente_vaut_verdict_introuvable() {
-        pistonRun(f -> stage(CodeAssembler.sqlVerdictStart(nonceIn(f)) + "\n1\n", "", 0, null, null));
+        runnerRun(f -> stage(CodeAssembler.sqlVerdictStart(nonceIn(f)) + "\n1\n", "", 0, null, null));
 
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
 
@@ -391,7 +391,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_verdict_null_est_rapporte_comme_aucune_valeur() {
-        pistonRun(f -> stage(sqlFenced(f, ""), "", 0, null, null));
+        runnerRun(f -> stage(sqlFenced(f, ""), "", 0, null, null));
 
         TestResult t = single("SQL", "SELECT 1", "SELECT NULL;");
 
@@ -401,7 +401,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_verdict_faux_rapporte_la_valeur_lue() {
-        pistonRun(f -> stage(sqlFenced(f, "0"), "", 0, null, null));
+        runnerRun(f -> stage(sqlFenced(f, "0"), "", 0, null, null));
 
         assertThat(single("SQL", "SELECT 1", "SELECT 0;").detail()).isEqualTo("Le harnais a renvoyé faux (valeur : 0)");
     }
@@ -409,7 +409,7 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void sql_verdict_est_la_derniere_ligne_non_vide_entre_sentinelles() {
         // Sentinelles entourées d'espaces (\r de fin de ligne, etc.) : tolérées.
-        pistonRun(f -> {
+        runnerRun(f -> {
             String n = nonceIn(f);
             return stage("  " + CodeAssembler.sqlVerdictStart(n) + " \r\n0\n  1  \n\n"
                     + CodeAssembler.sqlVerdictEnd(n) + "\r\n", "", 0, null, null);
@@ -422,18 +422,18 @@ class ExecutionServiceEdgeCasesTest {
     void sql_sentinelle_de_debut_en_double_fait_echouer_le_verdict() {
         // #23 : le programme n'imprime qu'un bloc. Un second, avant ou après le vrai, vient d'une
         // sortie forgée : le verdict n'est lu dans aucun des deux.
-        pistonRun(f -> stage(sqlFenced(f, "1") + sqlFenced(f, "1"), "", 0, null, null));
+        runnerRun(f -> stage(sqlFenced(f, "1") + sqlFenced(f, "1"), "", 0, null, null));
         TestResult t = single("SQL", "SELECT 1", "SELECT 1;");
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Verdict du harnais introuvable (sortie corrompue ?)");
 
         // Début seul en double, sans seconde fin : même refus.
-        pistonRun(f -> stage(CodeAssembler.sqlVerdictStart(nonceIn(f)) + "\n" + sqlFenced(f, "1"),
+        runnerRun(f -> stage(CodeAssembler.sqlVerdictStart(nonceIn(f)) + "\n" + sqlFenced(f, "1"),
                 "", 0, null, null));
         assertThat(single("SQL", "SELECT 1", "SELECT 1;").passed()).isFalse();
 
         // Une fin en double, elle, ne gêne pas : le bloc s'arrête à la première.
-        pistonRun(f -> stage(sqlFenced(f, "1") + CodeAssembler.sqlVerdictEnd(nonceIn(f)) + "\n",
+        runnerRun(f -> stage(sqlFenced(f, "1") + CodeAssembler.sqlVerdictEnd(nonceIn(f)) + "\n",
                 "", 0, null, null));
         assertThat(single("SQL", "SELECT 1", "SELECT 1;").passed()).isTrue();
     }
@@ -454,11 +454,11 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_phase1_sans_run_ou_interrompue() {
-        piston(f -> new RunnerExec.Result(null, null, null));
+        runnerReturns(f -> new RunnerExec.Result(null, null, null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
                 .isEqualTo("Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
 
-        pistonRun(f -> stage("", "", null, "SIGKILL", null));
+        runnerRun(f -> stage("", "", null, "SIGKILL", null));
         TestResult t = single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS);
         assertThat(t.passed()).isFalse();
         assertThat(t.detail()).isEqualTo("Interrompu en phase 1 (dépassement de temps ou de mémoire probable)");
@@ -466,7 +466,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_erreur_en_phase1_remonte_le_stderr_etudiant_sans_phase2() {
-        pistonRun(f -> stage("", "near \"x\": syntax error", 1, null, null));
+        runnerRun(f -> stage("", "near \"x\": syntax error", 1, null, null));
 
         TestResult t = single("SQL", "x", MUTATION_HARNESS);
 
@@ -476,7 +476,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_erreur_en_phase1_sans_stderr() {
-        pistonRun(f -> stage("", "", 1, null, null));
+        runnerRun(f -> stage("", "", 1, null, null));
 
         assertThat(single("SQL", "x", MUTATION_HARNESS).detail()).isEqualTo("Erreur SQL (ton code)");
     }
@@ -484,7 +484,7 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void sql_modification_dump_introuvable() {
         // L'étudiant a avalé les sentinelles (ex. commentaire non fermé) : pas de dump lisible.
-        pistonRun(f -> stage("1\n", "", 0, null, null));
+        runnerRun(f -> stage("1\n", "", 0, null, null));
 
         TestResult t = single("SQL", "/*", MUTATION_HARNESS);
 
@@ -493,7 +493,7 @@ class ExecutionServiceEdgeCasesTest {
         verify(runner, times(1)).execute(anyString(), any(), any(), any());
 
         // Début du dump en double (#23) : sortie forgée, le dump n'est pas relu, pas de phase 2.
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(CodeAssembler.sqlDumpStart(nonceIn(f)) + "\n" + dump(f, "CREATE TABLE t(n INT);\n"),
                         "", 0, null, null)
                 : stage(sqlFenced(f, "1"), "", 0, null, null));
@@ -506,7 +506,7 @@ class ExecutionServiceEdgeCasesTest {
     void sql_modification_le_nonce_du_dump_n_est_pas_celui_du_verdict() {
         // #23 : le code soumis tourne en phase 1 ; rien de ce qui s'y trouve ne vaut en phase 2.
         List<String> nonces = new ArrayList<>();
-        pistonRun(f -> {
+        runnerRun(f -> {
             nonces.add(nonceIn(f));
             return isPhase1(f)
                     ? stage(dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"), "", 0, null, null)
@@ -518,7 +518,7 @@ class ExecutionServiceEdgeCasesTest {
 
         // Le verdict encadré par le nonce du DUMP ne compte pas.
         String[] dumpNonce = new String[1];
-        pistonRun(f -> {
+        runnerRun(f -> {
             if (isPhase1(f)) {
                 dumpNonce[0] = nonceIn(f);
                 return stage(dump(f, "CREATE TABLE t(n INT);\n"), "", 0, null, null);
@@ -532,7 +532,7 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void sql_modification_dump_trop_volumineux_est_refuse_sans_phase2() {
         ReflectionTestUtils.setField(service, "maxSqlDumpChars", 50);
-        pistonRun(f -> stage(dump(f, "INSERT INTO t VALUES(" + "9".repeat(60) + ");\n"), "", 0, null, null));
+        runnerRun(f -> stage(dump(f, "INSERT INTO t VALUES(" + "9".repeat(60) + ");\n"), "", 0, null, null));
 
         TestResult t = single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS);
 
@@ -545,7 +545,7 @@ class ExecutionServiceEdgeCasesTest {
     void sql_modification_schema_reecrit_avec_un_parametre_est_refuse_sans_phase2() {
         // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema) ; le `$x(/*)` cachait
         // une vue TEMP qui s'exécutait en phase 2. Dump refusé, la phase 2 ne part pas.
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, "CREATE TABLE t(n INT);INSERT INTO t VALUES($x(/*),0);"
                         + "CREATE TEMP VIEW t AS SELECT 0 AS n;SELECT 1 /* */;\n"), "", 0, null, null)
                 : stage(sqlFenced(f, "1"), "", 0, null, null));
@@ -562,7 +562,7 @@ class ExecutionServiceEdgeCasesTest {
         // #23 : au-delà de son plafond en octets, le superviseur garde la tête et la queue de la
         // sortie. Les sentinelles survivent, le dump a perdu son milieu (la ligne fautive avec) :
         // la phase 2 ne doit pas noter cet état partiel.
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES('漢\n"
                         + "… (sortie tronquée au milieu : 1200055 octets)\n漢');\n"), "", 0, null, null)
                 : stage(sqlFenced(f, "1"), "", 0, null, null));
@@ -576,7 +576,7 @@ class ExecutionServiceEdgeCasesTest {
 
         // Sortie de débogage géante AVANT le dump : c'est elle que la coupe a touchée, le dump
         // est complet. La réponse est notée normalement (phase 2 lancée).
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage("ligne\n… (sortie tronquée au milieu : 1200048 octets)\nligne\n"
                         + dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"), "", 0, null, null)
                 : stage(sqlFenced(f, "1"), "", 0, null, null));
@@ -588,7 +588,7 @@ class ExecutionServiceEdgeCasesTest {
     void sql_modification_dump_exactement_a_la_limite_est_accepte() {
         ReflectionTestUtils.setField(service, "maxSqlDumpChars", 50);
         String body = "-- " + "x".repeat(47); // dump relu : exactement 50 caractères
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, body + "\n"), "", 0, null, null)
                 : stage(sqlFenced(f, "1"), "", 0, null, null));
 
@@ -602,7 +602,7 @@ class ExecutionServiceEdgeCasesTest {
     @Test
     void sql_modification_phase2_ne_recharge_que_les_tables_du_prof() {
         List<String> phase2 = new ArrayList<>();
-        pistonRun(f -> {
+        runnerRun(f -> {
             if (isPhase1(f)) {
                 return stage("bruit étudiant\n" + dump(f, "PRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\n"
                         + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
@@ -624,7 +624,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_erreur_en_phase2_ne_fuit_pas_le_stderr_du_harnais() {
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, "CREATE TABLE t(n INT);\n"), "", 0, null, null)
                 : stage("", "no such table: reference_secrete", 1, null, null));
 
@@ -636,7 +636,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_phase2_sans_run_ou_interrompue() {
-        piston(f -> isPhase1(f)
+        runnerReturns(f -> isPhase1(f)
                 ? new RunnerExec.Result(null, stage(dump(f, ""), "", 0, null, null), null)
                 : new RunnerExec.Result(null, null, null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
@@ -646,7 +646,7 @@ class ExecutionServiceEdgeCasesTest {
         // interruptions, pour le prof. (La boucle d'evaluation, elle, lit le SIGNAL de l'etape
         // pour savoir que l'etudiant a consomme le budget — cf.
         // ExecutionServiceTest.budget_exhausted_by_interrupted_harness_stays_a_grade.)
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, ""), "", 0, null, null)
                 : stage("", "", null, "SIGKILL", null));
         assertThat(single("SQL", "UPDATE t SET n=0", MUTATION_HARNESS).detail())
@@ -655,7 +655,7 @@ class ExecutionServiceEdgeCasesTest {
 
     @Test
     void sql_modification_verdict_faux_en_phase2() {
-        pistonRun(f -> isPhase1(f)
+        runnerRun(f -> isPhase1(f)
                 ? stage(dump(f, "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(1);\n"), "", 0, null, null)
                 : stage(sqlFenced(f, "0"), "", 0, null, null));
 

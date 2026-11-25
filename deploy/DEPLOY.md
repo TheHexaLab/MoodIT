@@ -159,6 +159,8 @@ Le serveur suit la branche `deploiement`, qui ne reçoit que `main` (#235) :
 docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql
 ```
 
+### Premier déploiement de #116
+
 > **Premier déploiement de #116 — l'ancien `update.sh` s'exécute.** Le script qui tire cette
 > version est celui d'AVANT elle (bash garde le fichier ouvert) : il ne construit pas les images
 > runner, ne pose pas `MOODIT_RUNNER_TAG`, ne passe pas `--remove-orphans`, et surveille encore
@@ -232,9 +234,12 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > **Harnais qui testent une exception.** Le noteur étant un autre programme, une exception du
 > code soumis ne lui parvient pas avec son type : Java la relance en `RuntimeException`
-> générique, C, C++, C#, Rust et Go s'arrêtent à l'appel refusé. Un harnais « doit lever X »
-> (`catch (IllegalArgumentException e)`, `assertThrows`, `catch_unwind`, `recover()`…) écrit
-> pour Piston note donc 0 à toute bonne réponse. Le rejeu du code de départ, qui ne lève rien,
+> générique, Go en `panic` générique (`recover()` le rattrape, sans la valeur d'origine), C, C++,
+> C# et Rust s'arrêtent à l'appel refusé. Un harnais « doit lever X »
+> (`catch (IllegalArgumentException e)`, `assertThrows`, `catch_unwind`, un `recover()` qui
+> examine la valeur…) écrit pour Piston note donc 0 à toute bonne réponse ; un harnais Java ou Go
+> qui vérifie seulement qu'une exception a lieu (`catch (RuntimeException e)`, `recover() != nil`)
+> fonctionne toujours. Le rejeu du code de départ, qui ne lève rien,
 > ne le montre pas : le script détecte ces harnais à leur texte et les sort À VÉRIFIER. Les
 > réécrire sans exception (la fonction rend une valeur sentinelle, par exemple), puis les
 > rejouer avec une solution.
@@ -514,7 +519,8 @@ Si le modèle est injoignable ou la clé absente, `mcp-service` produit une anal
   est supprimée et l'étudiant resoumet. File d'attente publique
   `EXEC_QUEUE_WAIT_MS` (15 s en prod) et `EXEC_MAX_PER_USER` requêtes en cours par utilisateur ;
   au-delà, l'interface affiche « Trop d'exécutions en cours ».
-- **Runner des langages compilés (#116)** : les questions Go/Rust/C/C++/C#/Java sont notées dans
+- **Runner Docker (#116)** : TOUTE exécution (notation des questions Go/Rust/C/C++/C#/Java,
+  mode exec des interprétés, SQL et vues, « Exécuter » et « Tester ») tourne dans
   des conteneurs jetables `moodit-runner-*` (réseau coupé, écritures étudiantes confinées aux
   tmpfs bornés `/box`, `/tmp` et `/dev/shm` — dimensionnés d'après la mémoire du conteneur et
   comptés dedans —, `SANDBOX_MEMORY_MB` de mémoire, 512 PID, `SANDBOX_CPUS`,

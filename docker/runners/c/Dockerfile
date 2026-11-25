@@ -1,9 +1,9 @@
 # Une seule image pour les deux langages (même toolchain).
 # Lancé jetable par execution-service : réseau coupé, écritures confinées aux tmpfs bornés
-# /box et /tmp (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
+# /box, /tmp et /dev/shm (les répertoires monde-inscriptibles de l'image sont verrouillés ci-dessous).
 FROM gcc:14-bookworm@sha256:5e927c284bf55a7dc796262e311a0703344f62f41f5621eb56843111b1d37e15
 
-# Trois tentatives pour la mise a jour des index, comme pour npm plus bas dans ce depot :
+# Trois tentatives pour la mise a jour des index, comme pour npm dans execution-service/Dockerfile :
 # une panne DNS passagere du runner vide la liste des paquets (cette image tire de
 # deb.debian.org ; le cas d'archive.ubuntu.com, a grosse reponse DNS, ne concerne que les
 # images java et csharp, qui basculent sur un miroir dedie).

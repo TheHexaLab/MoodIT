@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Superviseur de notation MoodIT (#116) — processus de CONFIANCE du conteneur runner.
 
-Tourne en root dans un conteneur jetable (réseau coupé, /box et /tmp en tmpfs bornés — seuls
-points d'écriture de l'UID étudiant, les images verrouillant leurs répertoires monde-inscriptibles).
+Tourne en root dans un conteneur jetable (réseau coupé, /box, /tmp et /dev/shm en tmpfs bornés —
+seuls points d'écriture de l'UID étudiant, les images n'ayant aucun autre emplacement
+monde-inscriptible).
 Le code étudiant, lui, ne tourne JAMAIS en root : chaque cas est exécuté sous l'UID `student`,
 le harnais du prof tournant dans un AUTRE processus (le noteur), sources verrouillées en 700 root.
 
@@ -1094,7 +1095,7 @@ def set_owner_mode(fpath, uid, gid, mode, dir_mode=None):
     root pose ces droits dans des dossiers que le code soumis a pu toucher : par chemin, un
     lien pose a la place d'un fichier lui faisait changer la CIBLE. Ici un lien echoue (ELOOP,
     une OSError : panne d'environnement imputable, donc une note), et ce qui est change est
-    exactement ce qui a ete ouvert. `mode_dossier` s'applique si c'est un dossier."""
+    exactement ce qui a ete ouvert. `dir_mode` s'applique si c'est un dossier."""
     fd = os.open(fpath, os.O_RDONLY | O_NO_LINK)
     try:
         st = os.fstat(fd)
@@ -1558,8 +1559,7 @@ def inconclusive(outcome):
     return outcome.timed_out or outcome.killed or outcome.harness_build
 
 
-# Nom du test canari tiré au sort, par index de cas (vide pour un cas réel). Sert à
-# NONCE du verdict, un par cas : le noteur l'imprime sur SON stderr quand le harnais du prof
+# NONCE du verdict, un par cas (cas réels et canaris) : le noteur l'imprime sur SON stderr quand le harnais du prof
 # renvoie vrai, et lui seul le connaît. `redact_tokens` l'efface des sorties rendues.
 TOKENS = {}
 
@@ -2610,9 +2610,21 @@ def harness_mentions(harness_code, name):
 
     Recherche du MOT dans le CODE du harnais, commentaires et littéraux blanchis (blank_code,
     chaînes brutes Go comprises) : un `max` cité en commentaire n'emploie rien, et faisait
-    refuser la fonction d'aide `max` d'une réponse juste (revue #246)."""
+    refuser la fonction d'aide `max` d'une réponse juste (revue #246).
+
+    Le harnais est blanchi et découpé en mots UNE fois (_harness_words, en cache) : appelée pour
+    chaque nom soumis, la fonction le reblanchissait à chaque fois — 3,8 s par cas pour 4 000
+    fonctions soumises, hors de tout délai (revue #246)."""
+    if re.fullmatch(r"\w+", name):
+        return name in _harness_words(harness_code or "")
     code = blank_code(harness_code or "", backticks=True)
     return re.search(r"(?<!\w)%s(?!\w)" % re.escape(name), code) is not None
+
+
+@functools.lru_cache(maxsize=4)
+def _harness_words(harness_code):
+    """Mots du CODE du harnais (commentaires et littéraux blanchis), pour harness_mentions."""
+    return frozenset(re.findall(r"\w+", blank_code(harness_code, backticks=True)))
 
 
 # Identifiants prédéclarés dont le SERVEUR généré (compilé dans le paquet de l'étudiant) se
@@ -3356,8 +3368,11 @@ def go_student_without_main(source):
 # (temps quadratique : 8 s par cas pour 100 000 caracteres).
 # Qualificatifs et attributs d'une fonction libre : `constexpr int f(int)`, `[[nodiscard]] int
 # f(int)`, `int f(int) noexcept` étaient ignorés — « Aucune fonction exploitable », 0 sur une
-# réponse juste. Attributs bornés (pas de retour arrière coûteux).
-C_ATTRIBUTES = r"(?:\[\[[^\[\]\n]{0,80}\]\]\s*)*"
+# réponse juste. Attributs bornés, en nombre (8) comme en longueur, et sur la ligne de la
+# signature (un attribut seul sur sa ligne est sauté : le motif repart de la ligne suivante) :
+# `\s*` franchissait les fins de ligne, et 20 000 lignes `[[a]]` faisaient relire au motif tout le
+# reste depuis chaque ligne — 80 s par cas hors de tout délai (temps quadratique, revue #246).
+C_ATTRIBUTES = r"(?:\[\[[^\[\]\n]{0,80}\]\][ \t]*){0,8}"
 # Écritures d'un même type scalaire : `long int` est un `long`, `signed` un `int` (revue #246 :
 # non reconnues, la fonction n'était pas proxifiée). `long long`, `long double`, `unsigned`
 # restent hors liste (types non transportables). Plus longue d'abord.
@@ -4455,14 +4470,19 @@ def rust_signatures(source):
 
 
 # Attributs sur la même ligne (`#[derive(Debug)] struct R`) et visibilité restreinte
-# (`pub(crate)`) admis : la structure était ignorée, 0 sur une réponse juste.
+# (`pub(crate)`) admis : la structure était ignorée, 0 sur une réponse juste. Attributs bornés
+# comme dans RUST_FN (8, sur la ligne de la structure) : `\s*` franchissait les fins de ligne, et
+# 20 000 lignes `#[a]` faisaient relire tout le reste depuis chaque ligne — plus de 2 min par cas
+# hors de tout délai, ici comme dans RUST_STRUCT_BODY et RUST_UNIT_STRUCT (revue #246).
 RUST_STRUCT = re.compile(
-    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)", re.M)
+    r"^[ \t]*(?:#\[[^\]\n]{0,200}\][ \t]*){0,8}(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)", re.M)
 # `impl Type {` et `impl Trait for Type {` (génériques tolérés) : les méthodes d'un trait
 # implémenté s'appellent sur l'objet comme les autres. Groupe 1 : le trait, groupe 2 : le type.
 RUST_IMPL = re.compile(
     r"^[ \t]*impl(?:\s*<[^<>{};]*>)?\s+(?:(\w+)(?:\s*<[^<>{};]*>)?\s+for\s+)?(\w+)\s*\{", re.M)
-RUST_TRAIT = re.compile(r"^[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?trait\s+(\w+)[^{};]*\{", re.M)
+# En-tête de trait borné (1 000 caractères) : sans borne, `trait a` répété sans accolade faisait
+# lire tout le reste depuis chaque occurrence (temps quadratique, revue #246).
+RUST_TRAIT = re.compile(r"^[ \t]*(?:pub(?:\([^)\n]{0,80}\))?\s+)?trait\s+(\w+)[^{};]{0,1000}\{", re.M)
 
 
 def rust_impl_blocks(source):
@@ -4587,10 +4607,10 @@ def rust_object_api(source):
 
 
 RUST_STRUCT_BODY = re.compile(
-    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*\{([^{}]*)\}",
+    r"^[ \t]*(?:#\[[^\]\n]{0,200}\][ \t]*){0,8}(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*\{([^{}]*)\}",
     re.M | re.S)
 RUST_UNIT_STRUCT = re.compile(
-    r"^[ \t]*(?:#\[[^\]\n]*\]\s*)*(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*;", re.M)
+    r"^[ \t]*(?:#\[[^\]\n]{0,200}\][ \t]*){0,8}(?:pub(?:\([^)\n]{0,80}\))?\s+)?struct\s+(\w+)\s*;", re.M)
 
 
 def rust_struct_fields(source):
@@ -7030,8 +7050,10 @@ def main():
         job = json.load(f)
     # job.json decrit TOUS les cas (caches et canaris compris ; le code des harnais, lui, est dans
     # l'arbre des cas) : il est DEPLACE ici par
-    # wait_for_files avec les perms du tar, donc potentiellement lisible. On le ferme MAINTENANT,
-    # root l'ayant deja lu. Meme chose pour l'arbre des cas, par securite.
+    # wait_for_files avec les perms du tar, donc potentiellement lisible. En mode NOTATION, on le
+    # ferme MAINTENANT, root l'ayant deja lu (l'arbre des cas est verrouille plus loin, avant le
+    # premier cas). Le mode exec rend ensuite tout /box a l'etudiant (exec_main), job.json
+    # compris : sans danger, ce job ne porte aucun secret.
     try:
         os.chown(os.path.join(BOX, "job.json"), 0, 0)
         os.chmod(os.path.join(BOX, "job.json"), 0o600)

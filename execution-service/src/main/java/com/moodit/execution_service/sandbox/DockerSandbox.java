@@ -33,8 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Lance le CONTENEUR RUNNER jetable d'une notation compilée (#116) et en rapporte la sortie JSON
- * du superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
+ * Lance le CONTENEUR RUNNER jetable d'une exécution (#116) — notation compilée comme mode exec
+ * des interprétés, SQL et vues ({@link RunnerExec}) — et en rapporte la sortie JSON du superviseur. Un conteneur par évaluation : réseau coupé, écritures étudiantes confinées aux
  * tmpfs bornés {@code /box} et {@code /tmp}, mémoire/PID/CPU bornés, toutes les capacités
  * retirées sauf le minimum du superviseur, {@code no-new-privileges}. {@code SYS_PTRACE} n'est
  * PLUS accordée : elle servait à tracer le code soumis pour détecter une lecture du harnais, ce
@@ -251,8 +251,8 @@ public class DockerSandbox {
         return os.contains("win") ? "npipe:////./pipe/docker_engine" : "unix:///var/run/docker.sock";
     }
 
-    // Initialisation PARESSEUSE : le service doit démarrer même sans démon Docker (seules les
-    // notations compilées en dépendent) — même philosophie que Piston injoignable.
+    // Initialisation PARESSEUSE : le service doit démarrer même sans démon Docker ; chaque
+    // exécution (tous langages) échoue alors en 502 « sandbox indisponible », sans bloquer le reste.
     private DockerClient client() {
         DockerClient current = client;
         if (current != null) {

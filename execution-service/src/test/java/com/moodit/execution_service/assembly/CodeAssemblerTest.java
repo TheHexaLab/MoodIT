@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Tests unitaires de l'assemblage par langage (aucun Piston requis) : on vérifie la STRUCTURE du
- * programme assemblé — langage Piston, fichiers, présence du code étudiant, du harnais, et surtout
+ * Tests unitaires de l'assemblage par langage (aucun conteneur requis) : on vérifie la STRUCTURE du
+ * programme assemblé — runtime du runner (mode exec), fichiers, présence du code étudiant, du harnais, et surtout
  * du NONCE anti-triche, ainsi que les astuces par langage (renommage de main, macros, alias).
  */
 class CodeAssemblerTest {
@@ -260,7 +260,8 @@ class CodeAssemblerTest {
 
     @Test
     void compiled_languages_are_rejected_here_evaluated_by_docker_runner() {
-        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par Piston.
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par
+        // l'assembleur du mode exec.
         for (String language : new String[] {"Java", "C#", "Go", "Rust", "C", "C++", "cpp", "cs"}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(
                             () -> assembler.assemble(language, "code", "harnais", "N"))
@@ -656,7 +657,8 @@ class CodeAssemblerTest {
 
     @Test
     void filterDumpToData_keeps_only_whitelisted_tables_and_inserts() {
-        // Dump réaliste du paquet Piston sqlite3 (contient la table de plomberie « argv »).
+        // Dump réaliste, avec une table de plomberie de l'environnement (« argv », que posait
+        // l'ancien paquet sqlite3 de Piston) : seule la liste blanche des tables du harnais passe.
         String dump = "PRAGMA foreign_keys=OFF;\n"
                 + "BEGIN TRANSACTION;\n"
                 + "CREATE TABLE argv (arg text);\n"

@@ -53,8 +53,8 @@ public class DockerEvaluator {
      * Plafond du mur pour un appel PUBLIC (« Tester » d'un prof). La route
      * {@code /exec/evaluate} est réservée aux ÉDITEURS DE QUIZ (enseignant/admin/gardien,
      * cf. PermissionService) mais accepte jusqu'à 100 cas fournis par l'appelant : sans
-     * ce plafond, une seule requête tenait la place publique un quart d'heure, et un étudiant
-     * pouvait refuser le sandbox à tout le monde en boucle. Au-delà, le superviseur rend des
+     * ce plafond, une seule requête tenait la place publique un quart d'heure, et un seul compte
+     * éditeur pouvait refuser le sandbox à tout le monde en boucle. Au-delà, le superviseur rend des
      * verdicts partiels (« non exécuté : budget dépassé »), ce qui reste lisible pour le prof.
      */
     public static final long PUBLIC_WALL_MS = 4 * 60_000;

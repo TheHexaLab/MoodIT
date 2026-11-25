@@ -250,7 +250,8 @@ services:
       SANDBOX_IMAGE_TAG: "${MOODIT_RUNNER_TAG:-latest}"
     mem_limit: 512m
     volumes:
-      # Runner des langages COMPILÉS (#116) : conteneurs jetables moodit-runner-* via le démon
+      # Runner Docker de TOUTE exécution (#116 : compilés, interprétés, SQL, vues, « Exécuter ») :
+      # conteneurs jetables moodit-runner-* via le démon
       # Docker de l'HÔTE (docker-outside-of-docker). Accès ROOT-ÉQUIVALENT à l'hôte : ce service
       # est joignable depuis Internet (/exec/** via le gateway), un défaut d'exécution de code y
       # vaudrait donc l'hôte entier. Assumé en attendant son durcissement (#271) ; cf.

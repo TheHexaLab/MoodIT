@@ -143,7 +143,7 @@ class ExecutionClientTest {
     @Test
     @DisplayName("Délai de lecture = base + nombre d'appels × (attente d'une place + exécution), au moins un")
     void readTimeout_couvreAttenteEtAppelParHarnais() {
-        // Valeurs par défaut : 10 s de base, per-test-timeout-ms = 20 s, EXEC_INTERNAL_QUEUE_WAIT_MS = 15 s.
+        // Valeurs DU TEST (pas les défauts) : 10 s de base, per-test-timeout-ms = 20 s, 15 s d'attente de file.
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // Par unité : attente de file (15 s) + max(20 s, temps limite + 5 s) + 75 s de mur
@@ -356,7 +356,7 @@ class ExecutionClientTest {
     }
 
     @Test
-    @DisplayName("compiled() et transpiled() reconnaissent les familles de langages")
+    @DisplayName("compiled() et vmLanguage() reconnaissent les familles de langages")
     void compiled_reconnaitLesLangagesCompiles() {
         assertThat(ExecutionClient.compiled("Java")).isTrue();
         assertThat(ExecutionClient.compiled(" c++ ")).isTrue();

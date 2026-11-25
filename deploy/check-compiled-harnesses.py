@@ -91,7 +91,9 @@ DECLARATIONS["TypeScript"] = DECLARATIONS["JavaScript"]
 
 # Un harnais compilé qui TESTE UNE EXCEPTION du code soumis ne peut plus réussir : le noteur est
 # un autre programme, et l'exception ne lui parvient pas avec son type (Java la relance en
-# RuntimeException générique ; C, C++, C#, Rust et Go s'arrêtent à l'appel refusé). Le rejeu du
+# RuntimeException générique, Go en panic générique que recover() rattrape sans la valeur
+# d'origine ; C, C++, C# et Rust s'arrêtent à l'appel refusé). Java et Go restent signalés : seul
+# un humain voit si le harnais dépend du type ou de la valeur de l'exception. Le rejeu du
 # code de départ, qui ne lève rien, rend « faux » comme pour tout harnais normal : sans ce
 # contrôle statique, la question sortait OK et notait 0 à toute bonne réponse après la bascule.
 EXCEPTION_HARNESS = {

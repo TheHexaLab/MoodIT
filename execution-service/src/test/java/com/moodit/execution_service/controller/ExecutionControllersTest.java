@@ -139,6 +139,27 @@ class ExecutionControllersTest {
     }
 
     @Test
+    void only_the_internal_call_is_marked_internal_during_evaluation() throws Exception {
+        // limiter.asInternal() donne à la correction d'une soumission son plafond de places et
+        // son attente plus longue (withSandboxSlot), et le mur interne (ExecutionService) ; le
+        // service le relit pendant l'évaluation via isInternal(). Le mock renvoie ce qu'il voit :
+        // sans asInternal dans InternalExecutionController, la correction attendrait comme un
+        // « Tester » public, et un refus y ferait échouer la tentative de l'étudiant.
+        when(service.evaluate(any())).thenAnswer(inv ->
+                List.of(new TestResult("t1", 2, true, String.valueOf(limiter.isInternal()))));
+
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "secret-interne")
+                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("true"));
+        mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("false"));
+        // Le marquage ne fuit pas hors de l'appel interne (fil de la requête réutilisé).
+        assertThat(limiter.isInternal()).isFalse();
+    }
+
+    @Test
     void interne_sans_jeton_ou_mauvais_jeton_donne_403() throws Exception {
         mvc.perform(post("/internal/exec/evaluate")
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))

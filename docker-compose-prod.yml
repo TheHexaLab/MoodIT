@@ -200,7 +200,8 @@ services:
     env_file:
       - .env.docker
     volumes:
-      # Runner des langages COMPILÉS (#116) : execution-service lance des conteneurs jetables
+      # Runner Docker de TOUTE exécution (#116 : compilés, interprétés, SQL, vues, « Exécuter ») :
+      # execution-service lance des conteneurs jetables
       # moodit-runner-* (réseau coupé, limites mémoire/PID/CPU) via le démon Docker de l'HÔTE
       # (docker-outside-of-docker — un montage hôte ne marcherait pas, les fichiers passent par
       # l'API). Accès ROOT-ÉQUIVALENT à l'hôte : ce service est joignable depuis Internet

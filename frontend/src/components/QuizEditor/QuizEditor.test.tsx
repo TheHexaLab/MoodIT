@@ -468,6 +468,35 @@ describe('QuizEditor — fetch de la liste', () => {
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledWith(42));
     expect(await screen.findByText('Depuis le serveur')).toBeTruthy();
   });
+
+  it('lecture de liste répondue juste après le détail d\'un quiz ouvert : les questions restent', async () => {
+    // Revue #246 : l'effet n'annule la lecture qu'au rendu du formulaire ; une réponse arrivée
+    // entre le détail et ce rendu remplaçait le quiz complet par sa version sans questions.
+    let resolveList!: (q: Quiz[]) => void;
+    const onFetchQuizzes = vi
+      .fn()
+      .mockResolvedValueOnce([makeQuiz()])
+      .mockImplementationOnce(() => new Promise<Quiz[]>((res) => (resolveList = res)))
+      .mockResolvedValue([makeQuiz()]);
+    let resolveFull!: (q: Quiz) => void;
+    const onFetchQuiz = vi.fn(() => new Promise<Quiz>((res) => (resolveFull = res)));
+    const { rerender } = renderEditor({ handlers: { onFetchQuizzes, onFetchQuiz } });
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(1));
+    // Seconde lecture de la liste (nouveau cours rendu puis revenu) laissée en vol.
+    rerender(<QuizEditor courseId={43} quizzes={[makeQuiz()]} onClose={vi.fn()}
+      handlers={{ onFetchQuizzes, onFetchQuiz }} />);
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByLabelText(listT.editAria('Quiz A')));
+    await act(async () => {
+      resolveFull(makeQuiz({
+        questions: [{ id: 7, qType: 'true_false', prompt: 'Question gardée', totalScore: 1 }],
+      } as Partial<Quiz>));
+      // Laisse la suite d'openEdit s'exécuter AVANT la réponse de liste, sans rendu entre les deux.
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      resolveList([makeQuiz()]);
+    });
+    expect(await screen.findByText('Question gardée')).toBeTruthy();
+  });
 });
 
 describe('QuizEditor — réordonnancement (échec de persistance)', () => {
