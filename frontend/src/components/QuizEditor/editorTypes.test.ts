@@ -56,6 +56,15 @@ describe('defaultHarness', () => {
     expect(out.startsWith('//')).toBe(true);
   });
 
+  it.each(['Python', 'JavaScript', 'TypeScript', 'JSX', 'TSX', 'PHP'])(
+    'repli %s : le harnais RENVOIE vrai (un assert seul échouerait toujours)',
+    (name) => {
+      const out = defaultHarness(undefined, { id: 1, name });
+      expect(out).toMatch(/renvoie (true|True) si la réponse est correcte/);
+      expect(out).not.toMatch(/lève une exception/);
+    }
+  );
+
   it('replie sur le langage de la question si aucun langage de harnais', () => {
     const questionLang: Language = { id: 6, name: 'C' };
     const out = defaultHarness(questionLang, undefined);

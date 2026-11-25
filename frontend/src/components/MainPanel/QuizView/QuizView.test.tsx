@@ -267,7 +267,10 @@ describe('QuizView — pied de navigation', () => {
     );
     expect(container.querySelector('[inert]')?.contains(submit)).toBe(true);
     expect(submit.disabled).toBe(true);
-    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+    // L'occupation est portée par le contenu, pas par la région annoncée : un aria-busy permanent
+    // sur celle-ci pouvait différer l'annonce du texte d'attente.
+    expect(status.hasAttribute('aria-busy')).toBe(false);
+    expect(container.querySelector('[inert]')?.getAttribute('aria-busy')).toBe('true');
   });
 
   it('« Soumettre » actif quand la tentative n’est pas consommée', async () => {

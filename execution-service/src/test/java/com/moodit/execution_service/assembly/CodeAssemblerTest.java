@@ -373,7 +373,10 @@ class CodeAssemblerTest {
                 .contains("__moodit_r = __moodit_bool(__moodit_harness())")
                 .doesNotContain("= bool(__moodit_harness())")
                 // Refus vérifié AVANT le lancement du processus étudiant.
-                .contains("[\"bool\", \"f\"] if hasattr(__moodit_builtins, __n)");
+                .contains("[\"bool\", \"f\"] if hasattr(__moodit_builtins, __n)")
+                // Présents tous deux : sinon indexOf vaut -1 et l'ordre ci-dessous passe à vide.
+                .contains("if __moodit_shadow:")
+                .contains("__moodit_subprocess.Popen");
         assertThat(grader.indexOf("if __moodit_shadow:"))
                 .isLessThan(grader.indexOf("__moodit_subprocess.Popen"));
     }

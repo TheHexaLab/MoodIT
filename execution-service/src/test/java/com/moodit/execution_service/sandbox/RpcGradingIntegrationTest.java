@@ -49,7 +49,7 @@ class RpcGradingIntegrationTest {
         }
     }
 
-    private TestResult note(String language, String harness, String code) {
+    private TestResult grade(String language, String harness, String code) {
         require(language);
         return evaluator.evaluate(language, code,
                 List.of(new TestCaseInput("cas", harness, 1)), null).get(0);
@@ -68,12 +68,12 @@ class RpcGradingIntegrationTest {
     @Test
     void java_right_then_wrong_answer() {
         String h = "return Solution.doubler(5) == 10;";
-        assertThat(note("Java", h, """
+        assertThat(grade("Java", h, """
                 public class Solution {
                     public static int doubler(int n) { return n * 2; }
                 }
                 """).passed()).isTrue();
-        assertThat(note("Java", h, """
+        assertThat(grade("Java", h, """
                 public class Solution {
                     public static int doubler(int n) { return 0; }
                 }
@@ -83,24 +83,24 @@ class RpcGradingIntegrationTest {
     @Test
     void go_right_then_wrong_answer() {
         String h = "return doubler(5) == 10";
-        assertThat(note("Go", h, "package main\n\nfunc doubler(n int) int { return n * 2 }\n")
+        assertThat(grade("Go", h, "package main\n\nfunc doubler(n int) int { return n * 2 }\n")
                 .passed()).isTrue();
-        assertThat(note("Go", h, "package main\n\nfunc doubler(n int) int { return 0 }\n")
+        assertThat(grade("Go", h, "package main\n\nfunc doubler(n int) int { return 0 }\n")
                 .passed()).isFalse();
     }
 
     @Test
     void c_right_then_wrong_answer() {
         String h = "return doubler(5) == 10;";
-        assertThat(note("C", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
-        assertThat(note("C", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
+        assertThat(grade("C", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
+        assertThat(grade("C", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
     }
 
     @Test
     void cpp_right_then_wrong_answer() {
         String h = "return doubler(5) == 10;";
-        assertThat(note("C++", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
-        assertThat(note("C++", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
+        assertThat(grade("C++", h, "int doubler(int n) { return n * 2; }\n").passed()).isTrue();
+        assertThat(grade("C++", h, "int doubler(int n) { return 0; }\n").passed()).isFalse();
     }
 
     @Test
@@ -109,8 +109,8 @@ class RpcGradingIntegrationTest {
         // par défaut la classe entière : réponse juste notée 0, alors que la solution du prof,
         // écrite sans valeur par défaut, passait au « Tester ».
         String h = "return somme(2, 3) == 5;";
-        assertThat(note("C++", h, "int somme(int a, int b = 0) { return a + b; }\n").passed()).isTrue();
-        assertThat(note("C++", h, "int somme(int a, int b = 0) { return a - b; }\n").passed()).isFalse();
+        assertThat(grade("C++", h, "int somme(int a, int b = 0) { return a + b; }\n").passed()).isTrue();
+        assertThat(grade("C++", h, "int somme(int a, int b = 0) { return a - b; }\n").passed()).isFalse();
         String hRect = "Rect r(3, 4); return r.aire() == 12;";
         String code = """
                 class Rect {
@@ -120,15 +120,15 @@ class RpcGradingIntegrationTest {
                     int aire() { return l * h; }
                 };
                 """;
-        assertThat(note("C++", hRect, code).passed()).isTrue();
-        assertThat(note("C++", hRect, code.replace("l * h", "l + h")).passed()).isFalse();
+        assertThat(grade("C++", hRect, code).passed()).isTrue();
+        assertThat(grade("C++", hRect, code.replace("l * h", "l + h")).passed()).isFalse();
     }
 
     @Test
     void rust_right_then_wrong_answer() {
         String h = "doubler(5) == 10";
-        assertThat(note("Rust", h, "fn doubler(n: i32) -> i32 { n * 2 }\n").passed()).isTrue();
-        assertThat(note("Rust", h, "fn doubler(n: i32) -> i32 { 0 }\n").passed()).isFalse();
+        assertThat(grade("Rust", h, "fn doubler(n: i32) -> i32 { n * 2 }\n").passed()).isTrue();
+        assertThat(grade("Rust", h, "fn doubler(n: i32) -> i32 { 0 }\n").passed()).isFalse();
     }
 
     @Test
@@ -148,9 +148,9 @@ class RpcGradingIntegrationTest {
                     println!("{}", doubler(2));
                 }
                 """;
-        TestResult right = note("Rust", h, code);
+        TestResult right = grade("Rust", h, code);
         assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
-        assertThat(note("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
+        assertThat(grade("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
     }
 
     @Test
@@ -166,9 +166,9 @@ class RpcGradingIntegrationTest {
 
                 pub fn doubler(n: i32) -> i32 { n * outils::deux() }
                 """;
-        TestResult right = note("Rust", h, code);
+        TestResult right = grade("Rust", h, code);
         assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
-        assertThat(note("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
+        assertThat(grade("Rust", h, code.replace("{ 2 }", "{ 3 }")).passed()).isFalse();
     }
 
     @Test
@@ -183,9 +183,9 @@ class RpcGradingIntegrationTest {
                     #endregion
                 }
                 """;
-        TestResult right = note("C#", h, code);
+        TestResult right = grade("C#", h, code);
         assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
-        assertThat(note("C#", h, code.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("C#", h, code.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
@@ -198,20 +198,20 @@ class RpcGradingIntegrationTest {
                 #endif
                 int doubler(int n) { return n * 2; }
                 """;
-        TestResult right = note("C", h, code);
+        TestResult right = grade("C", h, code);
         assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
-        assertThat(note("C", h, code.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("C", h, code.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
     void csharp_right_then_wrong_answer() {
         String h = "return Solution.Doubler(5) == 10;";
-        assertThat(note("C#", h, """
+        assertThat(grade("C#", h, """
                 public class Solution {
                     public static int Doubler(int n) { return n * 2; }
                 }
                 """).passed()).isTrue();
-        assertThat(note("C#", h, """
+        assertThat(grade("C#", h, """
                 public class Solution {
                     public static int Doubler(int n) { return 0; }
                 }
@@ -226,13 +226,13 @@ class RpcGradingIntegrationTest {
         // généré, le noteur compilait, puis l'appel échouait à l'exécution. Une réponse JUSTE
         // était notée 0, avec un diagnostic qui accusait le code de l'étudiant.
         String h = "return Solution.Doubler(5) == 10;";
-        assertThat(note("C#", h, """
+        assertThat(grade("C#", h, """
                 class Solution {
                     static int Doubler(int n) { return n * 2; }
                 }
                 """).passed()).isTrue();
         // Et la mauvaise réponse reste fausse : le chemin n'est pas devenu permissif.
-        assertThat(note("C#", h, """
+        assertThat(grade("C#", h, """
                 class Solution {
                     static int Doubler(int n) { return 0; }
                 }
@@ -246,7 +246,7 @@ class RpcGradingIntegrationTest {
         // setAccessible) ; seule l'extraction exigeait `public`, et refusait donc une
         // soumission correcte avec « aucune méthode statique ni objet exploitable ».
         String h = "return new Solution.Rectangle(3, 4).aire() == 12;";
-        assertThat(note("Java", h, """
+        assertThat(grade("Java", h, """
                 public class Solution {
                     static class Rectangle {
                         private final int largeur;
@@ -259,7 +259,7 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """).passed()).isTrue();
-        assertThat(note("Java", h, """
+        assertThat(grade("Java", h, """
                 public class Solution {
                     static class Rectangle {
                         Rectangle(int largeur, int hauteur) { }
@@ -284,8 +284,8 @@ class RpcGradingIntegrationTest {
                     static int doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("Java", h, twoClasses).passed()).isTrue();
-        assertThat(note("Java", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("Java", h, twoClasses).passed()).isTrue();
+        assertThat(grade("Java", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
@@ -298,8 +298,8 @@ class RpcGradingIntegrationTest {
                     static int Doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("C#", h, twoClasses).passed()).isTrue();
-        assertThat(note("C#", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("C#", h, twoClasses).passed()).isTrue();
+        assertThat(grade("C#", h, twoClasses.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
@@ -308,7 +308,7 @@ class RpcGradingIntegrationTest {
         // principale se fait sur la source DÉPOUILLÉE — sans cela, le fichier déposé (Java) et
         // les typeof du serveur (C#) étaient nommés d'après la classe commentée, et la
         // soumission correcte échouait sur un type que l'étudiant n'a pas écrit.
-        assertThat(note("Java", "return Solution.doubler(5) == 10;", """
+        assertThat(grade("Java", "return Solution.doubler(5) == 10;", """
                 /* Premier essai :
                 public class Brouillon {
                     static int doubler(int n) { return n + n; }
@@ -318,7 +318,7 @@ class RpcGradingIntegrationTest {
                     static int doubler(int n) { return n * 2; }
                 }
                 """).passed()).isTrue();
-        assertThat(note("C#", "return Solution.Doubler(5) == 10;", """
+        assertThat(grade("C#", "return Solution.Doubler(5) == 10;", """
                 // class Principale { }
                 class Solution {
                     static int Doubler(int n) { return n * 2; }
@@ -332,7 +332,7 @@ class RpcGradingIntegrationTest {
         // la decouverte plate la manquait, et le cas tombait dans « aucune methode exploitable »
         // — un 0 avec un message qui ne designe pas la cause. Desormais : un diagnostic qui dit
         // de retirer la ligne. Code par ailleurs CORRECT.
-        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+        TestResult r = grade("Java", "return Solution.doubler(5) == 10;", """
                 package exo1;
 
                 public class Solution {
@@ -348,12 +348,12 @@ class RpcGradingIntegrationTest {
         // L'idiome des questions a reponse flottante : comparer a une tolerance. Le noteur Go
         // n'importait pas « math » — un harnais ecrit AUJOURD'HUI ainsi ne compilait pas.
         String h = "return math.Abs(moitie(3)-1.5) < 1e-9";
-        assertThat(note("Go", h, """
+        assertThat(grade("Go", h, """
                 package main
 
                 func moitie(n int) float64 { return float64(n) / 2 }
                 """).passed()).isTrue();
-        assertThat(note("Go", h, """
+        assertThat(grade("Go", h, """
                 package main
 
                 func moitie(n int) float64 { return 0 }
@@ -366,7 +366,7 @@ class RpcGradingIntegrationTest {
         // source BRUTE : « // en cm, environ » faisait perdre `hauteur`, et le litteral du
         // harnais ne compilait plus — 0 sur une reponse juste.
         String h = "Rectangle { largeur: 3, hauteur: 4 }.aire() == 12";
-        assertThat(note("Rust", h, """
+        assertThat(grade("Rust", h, """
                 struct Rectangle {
                     largeur: i32, // en cm, environ
                     hauteur: i32,
@@ -381,7 +381,7 @@ class RpcGradingIntegrationTest {
     void go_tagged_field_graded_correctly() {
         // Une etiquette `json:"l"` faisait perdre toute la structure, lue sur la source brute.
         String h = "return Rectangle{Largeur: 3, Hauteur: 4}.Aire() == 12";
-        assertThat(note("Go", h, """
+        assertThat(grade("Go", h, """
                 package main
 
                 type Rectangle struct {
@@ -397,7 +397,7 @@ class RpcGradingIntegrationTest {
     void rust_solution_importing_write_graded_correctly() {
         // `use std::io::Write;` (banal pour un flush) levait E0252 : le SERVEUR, qui partage le
         // fichier de l'etudiant, importait Write sans alias.
-        assertThat(note("Rust", "doubler(5) == 10", """
+        assertThat(grade("Rust", "doubler(5) == 10", """
                 use std::io::Write;
 
                 fn doubler(n: i32) -> i32 {
@@ -413,7 +413,7 @@ class RpcGradingIntegrationTest {
         // `new Rectangle(3, 4)` ne compilait plus — 0 pour toute la question. La forme imbriquee
         // (Solution.Rectangle) reste couverte par java_objects_by_handle.
         String h = "return new Rectangle(3, 4).aire() == 12;";
-        assertThat(note("Java", h, """
+        assertThat(grade("Java", h, """
                 public class Solution {
                 }
 
@@ -443,16 +443,16 @@ class RpcGradingIntegrationTest {
                     int get() { return v; }
                 }
                 """;
-        TestResult right = note("Java", h, code);
+        TestResult right = grade("Java", h, code);
         assertThat(right.passed()).as(String.valueOf(right.detail())).isTrue();
-        assertThat(note("Java", h, code.replace("* 2", "* 3")).passed()).isFalse();
+        assertThat(grade("Java", h, code.replace("* 2", "* 3")).passed()).isFalse();
     }
 
     @Test
     void csharp_long_type_names_graded_correctly() {
         // `String` EST `string`, `Int32` EST `int` : aucun bouchon n'etait genere et une reponse
         // juste etait notee 0. Garde l'APPEL : l'extraction C# passe par cs_canonical_types.
-        assertThat(note("C#", "return Solution.Inverse(\"ab\") == \"ba\";", """
+        assertThat(grade("C#", "return Solution.Inverse(\"ab\") == \"ba\";", """
                 using System;
 
                 class Solution {
@@ -467,7 +467,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void c_static_function_and_const_parameter_graded_correctly() {
-        assertThat(note("C", "return doubler(5) == 10;",
+        assertThat(grade("C", "return doubler(5) == 10;",
                 "static int doubler(const int n) { return n * 2; }").passed()).isTrue();
     }
 
@@ -484,8 +484,8 @@ class RpcGradingIntegrationTest {
                 }
                 """;
         String staticHarness = "return Solution.Moitie(3) == 1.5;";
-        assertThat(note("C#", staticHarness, staticCode).passed()).isTrue();
-        assertThat(note("C#", staticHarness, staticCode.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        assertThat(grade("C#", staticHarness, staticCode).passed()).isTrue();
+        assertThat(grade("C#", staticHarness, staticCode.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
         String objectCode = """
                 class Rect {
                     int l, h;
@@ -494,8 +494,8 @@ class RpcGradingIntegrationTest {
                 }
                 """;
         String objectHarness = "return System.Math.Abs(new Rect(3, 4).Aire() - 6.0) < 1e-9;";
-        assertThat(note("C#", objectHarness, objectCode).passed()).isTrue();
-        assertThat(note("C#", objectHarness, objectCode.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
+        assertThat(grade("C#", objectHarness, objectCode).passed()).isTrue();
+        assertThat(grade("C#", objectHarness, objectCode.replace("/ 2.0", "/ 3.0")).passed()).isFalse();
     }
 
     @Test
@@ -508,8 +508,8 @@ class RpcGradingIntegrationTest {
                     pub fn aire(&self) -> i64 { self.l * self.h }
                 }
                 """;
-        assertThat(note("Rust", h, code).passed()).isTrue();
-        assertThat(note("Rust", h, code.replace("self.l * self.h", "self.l + self.h")).passed()).isFalse();
+        assertThat(grade("Rust", h, code).passed()).isTrue();
+        assertThat(grade("Rust", h, code.replace("self.l * self.h", "self.l + self.h")).passed()).isFalse();
     }
 
     @Test
@@ -525,8 +525,8 @@ class RpcGradingIntegrationTest {
                     int aire() { return l * h; }
                 };
                 """;
-        assertThat(note("C++", h, code).passed()).isTrue();
-        assertThat(note("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
+        assertThat(grade("C++", h, code).passed()).isTrue();
+        assertThat(grade("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
     }
 
     @Test
@@ -552,8 +552,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Java", h, code).passed()).isTrue();
-        assertThat(note("Java", h, code.replace("compare(y, x)", "compare(x, y)")).passed()).isFalse();
+        assertThat(grade("Java", h, code).passed()).isTrue();
+        assertThat(grade("Java", h, code.replace("compare(y, x)", "compare(x, y)")).passed()).isFalse();
     }
 
     @Test
@@ -577,8 +577,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Java", h, code).passed()).isTrue();
-        assertThat(note("Java", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
+        assertThat(grade("Java", h, code).passed()).isTrue();
+        assertThat(grade("Java", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
     }
 
     @Test
@@ -599,8 +599,8 @@ class RpcGradingIntegrationTest {
                     public static int Moitie(int n) { return n / 2; }
                 }
                 """;
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("n / 2", "n / 3")).passed()).isFalse();
     }
 
     @Test
@@ -614,8 +614,8 @@ class RpcGradingIntegrationTest {
                     virtual int aire() { return c * c; }
                 };
                 """;
-        assertThat(note("C++", h, code).passed()).isTrue();
-        assertThat(note("C++", h, code.replace("c * c", "c + c")).passed()).isFalse();
+        assertThat(grade("C++", h, code).passed()).isTrue();
+        assertThat(grade("C++", h, code.replace("c * c", "c + c")).passed()).isFalse();
     }
 
     @Test
@@ -624,7 +624,7 @@ class RpcGradingIntegrationTest {
         // place dans le noteur : le harnais ne peut pas distinguer l'outil de la fonction notee.
         // Refus explicite, meme pour une reponse juste.
         String h = "return abs(-5) == 5;";
-        TestResult r = note("C", h, "int abs(int n) { return n < 0 ? -n : n; }");
+        TestResult r = grade("C", h, "int abs(int n) { return n < 0 ? -n : n; }");
         assertThat(r.passed()).isFalse();
         assertThat(r.detail()).contains("réservé").contains("abs");
     }
@@ -639,12 +639,12 @@ class RpcGradingIntegrationTest {
                 double moitie(int n) { return 0; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = note(language, h, forged);
+            TestResult r = grade(language, h, forged);
             assertThat(r.passed()).as(language).isFalse();
             assertThat(r.detail()).as(language).contains("réservé").contains("fabs");
         }
         // Meme chose par une macro de <math.h>.
-        TestResult macro = note("C", "return !isnan(moitie(5)) && moitie(5) == 2.5;",
+        TestResult macro = grade("C", "return !isnan(moitie(5)) && moitie(5) == 2.5;",
                 "int isnan(double x) { return 0; }\ndouble moitie(int n) { return 2.5; }\n");
         assertThat(macro.passed()).isFalse();
         assertThat(macro.detail()).contains("réservé").contains("isnan");
@@ -653,7 +653,7 @@ class RpcGradingIntegrationTest {
     @Test
     void go_submitted_function_cannot_shadow_a_builtin() {
         // En Go, `func max` au niveau du paquet masquait la fonction INTEGREE max du harnais.
-        TestResult r = note("Go", "return max(doubler(2), 0) == 4",
+        TestResult r = grade("Go", "return max(doubler(2), 0) == 4",
                 "package main\n\nfunc doubler(n int) int { return 0 }\n\n"
                         + "func max(a, b int) int { return 4 }\n");
         assertThat(r.passed()).isFalse();
@@ -671,7 +671,7 @@ class RpcGradingIntegrationTest {
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
+            TestResult r = grade(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
             assertThat(r.passed()).as(language).isFalse();
             assertThat(r.detail()).as(language).contains("réservé").contains("__builtin_huge_val");
         }
@@ -686,7 +686,7 @@ class RpcGradingIntegrationTest {
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = note(language, "return divise(1.0, 0.0) == HUGE_VAL;", hidden);
+            TestResult r = grade(language, "return divise(1.0, 0.0) == HUGE_VAL;", hidden);
             assertThat(r.passed()).as(language).isFalse();
             assertThat(r.detail()).as(language).isEqualTo("Le harnais a renvoyé faux");
         }
@@ -697,7 +697,7 @@ class RpcGradingIntegrationTest {
         // Revue #246 : les noms de type et les constructeurs de l'API objet sont déclarés au
         // niveau du paquet du noteur, comme les fonctions : même refus explicite (ici un
         // constructeur `recover`, qui masquait la fonction intégrée du même nom).
-        TestResult r = note("Go", "return NewBoite(2).Valeur() == 2",
+        TestResult r = grade("Go", "return NewBoite(2).Valeur() == 2",
                 "package main\n\ntype Boite struct{ v int }\n\n"
                         + "func NewBoite(v int) *Boite { return &Boite{v} }\n\n"
                         + "func recover() *Boite { return &Boite{0} }\n\n"
@@ -724,15 +724,15 @@ class RpcGradingIntegrationTest {
                 func (r Rectangle) perimetre() int { return 2 * (r.largeur + r.hauteur) }
                 """;
         String demo = "r := Rectangle{largeur: 3, hauteur: 4}\nreturn r.aire() == 12";
-        assertThat(note("Go", demo, code).passed()).isTrue();
-        assertThat(note("Go", demo, code.replace("r.largeur * r.hauteur", "r.largeur + r.hauteur"))
+        assertThat(grade("Go", demo, code).passed()).isTrue();
+        assertThat(grade("Go", demo, code.replace("r.largeur * r.hauteur", "r.largeur + r.hauteur"))
                 .passed()).isFalse();
         // La modification faite par une méthode à récepteur pointeur est REPORTÉE dans l'objet
         // du harnais ; la perdre en silence donnerait un verdict faux.
         String mutation = "r := Rectangle{largeur: 3, hauteur: 4}\nr.agrandir(2)\n"
                 + "return r.aire() == 24 && r.perimetre() == 20";
-        assertThat(note("Go", mutation, code).passed()).isTrue();
-        assertThat(note("Go", mutation, code.replace("r.largeur *= k", "_ = k")).passed()).isFalse();
+        assertThat(grade("Go", mutation, code).passed()).isTrue();
+        assertThat(grade("Go", mutation, code.replace("r.largeur *= k", "_ = k")).passed()).isFalse();
     }
 
     @Test
@@ -741,20 +741,20 @@ class RpcGradingIntegrationTest {
         String go = "package main\n\ntype Calculatrice struct{}\n\n"
                 + "func (c *Calculatrice) additionner(a, b int) int { return a + b }\n";
         String goHarness = "c := Calculatrice{}\nreturn c.additionner(2, 3) == 5";
-        assertThat(note("Go", goHarness, go).passed()).isTrue();
-        assertThat(note("Go", goHarness, go.replace("a + b", "a - b")).passed()).isFalse();
+        assertThat(grade("Go", goHarness, go).passed()).isTrue();
+        assertThat(grade("Go", goHarness, go.replace("a + b", "a - b")).passed()).isFalse();
 
         String rust = "struct Calculatrice;\n\nimpl Calculatrice {\n"
                 + "    fn additionner(&self, a: i32, b: i32) -> i32 { a + b }\n}\n";
         String rustHarness = "let c = Calculatrice;\nc.additionner(2, 3) == 5";
-        assertThat(note("Rust", rustHarness, rust).passed()).isTrue();
-        assertThat(note("Rust", rustHarness, rust.replace("a + b", "a - b")).passed()).isFalse();
+        assertThat(grade("Rust", rustHarness, rust).passed()).isTrue();
+        assertThat(grade("Rust", rustHarness, rust.replace("a + b", "a - b")).passed()).isFalse();
 
         String cpp = "class Calculatrice {\npublic:\n"
                 + "    int additionner(int a, int b) { return a + b; }\n};\n";
         String cppHarness = "Calculatrice c;\nreturn c.additionner(2, 3) == 5;";
-        assertThat(note("C++", cppHarness, cpp).passed()).isTrue();
-        assertThat(note("C++", cppHarness, cpp.replace("a + b", "a - b")).passed()).isFalse();
+        assertThat(grade("C++", cppHarness, cpp).passed()).isTrue();
+        assertThat(grade("C++", cppHarness, cpp.replace("a + b", "a - b")).passed()).isFalse();
     }
 
     @Test
@@ -778,8 +778,8 @@ class RpcGradingIntegrationTest {
                 };
                 """;
         String h = "Rectangle r(3, 4);\nreturn fabs(r.aire() - 12) < 1e-9;";
-        assertThat(note("C++", h, code).passed()).isTrue();
-        assertThat(note("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
+        assertThat(grade("C++", h, code).passed()).isTrue();
+        assertThat(grade("C++", h, code.replace("l * h", "l + h")).passed()).isFalse();
     }
 
     @Test
@@ -787,16 +787,16 @@ class RpcGradingIntegrationTest {
         // Revue #246 : le refus « Nom réservé » ne vise plus que le nom que le harnais emploie.
         String go = "package main\n\nfunc max(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n"
                 + "\treturn b\n}\n\nfunc plusGrand(a, b, c int) int { return max(a, max(b, c)) }\n";
-        assertThat(note("Go", "return plusGrand(2, 9, 3) == 9", go).passed()).isTrue();
-        assertThat(note("Go", "return plusGrand(2, 9, 3) == 9", go.replace("a > b", "a < b"))
+        assertThat(grade("Go", "return plusGrand(2, 9, 3) == 9", go).passed()).isTrue();
+        assertThat(grade("Go", "return plusGrand(2, 9, 3) == 9", go.replace("a > b", "a < b"))
                 .passed()).isFalse();
         String c = "int abs(int x) { return x < 0 ? -x : x; }\n"
                 + "int distance(int a, int b) { return abs(a - b); }\n";
-        assertThat(note("C", "return distance(2, 5) == 3;", c).passed()).isTrue();
+        assertThat(grade("C", "return distance(2, 5) == 3;", c).passed()).isTrue();
         // En C++ aussi : le serveur n'inclut plus <stdlib.h> après le code soumis, la
         // redéfinition n'y heurte plus rien.
-        assertThat(note("C++", "return distance(2, 5) == 3;", c).passed()).isTrue();
-        assertThat(note("C++", "return distance(2, 5) == 3;", c.replace("-x : x", "0 : 0"))
+        assertThat(grade("C++", "return distance(2, 5) == 3;", c).passed()).isTrue();
+        assertThat(grade("C++", "return distance(2, 5) == 3;", c.replace("-x : x", "0 : 0"))
                 .passed()).isFalse();
     }
 
@@ -810,8 +810,8 @@ class RpcGradingIntegrationTest {
                 + " return Aide.carre(a) + Aide.carre(b); }\n"
                 + "    static int div(int a, int b) { return a / b; }\n}\n";
         String h = "return Solution.sommeCarres(3, 4) == 25 && Aide.carre(3) == 9;";
-        assertThat(note("Java", h, code).passed()).isTrue();
-        TestResult r = note("Java", "return Solution.div(1, 0) == 0;", code);
+        assertThat(grade("Java", h, code).passed()).isTrue();
+        TestResult r = grade("Java", "return Solution.div(1, 0) == 0;", code);
         assertThat(r.passed()).isFalse();
         assertThat(r.detail()).contains("ArithmeticException");
     }
@@ -1280,9 +1280,9 @@ class RpcGradingIntegrationTest {
                         }
                         """));
         for (Crash c : crashes) {
-            TestResult ok = note(c.lang(), c.harness(), c.code());
+            TestResult ok = grade(c.lang(), c.harness(), c.code());
             assertThat(ok.passed()).as(c.lang() + " : témoin " + ok.detail()).isTrue();
-            TestResult crash = note(c.lang(), c.harness(), c.code().replace("999", "5"));
+            TestResult crash = grade(c.lang(), c.harness(), c.code().replace("999", "5"));
             assertThat(crash.passed()).as(c.lang() + " : plantage").isFalse();
             assertThat(crash.detail()).as(c.lang() + " : plantage")
                     .isNotBlank().doesNotContainIgnoringCase("compilation");
@@ -1354,9 +1354,9 @@ class RpcGradingIntegrationTest {
                         }
                         """));
         for (EarlyExit e : exits) {
-            TestResult ok = note(e.lang(), e.harness(), e.code());
+            TestResult ok = grade(e.lang(), e.harness(), e.code());
             assertThat(ok.passed()).as(e.lang() + " : témoin " + ok.detail()).isTrue();
-            TestResult exit = note(e.lang(), e.harness(), e.code().replace("999", "5"));
+            TestResult exit = grade(e.lang(), e.harness(), e.code().replace("999", "5"));
             assertThat(exit.passed()).as(e.lang() + " : sortie en zéro").isFalse();
             assertThat(exit.detail()).as(e.lang() + " : sortie en zéro")
                     .isNotBlank().doesNotContainIgnoringCase("compilation");
@@ -1376,16 +1376,16 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("return 2 * n;", "return n;")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("return 2 * n;", "return n;")).passed()).isFalse();
     }
 
     @Test
     void csharp_class_without_declared_constructor() {
         String h = "return new Compteur().Trois() == 3;";
         String code = "class Compteur { public int Trois() { return 3; } }";
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("return 3;", "return 2;")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("return 3;", "return 2;")).passed()).isFalse();
     }
 
     @Test
@@ -1397,8 +1397,8 @@ class RpcGradingIntegrationTest {
                     public static int doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("Java", h, code).passed()).isTrue();
-        assertThat(note("Java", h, code.replace("n * 2", "n")).passed()).isFalse();
+        assertThat(grade("Java", h, code).passed()).isTrue();
+        assertThat(grade("Java", h, code.replace("n * 2", "n")).passed()).isFalse();
     }
 
     @Test
@@ -1413,8 +1413,8 @@ class RpcGradingIntegrationTest {
                     public static int calcul(int n) { return Aide.calcul(n) + 1; }
                 }
                 """;
-        assertThat(note("Java", h, code).passed()).isTrue();
-        assertThat(note("Java", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
+        assertThat(grade("Java", h, code).passed()).isTrue();
+        assertThat(grade("Java", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
     }
 
     @Test
@@ -1428,8 +1428,8 @@ class RpcGradingIntegrationTest {
                     public static int Calcul(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("+ 1;", "+ 2;")).passed()).isFalse();
     }
 
     // ───────── Bouchons objet bornes a LEUR classe ; en-tetes du noteur C (31e passe) ─────────
@@ -1449,8 +1449,8 @@ class RpcGradingIntegrationTest {
                     public int Aire() { return c * c; }
                 }
                 """;
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("l * h", "l + h")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("l * h", "l + h")).passed()).isFalse();
     }
 
     @Test
@@ -1466,8 +1466,8 @@ class RpcGradingIntegrationTest {
                     public override int Aire() { return c * c; }
                 }
                 """;
-        assertThat(note("C#", h, code).passed()).isTrue();
-        assertThat(note("C#", h, code.replace("c * c", "c + c")).passed()).isFalse();
+        assertThat(grade("C#", h, code).passed()).isTrue();
+        assertThat(grade("C#", h, code.replace("c * c", "c + c")).passed()).isFalse();
     }
 
     @Test
@@ -1482,8 +1482,8 @@ class RpcGradingIntegrationTest {
                     pub fn double(&self) -> i64 { self.l * 2 }
                 }
                 """;
-        assertThat(note("Rust", h, code).passed()).isTrue();
-        assertThat(note("Rust", h, code.replace("self.l * 2", "self.l")).passed()).isFalse();
+        assertThat(grade("Rust", h, code).passed()).isTrue();
+        assertThat(grade("Rust", h, code.replace("self.l * 2", "self.l")).passed()).isFalse();
     }
 
     @Test
@@ -1502,8 +1502,8 @@ class RpcGradingIntegrationTest {
                     int f() { return x * 2; }
                 };
                 """;
-        assertThat(note("C++", h, code).passed()).isTrue();
-        assertThat(note("C++", h, code.replace("x * 2", "x")).passed()).isFalse();
+        assertThat(grade("C++", h, code).passed()).isTrue();
+        assertThat(grade("C++", h, code.replace("x * 2", "x")).passed()).isFalse();
     }
 
     @Test
@@ -1514,9 +1514,9 @@ class RpcGradingIntegrationTest {
         String code = """
                 double moitie(int n) { return n / 2.0; }
                 """;
-        assertThat(note("C", h, code).passed()).isTrue();
-        assertThat(note("C", h, code.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
-        assertThat(note("C++", h, code).passed()).isTrue();
+        assertThat(grade("C", h, code).passed()).isTrue();
+        assertThat(grade("C", h, code.replace("n / 2.0", "n / 3.0")).passed()).isFalse();
+        assertThat(grade("C++", h, code).passed()).isTrue();
     }
 
     @Test
@@ -1587,7 +1587,7 @@ class RpcGradingIntegrationTest {
         // l'endroit que root parcourt entre deux cas. Le superviseur le passe en 0755 en mode
         // notation. Sonde directe, sans dependre d'aucune protection du noyau : la creation
         // doit echouer, et seule alors la reponse est juste.
-        assertThat(note("C", "return doubler(5) == 10;", """
+        assertThat(grade("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 int doubler(int n) {
                     FILE *f = fopen("/box/sonde", "w");
@@ -1616,8 +1616,8 @@ class RpcGradingIntegrationTest {
                     public static int doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("Java", h, oop).passed()).isTrue();
-        assertThat(note("Java", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(grade("Java", h, oop).passed()).isTrue();
+        assertThat(grade("Java", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1632,8 +1632,8 @@ class RpcGradingIntegrationTest {
                     public static int Doubler(int n) { return n * 2; }
                 }
                 """;
-        assertThat(note("C#", h, oop).passed()).isTrue();
-        assertThat(note("C#", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(grade("C#", h, oop).passed()).isTrue();
+        assertThat(grade("C#", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1655,8 +1655,8 @@ class RpcGradingIntegrationTest {
 
                 func (r Rectangle) Aire() int { return r.largeur * r.hauteur }
                 """;
-        assertThat(note("Go", h, oop).passed()).isTrue();
-        assertThat(note("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
+        assertThat(grade("Go", h, oop).passed()).isTrue();
+        assertThat(grade("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1678,8 +1678,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, oop).passed()).isTrue();
-        assertThat(note("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
+        assertThat(grade("Rust", h, oop).passed()).isTrue();
+        assertThat(grade("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
                 .passed()).isFalse();
     }
 
@@ -1695,8 +1695,8 @@ class RpcGradingIntegrationTest {
                     int aire() { return largeur * hauteur; }
                 };
                 """;
-        assertThat(note("C++", h, oop).passed()).isTrue();
-        assertThat(note("C++", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
+        assertThat(grade("C++", h, oop).passed()).isTrue();
+        assertThat(grade("C++", h, oop.replace("largeur * hauteur", "0")).passed()).isFalse();
     }
 
     // ── Formes RÉELLES des questions POO de la démo (db/demo/V2_3) : ce sont elles qui
@@ -1716,8 +1716,8 @@ class RpcGradingIntegrationTest {
 
                 func (r Rectangle) aire() int { return r.largeur * r.hauteur }
                 """;
-        assertThat(note("Go", h, oop).passed()).isTrue();
-        assertThat(note("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
+        assertThat(grade("Go", h, oop).passed()).isTrue();
+        assertThat(grade("Go", h, oop.replace("r.largeur * r.hauteur", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1735,8 +1735,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, oop).passed()).isTrue();
-        assertThat(note("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
+        assertThat(grade("Rust", h, oop).passed()).isTrue();
+        assertThat(grade("Rust", h, oop.replace("self.largeur * self.hauteur", "0"))
                 .passed()).isFalse();
     }
 
@@ -1755,9 +1755,9 @@ class RpcGradingIntegrationTest {
                 fn cle(n: i32) -> i32 { n + 1 }
                 fn a0(n: i32) -> i32 { n }
                 """;
-        TestResult r = note("Rust", h, code);
+        TestResult r = grade("Rust", h, code);
         assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
-        assertThat(note("Rust", h, code.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("Rust", h, code.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1775,9 +1775,9 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        TestResult r = note("Rust", h, code);
+        TestResult r = grade("Rust", h, code);
         assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
-        assertThat(note("Rust", h, code.replace("self.id + self.args", "0")).passed()).isFalse();
+        assertThat(grade("Rust", h, code.replace("self.id + self.args", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1791,9 +1791,9 @@ class RpcGradingIntegrationTest {
                 func ligne(n int) int { return n }
                 func rep(n int) int { return n }
                 """;
-        TestResult r = note("Go", h, code);
+        TestResult r = grade("Go", h, code);
         assertThat(r.passed()).as(r.detail() == null ? "" : r.detail()).isTrue();
-        assertThat(note("Go", h, code.replace("n * 2", "0")).passed()).isFalse();
+        assertThat(grade("Go", h, code.replace("n * 2", "0")).passed()).isFalse();
     }
 
     @Test
@@ -1806,10 +1806,10 @@ class RpcGradingIntegrationTest {
                 int a0(int x) { return x; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = note(language, h, code);
+            TestResult r = grade(language, h, code);
             assertThat(r.passed()).as(language + " : " + (r.detail() == null ? "" : r.detail()))
                     .isTrue();
-            assertThat(note(language, h, code.replace("x * 2", "0")).passed()).isFalse();
+            assertThat(grade(language, h, code.replace("x * 2", "0")).passed()).isFalse();
         }
     }
 
@@ -1820,10 +1820,10 @@ class RpcGradingIntegrationTest {
 
     private void gradedThenWrong(String language, String harness, String code, String right,
             String wrong) {
-        TestResult r = note(language, harness, code);
+        TestResult r = grade(language, harness, code);
         assertThat(r.passed()).as(language + " : " + (r.detail() == null ? "" : r.detail()))
                 .isTrue();
-        assertThat(note(language, harness, code.replace(right, wrong)).passed()).isFalse();
+        assertThat(grade(language, harness, code.replace(right, wrong)).passed()).isFalse();
     }
 
     @Test
@@ -1884,16 +1884,16 @@ class RpcGradingIntegrationTest {
         // échec quelconque, du noteur compris, ferait passer ce test).
         String h = "if (doubler(5) != 10) return 0;\nreturn doubler(0) == 0;";
         for (String language : List.of("C", "C++")) {
-            assertThat(note(language, h, "int doubler(int n) { return n * 2; }\n").passed())
+            assertThat(grade(language, h, "int doubler(int n) { return n * 2; }\n").passed())
                     .as(language + " : témoin juste").isTrue();
             // La macro ne détraque que la fonction SOUMISE : le serveur généré s'en débarrasse
             // (`#undef`, revue #246), répond normalement, et c'est le harnais du noteur, intact,
             // qui juge la réponse fausse. Atteint par la macro, il aurait renvoyé vrai.
-            TestResult ret = note(language, h,
+            TestResult ret = grade(language, h,
                     "#define return return 1 ||\nint doubler(int n) { return n * 3; }\n");
             assertThat(ret.passed()).as(language + " : return").isFalse();
             assertThat(ret.detail()).as(language + " : return").isEqualTo("Le harnais a renvoyé faux");
-            TestResult cond = note(language, h,
+            TestResult cond = grade(language, h,
                     "#define if(c) if (0)\nint doubler(int n) { return n * 3; }\n");
             assertThat(cond.passed()).as(language + " : if").isFalse();
             assertThat(cond.detail()).as(language + " : if").isEqualTo("Le harnais a renvoyé faux");
@@ -1937,7 +1937,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void c_submission_defining_a_symbol_the_server_links_to_is_refused_by_name() {
-        TestResult r = note("C", "return doubler(5) == 10;", """
+        TestResult r = grade("C", "return doubler(5) == 10;", """
                 int printf(int x) { return x; }
                 int doubler(int n) { return n * 2; }
                 """);
@@ -1947,7 +1947,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void cpp_class_named_like_a_library_function_is_refused_by_name() {
-        TestResult r = note("C++", "return remove(3).get() == 3;", """
+        TestResult r = grade("C++", "return remove(3).get() == 3;", """
                 class remove { int v; public: remove(int a) : v(a) {} int get() { return v; } };
                 """);
         assertThat(r.passed()).isFalse();
@@ -1961,7 +1961,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void go_package_declaration_hiding_a_predeclared_name_is_refused_by_name() {
-        TestResult r = note("Go", "return doubler(5) == 10",
+        TestResult r = grade("Go", "return doubler(5) == 10",
                 "package main\n\nvar string = 3\n\nfunc doubler(n int) int { return n * 2 }\n");
         assertThat(r.passed()).isFalse();
         assertThat(r.detail()).contains("réservé").contains("string");
@@ -2104,7 +2104,7 @@ class RpcGradingIntegrationTest {
                 int suivant(int a) { return printf(a); }
                 """, "return n->v;", "return 0;");
         // La signature de la libc, elle, reprend son symbole : refus nommé.
-        TestResult r = note("C++", "return doubler(5) == 10;", """
+        TestResult r = grade("C++", "return doubler(5) == 10;", """
                 #include <cstdlib>
                 void free(void *p) { }
                 int doubler(int n) { return n * 2; }
@@ -2117,7 +2117,7 @@ class RpcGradingIntegrationTest {
     void c_symbol_the_server_links_to_is_refused_by_name_however_it_is_written() {
         // Écritures que le contrôle textuel ne reconnaît pas : le binaire, lui, porte le symbole.
         // Type de retour sur sa propre ligne (C) :
-        TestResult c = note("C", "return doubler(5) == 10;", """
+        TestResult c = grade("C", "return doubler(5) == 10;", """
                 int
                 printf(const char *f, ...) { return 0; }
                 int doubler(int n) { return n * 2; }
@@ -2125,7 +2125,7 @@ class RpcGradingIntegrationTest {
         assertThat(c.passed()).isFalse();
         assertThat(c.detail()).contains("réservé").contains("printf");
         // Paramètre écrit par un alias de type : même signature que la libc, pas une surcharge.
-        TestResult alias = note("C++", "return doubler(5) == 10;", """
+        TestResult alias = grade("C++", "return doubler(5) == 10;", """
                 #include <cstdlib>
                 typedef void *adresse;
                 void free(adresse p) noexcept { }
@@ -2134,7 +2134,7 @@ class RpcGradingIntegrationTest {
         assertThat(alias.passed()).isFalse();
         assertThat(alias.detail()).contains("réservé").contains("free");
         // Bloc `extern "C"` :
-        TestResult externCBlock = note("C++", "return doubler(5) == 10;", """
+        TestResult externCBlock = grade("C++", "return doubler(5) == 10;", """
                 extern "C" {
                 void *malloc(unsigned long n) { return 0; }
                 }
@@ -2143,7 +2143,7 @@ class RpcGradingIntegrationTest {
         assertThat(externCBlock.passed()).isFalse();
         assertThat(externCBlock.detail()).contains("réservé").contains("malloc");
         // Fonction versionnée par directive d'assembleur : `T free@@GLIBC_2.2.5` dans le binaire.
-        TestResult versioned = note("C", "return doubler(5) == 10;", """
+        TestResult versioned = grade("C", "return doubler(5) == 10;", """
                 void mon_free(void *p) { }
                 __asm__(".symver mon_free,free@@GLIBC_2.2.5");
                 int doubler(int n) { return n * 2; }
@@ -2152,7 +2152,7 @@ class RpcGradingIntegrationTest {
         assertThat(versioned.detail()).contains("réservé").contains("free");
         // Une VARIABLE n'est jamais décorée, en C comme en C++ :
         for (String language : List.of("C", "C++")) {
-            TestResult variable = note(language, "return doubler(5) == 10;", """
+            TestResult variable = grade(language, "return doubler(5) == 10;", """
                     int stdin = 3;
                     int free;
                     int doubler(int n) { return n * 2; }
@@ -2206,8 +2206,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Java", h, oop).passed()).isTrue();
-        assertThat(note("Java", h, oop.replace("return largeur * hauteur;", "return 0;"))
+        assertThat(grade("Java", h, oop).passed()).isTrue();
+        assertThat(grade("Java", h, oop.replace("return largeur * hauteur;", "return 0;"))
                 .passed()).isFalse();
     }
 
@@ -2232,8 +2232,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("C#", h, oop).passed()).isTrue();
-        assertThat(note("C#", h, oop.replace("return largeur * hauteur;", "return 0;"))
+        assertThat(grade("C#", h, oop).passed()).isTrue();
+        assertThat(grade("C#", h, oop.replace("return largeur * hauteur;", "return 0;"))
                 .passed()).isFalse();
     }
 
@@ -2244,16 +2244,16 @@ class RpcGradingIntegrationTest {
     void java_all_marshalable_return_types() {
         // `long`, `double` et `boolean` sont des MOTS RÉSERVÉS : le nom de la méthode RPC ne peut
         // pas être dérivé du type. Seuls int et String compilaient.
-        assertThat(note("Java", "return Solution.moitie(7) == 3L;",
+        assertThat(grade("Java", "return Solution.moitie(7) == 3L;",
                 "public class Solution { public static long moitie(int n) { return n / 2; } }")
                 .passed()).isTrue();
-        assertThat(note("Java", "return Math.abs(Solution.aire(3, 4) - 12.0) < 1e-9;",
+        assertThat(grade("Java", "return Math.abs(Solution.aire(3, 4) - 12.0) < 1e-9;",
                 "public class Solution { public static double aire(int l, int h)"
                         + " { return l * (double) h; } }").passed()).isTrue();
-        assertThat(note("Java", "return Solution.pair(4);",
+        assertThat(grade("Java", "return Solution.pair(4);",
                 "public class Solution { public static boolean pair(int n)"
                         + " { return n % 2 == 0; } }").passed()).isTrue();
-        assertThat(note("Java", "return Solution.crie(\"bon\").equals(\"BON\");",
+        assertThat(grade("Java", "return Solution.crie(\"bon\").equals(\"BON\");",
                 "public class Solution { public static String crie(String s)"
                         + " { return s.toUpperCase(); } }").passed()).isTrue();
     }
@@ -2264,9 +2264,9 @@ class RpcGradingIntegrationTest {
         // réponse juste était notée FAUSSE. Les chaînes voyagent donc en hexadécimal.
         String code = "public class Solution { public static String copie(String s)"
                 + " { return s; } }";
-        assertThat(note("Java", "return Solution.copie(\"ab]cd\").equals(\"ab]cd\");", code)
+        assertThat(grade("Java", "return Solution.copie(\"ab]cd\").equals(\"ab]cd\");", code)
                 .passed()).isTrue();
-        assertThat(note("Java", "return Solution.copie(\"a\\\"b\\\\c|d\").equals(\"a\\\"b\\\\c|d\");",
+        assertThat(grade("Java", "return Solution.copie(\"a\\\"b\\\\c|d\").equals(\"a\\\"b\\\\c|d\");",
                 code).passed()).isTrue();
     }
 
@@ -2285,8 +2285,8 @@ class RpcGradingIntegrationTest {
                     }
                 }
                 """;
-        assertThat(note("Rust", h, oop).passed()).isTrue();
-        assertThat(note("Rust", h, oop.replace("self.valeur + n", "0")).passed()).isFalse();
+        assertThat(grade("Rust", h, oop).passed()).isTrue();
+        assertThat(grade("Rust", h, oop.replace("self.valeur + n", "0")).passed()).isFalse();
     }
 
     @Test
@@ -2307,20 +2307,20 @@ class RpcGradingIntegrationTest {
 
                 func (c *Compteur) Plus(n int) int { return c.valeur + n }
                 """;
-        assertThat(note("Go", h, oop).passed()).isTrue();
-        assertThat(note("Go", h, oop.replace("c.valeur + n", "0")).passed()).isFalse();
+        assertThat(grade("Go", h, oop).passed()).isTrue();
+        assertThat(grade("Go", h, oop.replace("c.valeur + n", "0")).passed()).isFalse();
     }
 
     @Test
     void strings_and_floats_over_text_protocols() {
         // `%g` tronquait un double à 6 chiffres significatifs, dans les deux sens, et une chaîne
         // contenant « | » décalait tout l'appel : réponse juste notée fausse.
-        assertThat(note("C", "return doubler(3.14159265) > 6.2831852;",
+        assertThat(grade("C", "return doubler(3.14159265) > 6.2831852;",
                 "double doubler(double x) { return x * 2; }").passed()).isTrue();
-        assertThat(note("C#", "return Solution.Copie(\"a|b\") == \"a|b\";",
+        assertThat(grade("C#", "return Solution.Copie(\"a|b\") == \"a|b\";",
                 "class Solution { public static string Copie(string s) { return s; } }")
                 .passed()).isTrue();
-        assertThat(note("Rust", "copie(String::from(\"a|b\")) == \"a|b\"",
+        assertThat(grade("Rust", "copie(String::from(\"a|b\")) == \"a|b\"",
                 "fn copie(s: String) -> String { s }").passed()).isTrue();
     }
 
@@ -2338,15 +2338,15 @@ class RpcGradingIntegrationTest {
                 const G: &str = include_str!("../noteur.rs");
                 fn copie(n: i32) -> i32 { if G.is_empty() { n } else { n } }
                 """;
-        assertThat(note("Rust", "copie(1) == 1", rust).passed()).isFalse();
-        assertThat(note("Rust", "copie(1) == 1",
+        assertThat(grade("Rust", "copie(1) == 1", rust).passed()).isFalse();
+        assertThat(grade("Rust", "copie(1) == 1",
                 rust.replace("include_str!(\"../noteur.rs\")", "\"\"")).passed()).isTrue();
         String c = """
                 __asm__(".section .rodata\\n g: .incbin \\\"../noteur.c\\\"\\n .previous");
                 int doubler(int n) { return n * 2; }
                 """;
-        assertThat(note("C", "return doubler(2) == 4;", c).passed()).isFalse();
-        assertThat(note("C", "return doubler(2) == 4;",
+        assertThat(grade("C", "return doubler(2) == 4;", c).passed()).isFalse();
+        assertThat(grade("C", "return doubler(2) == 4;",
                 c.replace(" g: .incbin \\\"../noteur.c\\\"\\n", "")).passed()).isTrue();
     }
 
@@ -2364,8 +2364,8 @@ class RpcGradingIntegrationTest {
 
                 func doubler(n int) int { return n * 2 }
                 """;
-        assertThat(note("Go", "return doubler(2) == 4", go).passed()).isFalse();
-        assertThat(note("Go", "return doubler(2) == 4",
+        assertThat(grade("Go", "return doubler(2) == 4", go).passed()).isFalse();
+        assertThat(grade("Go", "return doubler(2) == 4",
                 go.replace("import \"C\"\n", "")).passed()).isTrue();
     }
 
@@ -2377,7 +2377,7 @@ class RpcGradingIntegrationTest {
         // une valeur fausse : si une réponse forgée était prise pour la vraie, le cas passerait.
         // (Le nonce n'est pas dans la mémoire du code soumis — autre processus, autre UID — :
         // un parcours de /proc/self/mem qui ne pouvait rien changer au résultat a été retiré.)
-        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+        TestResult r = grade("Java", "return Solution.doubler(5) == 10;", """
                 public class Solution {
                     static {
                         System.out.println("{\\"ok\\":true,\\"value\\":10}");
@@ -2401,7 +2401,7 @@ class RpcGradingIntegrationTest {
         // Le résiduel historique de C/C++ : le code étudiant détournait printf pour capturer la
         // sortie du mini-framework — jeton compris — puis forgeait le verdict. Le harnais n'est
         // plus dans son unité de compilation : il n'y a plus rien à capturer.
-        TestResult r = note("C", "return doubler(5) == 10;", """
+        TestResult r = grade("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 #include <stdlib.h>
 
@@ -2424,7 +2424,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void go_answering_early_fails() {
-        TestResult r = note("Go", "return doubler(5) == 10", """
+        TestResult r = grade("Go", "return doubler(5) == 10", """
                 package main
 
                 import "fmt"
@@ -2455,7 +2455,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void csharp_answering_early_fails() {
-        TestResult r = note("C#", "return Solution.Doubler(5) == 10;", """
+        TestResult r = grade("C#", "return Solution.Doubler(5) == 10;", """
                 using System;
 
                 public class Solution {
@@ -2478,7 +2478,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void rust_answering_early_fails() {
-        TestResult r = note("Rust", "doubler(5) == 10", """
+        TestResult r = grade("Rust", "doubler(5) == 10", """
                 use std::io::Write;
 
                 pub fn doubler(_n: i32) -> i32 {
@@ -2494,7 +2494,7 @@ class RpcGradingIntegrationTest {
 
     @Test
     void cpp_answering_early_fails() {
-        TestResult r = note("C++", "return doubler(5) == 10;", """
+        TestResult r = grade("C++", "return doubler(5) == 10;", """
                 #include <cstdio>
 
                 // Constructeur d'un objet global : il tourne AVANT le main du serveur.
@@ -2520,7 +2520,7 @@ class RpcGradingIntegrationTest {
         // sous un autre UID : le détournement ne coupe que le canal de réponse de l'étudiant
         // lui-même, et l'appel est refusé — jamais une réponse forgée acceptée. (La forge par
         // réponse devancée sur le canal intact est mesurée par csharp_answering_early_fails.)
-        TestResult r = note("C#", "return Solution.Doubler(5) == 10;", """
+        TestResult r = grade("C#", "return Solution.Doubler(5) == 10;", """
                 using System;
                 using System.Runtime.InteropServices;
 
@@ -2626,7 +2626,7 @@ class RpcGradingIntegrationTest {
         // TÉMOIN : la même sonde doit retrouver un texte qu'elle PEUT lire (son propre marqueur,
         // dans son .class) ET avoir essuyé des refus sans s'arrêter. Sans lui, une sonde qui ne
         // parcourt rien — le défaut de l'ancienne — rendait le test vert à vide.
-        TestResult alive = note("Java", harness,
+        TestResult alive = grade("Java", harness,
                 javaHarnessProbe("sonde-vivante-moodit", "vu && refus > 0"));
         assertThat(alive.passed())
                 .withFailMessage("la sonde doit lire ses propres fichiers et franchir les refus, "
@@ -2634,7 +2634,7 @@ class RpcGradingIntegrationTest {
                 .isTrue();
 
         // La sonde, cette fois sur le texte du HARNAIS, et sur tout fichier qui n'est pas à elle.
-        TestResult r = note("Java", harness, javaHarnessProbe("doubler(5) == 10", "vu || ecrit"));
+        TestResult r = grade("Java", harness, javaHarnessProbe("doubler(5) == 10", "vu || ecrit"));
         assertThat(r.passed())
                 .as("le harnais ne doit être ni lisible ni modifiable depuis le code noté")
                 .isFalse();
@@ -2651,7 +2651,7 @@ class RpcGradingIntegrationTest {
         // `-user root` seul ne regardait jamais `noteur.c` : un `noteur.c` laissé lisible n'aurait
         // pas fait échouer le test. Sous -std=gnu17, popen compile : si le harnais était lisible,
         // ceci le trouverait. Il ne l'est pas.
-        TestResult r = note("C", "return doubler(5) == 10;", """
+        TestResult r = grade("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 #include <string.h>
 
@@ -2673,7 +2673,7 @@ class RpcGradingIntegrationTest {
         // TÉMOIN : la même commande SANS le filtre d'UID trouve le texte dans les fichiers de
         // l'étudiant (son source le contient). Elle prouve que popen, find et grep tournent dans
         // le conteneur — sans quoi la sonde ci-dessus rendrait 0 pour une tout autre raison.
-        TestResult alive = note("C", "return doubler(5) == 10;", """
+        TestResult alive = grade("C", "return doubler(5) == 10;", """
                 #include <stdio.h>
                 #include <string.h>
 
@@ -2701,7 +2701,7 @@ class RpcGradingIntegrationTest {
     void honest_chatty_code_still_passes() {
         // Un étudiant qui imprime beaucoup, sur la sortie comme sur l'erreur, ne doit pas être
         // pénalisé : sa sortie n'est pas le canal de verdict (le nonce part du NOTEUR).
-        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+        TestResult r = grade("Java", "return Solution.doubler(5) == 10;", """
                 public class Solution {
                     public static int doubler(int n) {
                         System.out.println("je calcule " + n);
@@ -2730,7 +2730,7 @@ class RpcGradingIntegrationTest {
         // Le test voisin fermait le flux dans `main`, qui n'est JAMAIS appelé sur ce chemin
         // (c'est le serveur généré qui tourne et invoque la méthode) : il donnait l'illusion de
         // couvrir cet idiome sans jamais l'exercer.
-        TestResult r = note("Java", "return Solution.doubler(5) == 10;", """
+        TestResult r = grade("Java", "return Solution.doubler(5) == 10;", """
                 public class Solution {
                     public static int doubler(int n) {
                         System.out.close();
@@ -2752,7 +2752,7 @@ class RpcGradingIntegrationTest {
         // 1. C# : un constructeur prenant UN SEUL int — `new Compteur(0)`, l'idiome le plus
         //    courant — collisionnait avec le constructeur « à poignée » du bouchon. Le noteur ne
         //    compilait plus et la question rendait 0 sans diagnostic.
-        assertThat(note("C#", "return new Compteur(10).Plus(5) == 15;", """
+        assertThat(grade("C#", "return new Compteur(10).Plus(5) == 15;", """
                 class Compteur {
                     int valeur;
                     public Compteur(int depart) { valeur = depart; }
@@ -2762,7 +2762,7 @@ class RpcGradingIntegrationTest {
 
         // 2. Rust : un champ String en capture de champs partait en clair alors que l'autre côté
         //    le décodait — une valeur commençant par « H » revenait mutilée.
-        assertThat(note("Rust", "let p = Personne { nom: String::from(\"Hugo\"), age: 7 };\n"
+        assertThat(grade("Rust", "let p = Personne { nom: String::from(\"Hugo\"), age: 7 };\n"
                 + "p.carte() == \"Hugo:7\"", """
                 struct Personne {
                     nom: String,
@@ -2778,7 +2778,7 @@ class RpcGradingIntegrationTest {
 
         // 3. Go : tout entier traversait un float64 (JSON), donc perdait des unités au-delà
         //    de 2^53. Une somme de grands nombres revenait fausse.
-        assertThat(note("Go", "return somme(9007199254740993, 2) == 9007199254740995",
+        assertThat(grade("Go", "return somme(9007199254740993, 2) == 9007199254740995",
                 "package main\n\nfunc somme(a int64, b int64) int64 { return a + b }\n")
                 .passed()).isTrue();
     }
@@ -2789,7 +2789,7 @@ class RpcGradingIntegrationTest {
         // niveau module : l'aiguillage généré la citait quand même et le programme de l'étudiant
         // ne compilait plus. Il recevait 0 avec une erreur de compilation qui n'était pas la
         // sienne — le même défaut qu'en C++ avec les méthodes de classe.
-        TestResult r = note("Rust", "doubler(5) == 10", """
+        TestResult r = grade("Rust", "doubler(5) == 10", """
                 struct Aide {
                     facteur: i32,
                 }
@@ -2811,7 +2811,7 @@ class RpcGradingIntegrationTest {
         // En capture de champs, l'objet est reconstruit à chaque appel : une méthode `&mut self`
         // verrait sa modification perdue EN SILENCE. Le type n'est donc pas proxifié de cette
         // façon — le harnais ne compile pas et le prof le voit, plutôt qu'un faux verdict.
-        TestResult r = note("Rust", "let mut c = Compteur { valeur: 0 };\nc.ajoute(5) == 5", """
+        TestResult r = grade("Rust", "let mut c = Compteur { valeur: 0 };\nc.ajoute(5) == 5", """
                 struct Compteur {
                     valeur: i32,
                 }
@@ -2833,7 +2833,7 @@ class RpcGradingIntegrationTest {
         // La réponse d'erreur du serveur ne portait pas l'identifiant de l'appel : le noteur ne
         // la consommait jamais, les deux processus s'attendaient, et le cas rendait « Interrompu
         // (temps limite dépassé) » au bout de son mur au lieu du vrai motif.
-        TestResult r = note("Java", "return Solution.divise(1, 0) == 0;",
+        TestResult r = grade("Java", "return Solution.divise(1, 0) == 0;",
                 "public class Solution { public static int divise(int a, int b)"
                         + " { return a / b; } }");
         assertThat(r.passed()).isFalse();
@@ -2901,7 +2901,7 @@ class RpcGradingIntegrationTest {
                         }
                         """));
         for (CaseSpec c : specs) {
-            TestResult r = note(c.lang(), c.harnessCode(), c.code());
+            TestResult r = grade(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
                     .as("sortie non terminée en " + c.lang() + " : "
                             + (r.detail() == null ? "" : r.detail()))
@@ -2936,14 +2936,14 @@ class RpcGradingIntegrationTest {
                     + startCode.substring(m.end());
             assertThat(code).as("code complété en " + lang).contains("42");
 
-            TestResult good = note(lang, harness, code);
+            TestResult good = grade(lang, harness, code);
             assertThat(good.passed())
                     .as("valeurs par défaut en " + lang + " : "
                             + (good.detail() == null ? "" : good.detail()))
                     .isTrue();
             // Et une mauvaise réponse échoue : le test mesure bien la notation, pas un « tout
             // passe ».
-            assertThat(note(lang, harness, code.replace("42", "41")).passed())
+            assertThat(grade(lang, harness, code.replace("42", "41")).passed())
                     .as("mauvaise réponse en " + lang)
                     .isFalse();
         }
@@ -2953,21 +2953,21 @@ class RpcGradingIntegrationTest {
     void error_paths_fail_cleanly() {
         // Fail-closed : aucune de ces situations ne doit donner « réussi », et le motif doit
         // désigner le bon fautif — le prof pour un harnais qui ne compile pas, pas l'étudiant.
-        TestResult falseHarness = note("Java", "return Solution.inexistante(3) == 1;",
+        TestResult falseHarness = grade("Java", "return Solution.inexistante(3) == 1;",
                 "public class Solution { public static int doubler(int n) { return n * 2; } }");
         assertThat(falseHarness.passed()).isFalse();
         assertThat(falseHarness.detail()).contains("harnais");
 
-        TestResult withoutApi = note("Java", "return true;",
+        TestResult withoutApi = grade("Java", "return true;",
                 "public class Solution { private static int cache = 1; }");
         assertThat(withoutApi.passed()).isFalse();
         assertThat(withoutApi.detail()).isNotEmpty();
 
-        TestResult brokenCode = note("Rust", "doubler(5) == 10", "fn doubler(n: i32) -> i32 { n *");
+        TestResult brokenCode = grade("Rust", "doubler(5) == 10", "fn doubler(n: i32) -> i32 { n *");
         assertThat(brokenCode.passed()).isFalse();
         assertThat(brokenCode.detail()).contains("compilation");
 
-        TestResult throwingHarness = note("Java",
+        TestResult throwingHarness = grade("Java",
                 "throw new IllegalStateException(\"le prof s'est trompé\");",
                 "public class Solution { public static int doubler(int n) { return n * 2; } }");
         assertThat(throwingHarness.passed()).isFalse();
@@ -3036,7 +3036,7 @@ class RpcGradingIntegrationTest {
                         }
                         """));
         for (CaseSpec c : specs) {
-            TestResult r = note(c.lang(), c.harnessCode(), c.code());
+            TestResult r = grade(c.lang(), c.harnessCode(), c.code());
             assertThat(r.passed())
                     .as("code honnête mais bavard en " + c.lang() + " : "
                             + (r.detail() == null ? "" : r.detail()))

@@ -216,11 +216,13 @@ export function defaultStartCode(language?: Language): string {
  * fourni. Le langage passé est celui du harnais (résolu via Language.harnessLanguageId).
  */
 const HARNESS_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
-  python: '# Harnais : lève une exception (ou renvoie False) si la réponse est incorrecte.\n',
-  javascript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  typescript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  jsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  tsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  // Interprétés : le harnais RENVOIE un booléen, comme les gabarits du backend (V2/V5) — un
+  // harnais qui ne fait qu'un `assert` (sans renvoyer vrai) échoue toujours.
+  python: '# Harnais : renvoie True si la réponse est correcte (False ou une exception = échec).\n',
+  javascript: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  typescript: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  jsx: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  tsx: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
   // Compilés : le harnais est un corps qui RENVOIE UN BOOLÉEN. C'est cette forme que le
   // superviseur note sans que l'étudiant puisse falsifier son résultat (harnais compilé dans un
   // processus séparé, sous un UID séparé) — le gabarit du backend, plus détaillé, prime.
@@ -230,7 +232,7 @@ const HARNESS_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
   'c#': '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
   go: '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
   rust: '// Harnais : une expression booléenne, vraie si la réponse est correcte.\n',
-  php: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  php: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
   sql: '-- Harnais : requête de vérification renvoyant vrai/faux.\n',
   bash: '# Harnais : sortie 0 si la réponse est correcte, non-zéro sinon.\n',
 };

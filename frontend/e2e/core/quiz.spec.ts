@@ -16,6 +16,12 @@ import {
   pythonLanguage,
 } from './quiz.helpers';
 
+/**
+ * Corps du 409 de core pour une tentative unique déjà consommée (AlreadySubmittedException, texte
+ * brut) — distinct du 409 JSON « correction en cours » (cause en_cours) ou « relance ».
+ */
+const ALREADY_SUBMITTED = 'Quiz already submitted';
+
 // Un quiz n'accepte qu'UNE tentative par compte : chaque exécution utilise un compte neuf.
 // Questions 1 à 3 répondues juste ; 4 (remise en ordre) et 5 (association) laissées telles quelles.
 test('passer un quiz et voir la correction', async ({ browser, baseURL }) => {
@@ -227,7 +233,10 @@ test('question de code et tentative unique', async ({ browser, baseURL }) => {
     const again = await page.request.post(`/api/quizzes/${quizId}/submissions`, {
       data: { quizId, answers: [] },
     });
+    // Refus « déjà soumise » (corps texte), et non « correction en cours » (JSON, cause en_cours) :
+    // la tentative est corrigée, le résumé vient de s'afficher.
     expect(again.status()).toBe(409);
+    expect(await again.text()).toBe(ALREADY_SUBMITTED);
 
     await context.close();
   } finally {
@@ -336,8 +345,15 @@ test("API : une remise en ordre qui n'est pas une permutation est refusée sans 
       // Aucune tentative enregistrée : la soumission valide (permutation, même fausse) passe.
       expect((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).toHaveLength(0);
       expect((await submit([ids[2], ids[0], ids[1]])).status()).toBe(202);
-      // Et la tentative unique s'applique toujours ensuite.
-      await expect.poll(async () => (await submit([...ids])).status()).toBe(409);
+      // Et la tentative unique s'applique toujours ensuite. Une fois la correction TERMINÉE :
+      // pendant qu'elle tourne, le refus serait « correction en cours » (JSON, cause en_cours),
+      // pas la règle de tentative unique.
+      await expect
+        .poll(async () => ((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).length)
+        .toBe(1);
+      const again = await submit([...ids]);
+      expect(again.status()).toBe(409);
+      expect(await again.text()).toBe(ALREADY_SUBMITTED);
     } finally {
       await student.dispose();
     }

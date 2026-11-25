@@ -25,8 +25,9 @@ import static org.mockito.Mockito.when;
 /**
  * Traduction FAIL-CLOSED du JSON du superviseur en verdicts (#116) : un cas sans verdict, un JSON
  * cassé, un verdict de canaris absent ou inconnu, ou une erreur du superviseur ne deviennent
- * jamais un « réussi ». Les événements du superviseur sont journalisés, jamais annexés aux
- * verdicts (aucun ne porte d'index de cas).
+ * jamais un « réussi ». Les événements du superviseur sont journalisés côté serveur seulement :
+ * ils portent l'index du cas quand ils en concernent un (pour le journal), mais ne sont jamais
+ * annexés aux verdicts et n'en modifient aucun.
  */
 class DockerEvaluatorTest {
 

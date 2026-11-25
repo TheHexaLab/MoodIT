@@ -456,8 +456,8 @@ export class ExecutionBusyError extends Error {
 export class SubmissionRejectedError extends Error {
   /**
    * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo).
-   * `regrading` : 409 de cause « relance » — l'enseignant relance la correction de la tentative
-   * précédente ; refus TEMPORAIRE, à renvoyer plus tard (aucune attente : l'id relancé est déjà
+   * `regrading` : 409 de cause « relance » — quiz AVEC reprise dont l'enseignant relance la
+   * correction de la tentative précédente ; refus TEMPORAIRE, à renvoyer plus tard (aucune attente : l'id relancé est déjà
    * connu, son verdict ne conclurait pas cet envoi).
    * Le texte affiché vient alors des libellés de la vue (`submitTooLarge`, `submitRegrading`),
    * pas de ce message.

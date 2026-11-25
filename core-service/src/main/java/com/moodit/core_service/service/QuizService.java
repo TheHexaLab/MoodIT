@@ -395,9 +395,10 @@ public class QuizService {
      * d'une soumission de l'étudiant sur ce quiz est déjà en cours (tentative {@code "pending"},
      * index partiel {@code uq_attempt_pending}) — le frontend rejoint alors son attente ;
      * {@link RegradeInProgressException} ({@code cause = "relance"}) si ce pending est une RELANCE
-     * de l'enseignant ({@link Attempt#isRegrade()}), dont le verdict n'est pas celui de cette
-     * soumission ; sinon {@link AlreadySubmittedException} (corps texte) si la tentative unique est
-     * déjà consommée (quiz sans reprise). `userEmail` vient du JWT (header gateway).
+     * de l'enseignant ({@link Attempt#isRegrade()}) sur un quiz AVEC reprise, dont le verdict
+     * n'est pas celui de cette soumission ; sinon {@link AlreadySubmittedException} (corps texte)
+     * si la tentative unique est déjà consommée (quiz sans reprise — relance en cours comprise :
+     * elle porte forcément sur cette tentative unique). `userEmail` vient du JWT (header gateway).
      */
     public Integer submitQuiz(Integer quizId, QuizSubmissionDTO submission, String userEmail) {
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
@@ -412,31 +413,44 @@ public class QuizService {
             // sans harnais elle passe en done en quelques millisecondes (ou est supprimée) et la
             // relecture ne trouverait plus rien. Reste à distinguer la relance, relue dans une
             // transaction NOUVELLE : celle de l'insert est annulée — sous PostgreSQL, une
-            // transaction en erreur refuse toute requête jusqu'à son rollback.
+            // transaction en erreur refuse toute requête jusqu'à son rollback. Sur un quiz SANS
+            // reprise, une relance concurrente est en pratique inatteignable ici (elle suppose une
+            // tentative « à revoir », que le comptage aurait déjà refusée) ; si elle survenait,
+            // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
             readTx.setReadOnly(true);
-            boolean regrade = Boolean.TRUE.equals(readTx.execute(status -> regradePending(quizId, e.userId)));
-            throw regrade ? new RegradeInProgressException() : new GradingInProgressException();
+            throw readTx.execute(status -> pendingConflict(quizId, e.userId, e.allowRetry));
         }
     }
 
-    /** Vrai si le pending de l'étudiant sur ce quiz est une RELANCE de l'enseignant. */
-    private boolean regradePending(Integer quizId, Integer userId) {
-        return attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, userId, "pending", true);
+    /**
+     * 409 d'une soumission face au pending de l'étudiant sur ce quiz : « en_cours » pour la
+     * correction de sa propre soumission ; pour une RELANCE de l'enseignant, « relance » sur un
+     * quiz avec reprise (il pourra resoumettre ensuite), mais « déjà soumis » sur un quiz sans
+     * reprise — la relance porte forcément sur sa tentative unique, « réessayez plus tard » le
+     * mènerait de toute façon à ce refus.
+     */
+    private RuntimeException pendingConflict(Integer quizId, Integer userId, boolean allowRetry) {
+        if (!attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, userId, "pending", true)) {
+            return new GradingInProgressException();
+        }
+        return allowRetry ? new RegradeInProgressException() : new AlreadySubmittedException();
     }
 
     /**
      * Insert de la tentative refusé par {@code UNIQUE(quiz,user,attempt_no)} ou
      * {@code uq_attempt_pending} (écriture concurrente du même étudiant sur le même quiz) :
-     * {@link #submitQuiz} répond « correction en cours », ou « relance » après relecture hors de
-     * la transaction annulée.
+     * {@link #submitQuiz} répond « correction en cours », sauf relance relue hors de la
+     * transaction annulée (cf. {@link #pendingConflict}, d'où {@code allowRetry}).
      */
     private static final class ConcurrentSubmissionException extends RuntimeException {
         private final Integer userId;
+        private final boolean allowRetry;
 
-        ConcurrentSubmissionException(Integer userId, Throwable cause) {
+        ConcurrentSubmissionException(Integer userId, boolean allowRetry, Throwable cause) {
             super(cause);
             this.userId = userId;
+            this.allowRetry = allowRetry;
         }
     }
 
@@ -455,14 +469,16 @@ public class QuizService {
      *
      * <p>Une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
      * contrôle de tentative unique : sur un quiz sans reprise, elle compte aussi parmi les
-     * tentatives et donnerait sinon le 409 « déjà soumis ». {@link RegradeInProgressException} si
-     * c'est une relance de l'enseignant, {@link GradingInProgressException} sinon.
+     * tentatives et donnerait sinon le 409 « déjà soumis » à tort. Le 409 suit
+     * {@link #pendingConflict} : {@link GradingInProgressException} pour sa propre correction ;
+     * pour une relance de l'enseignant, {@link RegradeInProgressException} avec reprise,
+     * {@link AlreadySubmittedException} sans reprise.
      *
      * <p>Anti-double-soumission ATOMIQUE : la contrainte {@code UNIQUE(quiz,user,attempt_no)} ET
      * l'index partiel {@code uq_attempt_pending} garantissent qu'un seul pending existe à la fois —
      * un 2e insert concurrent viole l'un d'eux → {@link ConcurrentSubmissionException}, que
-     * {@link #submitQuiz} traduit en 409 « en_cours » (ou « relance », après relecture), jamais en
-     * « déjà soumis ».
+     * {@link #submitQuiz} traduit en 409 « en_cours » même si le pending concurrent est déjà
+     * corrigé (ou supprimé) à la relecture ; seule une relance relue change la réponse.
      */
     private Integer persistPendingAttempt(Integer quizId, String userEmail,
             Map<Integer, SubmittedAnswerDTO> submitted) {
@@ -478,8 +494,7 @@ public class QuizService {
         requireBoundedCode(quiz, byQuestion);
 
         if (attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(quizId, user.getId(), "pending")) {
-            throw regradePending(quizId, user.getId())
-                    ? new RegradeInProgressException() : new GradingInProgressException();
+            throw pendingConflict(quizId, user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()));
         }
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
@@ -495,10 +510,10 @@ public class QuizService {
         try {
             saved = attemptRepository.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException e) {
-            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending : écriture concurrente. 409
-            // « en_cours » ou « relance », décidé hors de cette transaction, désormais
-            // inutilisable (cf. submitQuiz).
-            throw new ConcurrentSubmissionException(user.getId(), e);
+            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending : écriture concurrente. Le 409
+            // est décidé hors de cette transaction, désormais inutilisable (cf. submitQuiz).
+            throw new ConcurrentSubmissionException(
+                    user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()), e);
         }
 
         // Réponses brutes ; les verdicts de code seront ajoutés par la correction async.

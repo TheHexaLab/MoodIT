@@ -148,8 +148,10 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Pending = RELANCE de l'enseignant → RegradeInProgressException (« relance »), pas « en cours »")
-        void pendingRegrade_regradeInProgress() {
+        @DisplayName("Pending = RELANCE de l'enseignant, quiz AVEC reprise → RegradeInProgressException (« relance »), pas « en cours »")
+        void pendingRegrade_withRetry_regradeInProgress() {
+            // Quiz AVEC reprise : l'étudiant pourra resoumettre une fois la relance finie.
+            quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
@@ -163,6 +165,22 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .hasMessage("Votre tentative précédente est en cours de recorrection par votre"
                             + " enseignant. Réessayez plus tard.");
             verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
+            verify(attemptRepository, never()).saveAndFlush(any());
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Pending = RELANCE de l'enseignant, quiz SANS reprise → AlreadySubmittedException (« réessayez » mènerait à ce refus)")
+        void pendingRegrade_noRetry_alreadySubmitted() {
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(true);
+
+            // La relance porte forcément sur la tentative unique : elle est consommée.
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(AlreadySubmittedException.class);
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
@@ -388,8 +406,9 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Insert concurrent avec une RELANCE de l'enseignant → RegradeInProgressException, relue dans une transaction NOUVELLE")
+        @DisplayName("Insert concurrent avec une RELANCE de l'enseignant, quiz AVEC reprise → RegradeInProgressException, relue dans une transaction NOUVELLE")
         void constraintViolation_regradeReread_regradeInProgress() {
+            quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             // Contrôle préalable : rien encore ; l'enseignant relance une tentative « à revoir »
@@ -410,6 +429,33 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             assertThat(defs.getAllValues().get(0).isReadOnly()).isFalse();
             assertThat(defs.getAllValues().get(1).isReadOnly()).isTrue();
             verify(transactionManager).rollback(any());
+            // ORDRE : la relecture ne commence qu'APRÈS le rollback. Une relecture lancée dans le
+            // catch de l'insert rejoindrait la transaction PostgreSQL en échec (25P02) → 500.
+            org.mockito.InOrder order = org.mockito.Mockito.inOrder(transactionManager);
+            order.verify(transactionManager).getTransaction(
+                    org.mockito.ArgumentMatchers.argThat(d -> d != null && !d.isReadOnly()));
+            order.verify(transactionManager).rollback(any());
+            order.verify(transactionManager).getTransaction(
+                    org.mockito.ArgumentMatchers.argThat(d -> d != null && d.isReadOnly()));
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Insert concurrent avec une RELANCE, quiz SANS reprise → AlreadySubmittedException (même règle que le contrôle préalable)")
+        void constraintViolation_regradeReread_noRetry_alreadySubmitted() {
+            // En pratique inatteignable (une relance suppose une tentative « à revoir », que le
+            // comptage aurait refusée) : la règle reste celle du contrôle préalable.
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
+            when(attemptRepository.saveAndFlush(any(Attempt.class)))
+                    .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(true);
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(AlreadySubmittedException.class);
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
     }

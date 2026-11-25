@@ -62,7 +62,7 @@ public class DockerEvaluator {
      */
     private static final long C_PREPROCESS_BUDGET_MS = 10_000;
     private static final long DEFAULT_RUN_TIMEOUT_MS = 10_000;
-    private static final long MAX_WALL_MS = 15 * 60_000;
+    static final long MAX_WALL_MS = 15 * 60_000;
     /**
      * Plafond du mur pour un appel PUBLIC (« Tester » d'un prof). La route
      * {@code /exec/evaluate} est réservée aux ÉDITEURS DE QUIZ (enseignant/admin/gardien,

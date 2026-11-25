@@ -197,8 +197,8 @@ class DockerSandboxTest {
         // État OOMKilled illisible (non simulé ici) : faux, sans faire échouer la notation.
         assertThat(run.oomKilled()).isFalse();
         org.mockito.Mockito.verify(remove).exec(); // conteneur détruit, succès ou non
-        // Étiquette EXACTE des runners : le balayage des orphelins (OrphanSweeper) et le test
-        // d'intégration interrupted_run_leaves_no_container la cherchent avec la valeur « 1 ».
+        // Étiquette EXACTE des runners : le balayage des orphelins (OrphanSweeper) la cherche
+        // avec la valeur « 1 ».
         org.mockito.Mockito.verify(create).withLabels(Map.of(DockerSandbox.RUNNER_LABEL, "1"));
     }
 
@@ -584,8 +584,14 @@ class DockerSandboxTest {
                 created * 1000L + DockerSandbox.ORPHAN_GRACE_MS)).isTrue();
         assertThat(DockerSandbox.removable(container("exited", created),
                 created * 1000L + DockerSandbox.ORPHAN_GRACE_MS - 1)).isFalse();
-        // Le délai couvre le plus long mur possible, journaux compris.
-        assertThat(DockerSandbox.ORPHAN_GRACE_MS).isGreaterThan(15 * 60_000L + 30_000L);
+        // Le délai couvre le plus long mur possible, journaux compris : lus sur les vraies
+        // valeurs (plafond du mur de DockerEvaluator, délai de lecture des journaux par défaut),
+        // pas recopiés — relever le mur sans relever ce délai doit faire échouer ce test.
+        long logReadMs = new DockerSandbox(
+                org.mockito.Mockito.mock(com.github.dockerjava.api.DockerClient.class), 512, 64, 1.0)
+                .logReadTimeout.toMillis();
+        assertThat(DockerSandbox.ORPHAN_GRACE_MS)
+                .isGreaterThan(DockerEvaluator.MAX_WALL_MS + logReadMs);
     }
 
     private static com.github.dockerjava.api.model.Container container(String state, long createdSeconds) {
@@ -928,5 +934,88 @@ class DockerSandboxTest {
         assertThat(tinySandbox.boxSizeMb()).isEqualTo(256);
         assertThat(tinySandbox.tmpSizeMb()).isEqualTo(32);
         assertThat(tinySandbox.shmSizeMb()).isEqualTo(16);
+    }
+
+    @Test
+    void memory_below_docker_minimum_refused_at_startup() {
+        // 0 = « illimité » pour Docker, négatif = 502 à chaque notation : refusé au démarrage.
+        for (long memoryMb : new long[] {0, -1, DockerSandbox.MIN_MEMORY_MB - 1,
+                Long.MAX_VALUE / (1024 * 1024) + 1}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> new DockerSandbox("tcp://localhost:1", memoryMb, 512, 1.0))
+                    .as("mémoire %d", memoryMb)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("SANDBOX_MEMORY_MB");
+        }
+        // Borne exacte acceptée.
+        new DockerSandbox("tcp://localhost:1", DockerSandbox.MIN_MEMORY_MB, 512, 1.0);
+    }
+
+    @Test
+    void pids_limit_below_one_refused_at_startup() {
+        // 0 et -1 = « illimité » pour Docker : une bombe de fork n'aurait plus de borne.
+        for (long pids : new long[] {0, -1}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> new DockerSandbox("tcp://localhost:1", 512, pids, 1.0))
+                    .as("PID %d", pids)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("SANDBOX_PIDS_LIMIT");
+        }
+        new DockerSandbox("tcp://localhost:1", 512, 1, 1.0);
+    }
+
+    @Test
+    void cpus_not_strictly_positive_refused_at_startup() {
+        // 0 = « illimité » pour Docker ; une fraction qui s'arrondit à 0 nanoCPU aussi.
+        for (double cpus : new double[] {0, -1, 1e-10, Double.NaN, Double.POSITIVE_INFINITY}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> new DockerSandbox("tcp://localhost:1", 512, 512, cpus))
+                    .as("CPU %s", cpus)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("SANDBOX_CPUS");
+        }
+        // Plus petite valeur représentable : un nanoCPU.
+        new DockerSandbox("tcp://localhost:1", 512, 512, 1e-9);
+    }
+
+    @Test
+    void validated_limits_reach_the_host_config() {
+        // Les valeurs acceptées sont bien celles imposées au conteneur.
+        var create = createCmdReturning("cid");
+        var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+        new DockerSandbox(dockerMock(create, remove, 0), 6, 1, 1e-9)
+                .run("img", Map.of("job.json", "{}"), 5000);
+        org.mockito.ArgumentCaptor<com.github.dockerjava.api.model.HostConfig> host =
+                org.mockito.ArgumentCaptor.forClass(com.github.dockerjava.api.model.HostConfig.class);
+        org.mockito.Mockito.verify(create).withHostConfig(host.capture());
+        assertThat(host.getValue().getMemory()).isEqualTo(6L * 1024 * 1024);
+        assertThat(host.getValue().getPidsLimit()).isEqualTo(1L);
+        assertThat(host.getValue().getNanoCPUs()).isEqualTo(1L);
+    }
+
+    @Test
+    void container_vanishing_after_creation_is_not_a_missing_image() {
+        // Un 404 APRÈS la création vise le conteneur (supprimé en vol), pas l'image : « Image
+        // runner absente » envoyait chercher une image qui était bien là.
+        for (boolean shutdown : new boolean[] {false, true}) {
+            var create = createCmdReturning("cid");
+            var remove = org.mockito.Mockito.mock(com.github.dockerjava.api.command.RemoveContainerCmd.class);
+            var docker = dockerMock(create, remove, 0);
+            DockerSandbox sandbox = new DockerSandbox(docker, 512, 64, 1.0);
+            var start = docker.startContainerCmd("cid");
+            org.mockito.Mockito.when(start.exec()).thenAnswer(inv -> {
+                if (shutdown) {
+                    sandbox.removeInFlight();
+                }
+                throw new com.github.dockerjava.api.exception.NotFoundException("no such container");
+            });
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> sandbox.run("img", Map.of("job.json", "{}"), 5000))
+                    .as("arrêt %s", shutdown)
+                    .isInstanceOf(SandboxException.class)
+                    .isNotInstanceOf(NoVerdictException.class)
+                    .hasMessageNotContaining("Image runner absente")
+                    .hasMessageContaining(shutdown ? "Service en cours d'arrêt" : "disparu");
+        }
     }
 }

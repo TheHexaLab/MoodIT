@@ -196,7 +196,9 @@ const QuizView: React.FC<QuizViewProps> = ({
             : ''}
       </p>
       {busy && (
-        <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">
+        // Région annoncée SANS aria-busy : posé ici en permanence, il pouvait différer l'annonce du
+        // texte d'attente jusqu'au démontage de la région. L'occupation est portée par le contenu.
+        <div className={styles.busyOverlay} role="status" aria-live="polite">
           <Spinner size={44} />
           {/* Attente de la correction : elle peut durer plusieurs minutes, sans un mot jusque-là
               (le spinner est purement visuel). */}
@@ -216,7 +218,7 @@ const QuizView: React.FC<QuizViewProps> = ({
 
       {/* Sous le voile, le contenu reste atteignable au clavier : `inert` le retire du parcours
           (sinon « Soumettre » restait actionnable pendant l'attente de la correction). */}
-      <div className={styles.content} inert={busy}>
+      <div className={styles.content} inert={busy} aria-busy={busy || undefined}>
         <header className={styles.header}>
           <div className={styles.headerTitle}>
             <span className={styles.bolt}>

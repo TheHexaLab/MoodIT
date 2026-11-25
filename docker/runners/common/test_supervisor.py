@@ -585,12 +585,118 @@ class BoxExhaustedTest(unittest.TestCase):
         supervisor.EVENTS.clear()
 
     def test_below_threshold_is_saturated(self):
-        # 100 blocs de 4 Kio = 400 Kio, bien en dessous du seuil de 48 Mio.
-        self.assertTrue(supervisor.free_bytes_under(100, 4096, 48 * 1024 * 1024))
+        # 100 blocs de 4 Kio = 400 Kio, bien en dessous du seuil (BOX_MIN_FREE_BYTES).
+        self.assertTrue(supervisor.free_bytes_under(100, 4096, supervisor.BOX_MIN_FREE_BYTES))
 
     def test_above_threshold_is_healthy(self):
-        # 100 000 blocs de 4 Kio = 390 Mio.
-        self.assertFalse(supervisor.free_bytes_under(100000, 4096, 48 * 1024 * 1024))
+        # 100 000 blocs de 4 Kio = 390 Mio, au-dessus du seuil.
+        self.assertFalse(supervisor.free_bytes_under(100000, 4096, supervisor.BOX_MIN_FREE_BYTES))
+
+    def test_box_keeps_room_for_the_grader_build(self):
+        # /box rempli à 566 Mo (ancien seuil de 48 Mo libres) par le cache Go de l'étudiant : le
+        # noteur Go à cache froid y écrivait 48 Mo et ne laissait qu'1 Mo libre, au bord d'un
+        # « no space left on device » présenté comme « Le harnais ne compile pas ». Le seuil
+        # réserve sa place.
+        self.assertGreaterEqual(supervisor.BOX_MIN_FREE_BYTES, 96 * 1024 * 1024)
+        self.assertTrue(supervisor.free_bytes_under(
+            (64 * 1024 * 1024) // 4096, 4096, supervisor.BOX_MIN_FREE_BYTES))
+
+    def test_go_grader_cache_does_not_grow_with_the_cases(self):
+        # Le cache Go du NOTEUR (/box/gocache), partagé par les cas, recevait à chaque cas le
+        # paquet du noteur recompilé (nonce différent) : +13,6 Mo par cas mesurés sous les bornes
+        # (moodit-runner-go, 1 CPU, 1 Go) — /box saturé bien avant 100 cas, cas sautés pour
+        # « espace » imputés à l'étudiant. Une fois chaud, ce qu'une compilation ajoute est retiré
+        # (51 Mo stables sur 6 cas, mêmes temps de compilation).
+        directory = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(directory, "ab"))
+            for name in ("ab/std-a", "ab/std-d", "trim.txt"):
+                with open(os.path.join(directory, name), "w") as f:
+                    f.write("x")
+            before = supervisor.go_cache_files(directory)
+            self.assertEqual({os.path.join("ab", "std-a"), os.path.join("ab", "std-d"),
+                              "trim.txt"}, before)
+            for name in ("ab/noteur-a", "ab/noteur-d"):
+                with open(os.path.join(directory, name), "w") as f:
+                    f.write("y")
+            supervisor.drop_new_cache_files(directory, before)
+            self.assertEqual(before, supervisor.go_cache_files(directory))
+            supervisor.drop_new_cache_files(directory, None)     # cache froid : rien n'est retiré
+            self.assertEqual(before, supervisor.go_cache_files(directory))
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+        # Dans run_go_rpc : l'instantané précède la compilation du noteur, le retrait la suit,
+        # seulement une fois le cache chaud (bibliothèque standard compilée par une réussite).
+        source = inspect.getsource(supervisor.run_go_rpc)
+        grader = source[source.index("grader_cache = env_c.get(\"GOCACHE\")"):]
+        self.assertLess(grader.index("before = go_cache_files(grader_cache) if warm"),
+                        grader.index("run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S"))
+        self.assertLess(grader.index("run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S"),
+                        grader.index("drop_new_cache_files(grader_cache, before)"))
+        self.assertIn("GO_GRADER_CACHE_WARM[grader_cache] = True", grader)
+
+    def test_purge_forks_rm_once_per_batch_not_per_entry(self):
+        # Un `rm` par entrée de premier niveau : 5 110 dossiers vides déposés par le code soumis
+        # dans /tmp tenaient la purge 22,6 s par cas hors délai (moodit-runner-c, 1 CPU) ;
+        # en lots : 0,14 s.
+        self.assertEqual([["a", "b"], ["c"]], supervisor.rm_batches(["a", "b", "c"], limit=4))
+        self.assertEqual([["x" * 10], ["y"]], supervisor.rm_batches(["x" * 10, "y"], limit=4))
+        root = tempfile.mkdtemp()
+        try:
+            paths = []
+            for k in range(3_000):
+                path = os.path.join(root, "d%04d" % k)
+                os.mkdir(path)
+                paths.append(path)
+            leaf = os.path.join(root, "fichier")
+            with open(leaf, "w") as f:
+                f.write("x")
+            calls = []
+            def fake_run(cmd, **kwargs):
+                calls.append(len(cmd))
+            with unittest.mock.patch.object(supervisor, "RM", sys.executable), \
+                    unittest.mock.patch.object(supervisor.subprocess, "run", fake_run):
+                supervisor.remove_trees(paths + [leaf])
+            # rm simulé (rien supprimé) : un lancement par LOT (deux ou trois pour 3 000 chemins
+            # longs, et non 3 000), puis le repli itératif finit le travail ; le fichier, lui, est
+            # retiré directement.
+            self.assertEqual(len(supervisor.rm_batches(paths)), len(calls))
+            self.assertLessEqual(len(calls), 3)
+            self.assertEqual([], os.listdir(root))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        source = inspect.getsource(supervisor.purge_shared_dirs)
+        self.assertIn("remove_trees(entries)", source)
+        self.assertNotIn("remove_tree(fpath)", source)
+
+    def test_cpp_method_with_untransportable_return_is_skipped(self):
+        # `signed long signed int` : accepté par C_SCALAR_RET, refusé par c_scalar_type. Gardée
+        # avec un retour None, la méthode levait KeyError dans cpp_object_dispatch — « erreur
+        # interne », job incomplet, 502 à volonté pour du code qui compile (ici, dans une suite
+        # de `#define` inutilisée).
+        src = ("struct A { int g() { return 1; }\n#define Q \\\n"
+               "  signed long signed int f(int a)\n};\nint main() { return 0; }\n")
+        extraction = supervisor.blank_code(src)
+        api = supervisor.cpp_object_api(extraction)
+        self.assertEqual([("A", [[]], [("int", "g", [])])], api)
+        server = supervisor.c_server_source(supervisor.c_signatures(extraction, cpp=True), src,
+                                            cpp=True, obj_list=api)
+        self.assertIn("A.g()", server)
+        self.assertNotIn("A.f(", server)
+
+    def test_main_checks_saturation_before_each_case(self):
+        # La saturation n'a d'effet que si main() la consulte AVANT de lancer le cas : déplacée
+        # après execute_case, un /box plein faisait échouer le cas (et ses canaris) sur un
+        # diagnostic trompeur au lieu de le sauter avec la cause « espace ».
+        source = inspect.getsource(supervisor.main)
+        loop = source[source.index("for case in order:"):]
+        self.assertLess(loop.index("box_exhausted()"), loop.index("execute_case("))
+        skipped = loop[loop.index("box_exhausted()"):loop.index("execute_case(")]
+        self.assertIn('cause="espace"', skipped)
+        # Le message ne parle plus d'un « dossier temporaire » : /tmp, /dev/shm et le dossier du
+        # cas sont vidés entre les cas ; ce qui sature /box survit ailleurs (cache de compilation).
+        self.assertNotIn("dossier temporaire", skipped)
+        self.assertIn("cache de compilation", skipped)
 
     def test_case_skipped_for_saturation_does_not_accuse(self):
         # Même traitement qu'un budget dépassé : skipped → « indetermines », jamais
@@ -4920,14 +5026,6 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertFalse(supervisor.oom_killed_during(1, 1))
         self.assertFalse(supervisor.oom_killed_during(None, 1))
         self.assertFalse(supervisor.oom_killed_during(1, None))
-
-    def test_box_keeps_room_for_the_grader_build(self):
-        # /box rempli à 566 Mo (seuil de 48 Mo libres) par le cache Go de l'étudiant : le noteur
-        # Go à cache froid y écrivait 48 Mo et ne laissait qu'1 Mo libre, au bord d'un « no space
-        # left on device » présenté comme « Le harnais ne compile pas ». Le seuil réserve sa place.
-        self.assertGreaterEqual(supervisor.BOX_MIN_FREE_BYTES, 96 * 1024 * 1024)
-        self.assertTrue(supervisor.free_bytes_under(
-            (64 * 1024 * 1024) // 4096, 4096, supervisor.BOX_MIN_FREE_BYTES))
 
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes

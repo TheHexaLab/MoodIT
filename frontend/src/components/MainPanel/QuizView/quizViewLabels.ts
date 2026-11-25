@@ -26,8 +26,8 @@ export interface QuizViewLabels {
   /** Soumission refusée car trop volumineuse (413 du gateway, au-delà de 1 Mo). */
   submitTooLarge: string;
   /**
-   * Soumission refusée TEMPORAIREMENT (409 de cause « relance ») : l'enseignant relance la
-   * correction de la tentative précédente. Le brouillon est gardé, à renvoyer plus tard.
+   * Soumission refusée TEMPORAIREMENT (409 de cause « relance », quiz AVEC reprise) : l'enseignant
+   * relance la correction de la tentative précédente. Le brouillon est gardé, à renvoyer plus tard.
    */
   submitRegrading: string;
   /** Message d'erreur quand la vérification du code est indisponible (503) : la tentative

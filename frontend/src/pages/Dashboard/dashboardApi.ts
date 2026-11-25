@@ -266,7 +266,10 @@ export async function fetchLanguages(): Promise<Language[]> {
 
 /** Cause du 409 de core quand une correction de ce quiz est déjà en cours pour l'étudiant. */
 const SUBMISSION_IN_PROGRESS_CAUSE = 'en_cours';
-/** Cause du 409 de core quand l'enseignant relance la correction de la tentative précédente. */
+/**
+ * Cause du 409 de core quand, sur un quiz AVEC reprise, l'enseignant relance la correction de la
+ * tentative précédente (sans reprise, core répond « déjà soumis », en texte).
+ */
 const SUBMISSION_REGRADING_CAUSE = 'relance';
 
 /**
@@ -276,10 +279,11 @@ const SUBMISSION_REGRADING_CAUSE = 'relance';
  * via {@link fetchAttemptResult}. 409 de core, corps JSON `{cause, message}` :
  * - « en_cours » (correction de ce quiz déjà en cours) → `SubmissionInProgressError` : la vue
  *   rejoint l'attente ;
- * - « relance » (l'enseignant relance la correction de la tentative précédente) →
- *   `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente (l'id relancé
- *   est déjà connu, son verdict ne conclurait pas cet envoi) ;
- * - tout autre 409 (tentative unique déjà consommée, corps texte) → échec ordinaire.
+ * - « relance » (quiz AVEC reprise : l'enseignant relance la correction de la tentative
+ *   précédente) → `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente
+ *   (l'id relancé est déjà connu, son verdict ne conclurait pas cet envoi) ;
+ * - tout autre 409 (tentative unique déjà consommée — y compris pendant une relance, sur un quiz
+ *   sans reprise —, corps texte) → échec ordinaire.
  * 400 (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ;
  * 413 (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`.
  * Les raisons `tooLarge` et `regrading` prennent leur texte dans les libellés de la vue.

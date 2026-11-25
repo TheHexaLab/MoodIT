@@ -43,6 +43,12 @@ type PendingSubmission = {
   attemptsBefore: number;
   attemptId?: number;
   knownAttemptIds?: number[];
+  /**
+   * Instant de l'envoi (ms), écrit AVANT le POST : l'échéance d'attente en part, et non du
+   * montage — sinon un marqueur abandonné (correction en échec reçue par personne) relançait
+   * 30 min d'attente à chaque retour sur le quiz, même des jours plus tard.
+   */
+  submittedAt?: number;
 };
 
 /**
@@ -185,8 +191,8 @@ interface UseQuizAttemptParams {
   /** Message d'une soumission trop volumineuse (413 du gateway) — label, surchargeable. */
   submitTooLargeMessage?: string;
   /**
-   * Message d'un refus temporaire (409 de cause « relance » : l'enseignant relance la correction
-   * de la tentative précédente) — label, surchargeable.
+   * Message d'un refus temporaire (409 de cause « relance », quiz AVEC reprise : l'enseignant
+   * relance la correction de la tentative précédente) — label, surchargeable.
    */
   submitRegradingMessage?: string;
   /**
@@ -329,16 +335,18 @@ export function useQuizAttempt({
   // Dernier verdict WS reçu pour CE quiz : consulté par la boucle d'attente (reconcilePending)
   // pour résoudre immédiatement une correction sans attendre le prochain sondage.
   const outcomeRef = useRef<AttemptOutcome | null>(null);
-  // Verdict déjà présent au MONTAGE (le Dashboard garde le dernier reçu, jamais vidé) : il précède
-  // tout envoi de cette vue. Un marqueur sans id de tentative ne doit pas le prendre pour le sien
-  // (ex. tentative #1 corrigée, « Refaire », envoi, changement de canal pendant le POST, retour).
-  const mountOutcomeRef = useRef(attemptOutcome ?? null);
+  // Id du DERNIER verdict vu pour ce quiz (jamais vidé, contrairement à `outcomeRef`). Le
+  // Dashboard garde le dernier verdict reçu, même vue fermée, et le représente au montage : à
+  // l'envoi, cet id rejoint les tentatives connues du marqueur, pour qu'un verdict d'AVANT l'envoi
+  // (ex. échec d'une tentative supprimée, absente de l'historique) ne conclue jamais l'attente.
+  const lastSeenOutcomeIdRef = useRef<number | null>(null);
   // Attente d'une correction en cours (reconcilePending) : `submit` refuse un second envoi, qui
   // lancerait une seconde boucle, écraserait le marqueur et pourrait consommer le verdict.
   const waitingRef = useRef(false);
   useEffect(() => {
     if (attemptOutcome && attemptOutcome.quizId === initialQuiz.id) {
       outcomeRef.current = attemptOutcome;
+      lastSeenOutcomeIdRef.current = attemptOutcome.attemptId;
     }
   }, [attemptOutcome, initialQuiz.id]);
   const fetchRef = useRef(onFetchQuiz);
@@ -381,14 +389,15 @@ export function useQuizAttempt({
       async function waitForGrading(quizId: number, pending: PendingSubmission) {
         setReconciling(true);
         const refresh = fetchAttemptsRef.current;
-        const started = Date.now();
+        // Échéance comptée depuis l'ENVOI (marqueur), pas depuis ce montage. Un retour après
+        // l'échéance conclut aussitôt (l'historique vient d'être relu par `reload`) : « non
+        // confirmée », renvoi possible — sûr, puisqu'un renvoi pendant une correction encore en
+        // cours reçoit un 409 « en_cours » et rejoint l'attente.
+        const started = pending.submittedAt ?? Date.now();
         const ceiling = started + RECONCILE_CEILING_MS;
         const takeOutcome = () => {
           const outcome = outcomeRef.current;
-          if (!outcome || !outcomeMatches(pending, outcome)) return null;
-          // Sans id de tentative, le verdict présent au montage précède cet envoi : pas le sien.
-          if (pending.attemptId == null && outcome === mountOutcomeRef.current) return null;
-          return outcome;
+          return outcome && outcomeMatches(pending, outcome) ? outcome : null;
         };
         // Charge le résultat corrigé d'une tentative et ouvre le résumé — ou, si elle attend
         // l'enseignant (#116), le message « à revoir » : elle n'a ni note ni corrigé.
@@ -769,12 +778,19 @@ export function useQuizAttempt({
     lateRef.current = null;
     const usingServer = Boolean(onSubmitQuiz);
     const attemptsBefore = attempts.length;
+    // Tentatives connues + dernier verdict vu (cf. lastSeenOutcomeIdRef) : seul un verdict d'une
+    // AUTRE tentative pourra conclure l'attente d'un envoi dont l'id est inconnu.
     const knownAttemptIds = attempts.map((a) => a.id);
+    const lastSeen = lastSeenOutcomeIdRef.current;
+    if (lastSeen != null && !knownAttemptIds.includes(lastSeen)) knownAttemptIds.push(lastSeen);
+    const submittedAt = Date.now();
     // Marqueur « en vol » AVANT le POST (clé sur `initialQuiz.id`, cf. effet de persistance) : si
     // l'onglet est rechargé pendant l'envoi OU la correction, le remontage réconciliera. Les
     // tentatives déjà connues y figurent : sans id (vue démontée pendant le POST), seul le verdict
     // d'une AUTRE tentative pourra conclure (cf. outcomeMatches).
-    if (usingServer) writePending(initialQuiz.id, { answers, attemptsBefore, knownAttemptIds });
+    if (usingServer) {
+      writePending(initialQuiz.id, { answers, attemptsBefore, knownAttemptIds, submittedAt });
+    }
     try {
       if (onSubmitQuiz) {
         // Mode serveur ASYNCHRONE : le POST enregistre la tentative (202 + id) et rend la main ;
@@ -783,7 +799,7 @@ export function useQuizAttempt({
         const accepted = await onSubmitQuiz(toSubmission(quiz, answers));
         if (!mountedRef.current) return;
         // On connaît l'id : on peut honorer le verdict WS ciblé (et le rendre robuste au refresh).
-        const pending = { answers, attemptsBefore, attemptId: accepted.attemptId };
+        const pending = { answers, attemptsBefore, attemptId: accepted.attemptId, submittedAt };
         writePending(initialQuiz.id, pending);
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
@@ -804,7 +820,8 @@ export function useQuizAttempt({
       // consommée, relance par l'enseignant : autres 409, traités plus bas comme des refus.)
       if (usingServer && e instanceof SubmissionInProgressError) {
         if (!mountedRef.current) return;
-        const pending = { answers, attemptsBefore, knownAttemptIds };
+        // Échéance : depuis ce renvoi (le début de la correction en cours est inconnu).
+        const pending = { answers, attemptsBefore, knownAttemptIds, submittedAt: Date.now() };
         writePending(initialQuiz.id, pending);
         outcomeRef.current = null;
         setSubmitting(false);

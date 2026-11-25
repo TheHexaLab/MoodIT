@@ -425,20 +425,36 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > ```bash
 > # Corrections en file ou en cours : attendre 0 si possible (prévenir les enseignants).
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc >   "SELECT count(*) FROM Attempt WHERE status = 'pending';"
-> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c >   "SELECT id, quiz_id, user_id, status, submitted_at FROM Attempt
->     WHERE status IN ('pending', 'review') ORDER BY quiz_id, id;"
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+>   "SELECT count(*) FROM Attempt WHERE status = 'pending';"
+> docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+>   "SELECT id, quiz_id, user_id, attempt_no, status, submitted_at FROM Attempt
+>     WHERE status IN ('pending', 'review') ORDER BY quiz_id, user_id, attempt_no;"
 > ```
 >
 > Une fois l'ancienne version démarrée, relancer la même liste (une correction coupée par
-> l'arrêt reste `pending`) puis, avec l'accord des enseignants concernés, supprimer ces lignes
-> pour rendre leur tentative aux étudiants — sauvegarde d'abord, puis une seule transaction
-> (`-1`) qui ne touche que des lignes encore dans ces états (les réponses suivent par cascade) :
+> l'arrêt reste `pending`) puis, avec l'accord des enseignants concernés, rendre leur tentative
+> aux étudiants. **Seule la DERNIÈRE tentative d'un couple (quiz, étudiant) peut être
+> supprimée** : core numérote la suivante `attempt_no = nombre de tentatives + 1`, sous
+> `UNIQUE(quiz_id, user_id, attempt_no)` ; supprimer la tentative k quand k+1 existe (quiz avec
+> reprise : k « à revoir », k+1 corrigée) laisserait un trou, et chaque nouvelle soumission de
+> l'étudiant reprendrait le numéro k+1 déjà pris — 409 permanent. Une tentative plus ancienne
+> reste donc : `review` telle quelle (l'ancien core la cache, l'étudiant a déjà les suivantes),
+> `pending` passée en `review` (elle libère `uq_attempt_pending` sans trou). Sauvegarde d'abord,
+> puis une seule transaction (`-1`) qui ne touche que des lignes encore dans ces états (les
+> réponses des tentatives supprimées suivent par cascade) :
 >
 > ```bash
 > mkdir -p backups
-> docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" >   | gzip > "backups/db-avant-purge-tentatives-$(date +%Y%m%d-%H%M%S).sql.gz"
-> docker exec moodit_postgres psql -1 -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c >   "DELETE FROM Attempt WHERE id IN (<ids>) AND status IN ('pending', 'review');"
+> docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" \
+>   | gzip > "backups/db-avant-purge-tentatives-$(date +%Y%m%d-%H%M%S).sql.gz"
+> # <ids> : ceux de la liste ci-dessus retenus avec les enseignants. Le DELETE ne voit que l'état
+> # d'avant lui : seules les tentatives qui étaient les dernières de leur couple partent.
+> docker exec moodit_postgres psql -1 -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+>   -c "DELETE FROM Attempt AS a WHERE a.id IN (<ids>) AND a.status IN ('pending', 'review')
+>         AND a.attempt_no = (SELECT max(a2.attempt_no) FROM Attempt AS a2
+>                             WHERE a2.quiz_id = a.quiz_id AND a2.user_id = a.user_id);" \
+>   -c "UPDATE Attempt SET status = 'review' WHERE id IN (<ids>) AND status = 'pending';"
 > ```
 >
 > Tant que la purge ci-dessous n'est pas faite, l'ancienne version retrouve Piston tel quel : son

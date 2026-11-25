@@ -110,8 +110,8 @@ public class QuizController {
      * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. 409 en JSON
      * {@code {"cause":"en_cours",…}} si une correction de ce quiz est déjà en cours (le client
      * rejoint son attente), 409 en JSON {@code {"cause":"relance",…}} si c'est l'enseignant qui
-     * relance la correction d'une tentative de l'étudiant, 409 en texte si la tentative unique est
-     * déjà consommée.
+     * relance la correction d'une tentative de l'étudiant sur un quiz avec reprise, 409 en texte
+     * si la tentative unique est déjà consommée (quiz sans reprise, relance en cours comprise).
      * `X-User-Email` injecté par la gateway.
      */
     @PostMapping("/{quizId}/submissions")

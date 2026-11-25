@@ -568,39 +568,107 @@ describe('réconciliation via polling de secours', () => {
     await waitFor(() => expect(result.current.result?.attemptId).toBe(11), { timeout: 3000 });
   });
 
-  it.each([
-    // Ancien format (ni id ni tentatives connues).
-    ['marqueur sans id ni tentatives connues', { attemptsBefore: 1 }],
-    // Tentatives connues, mais le verdict présent au montage est celui d'AVANT l'envoi.
-    ['verdict déjà présent au montage', { attemptsBefore: 1, knownAttemptIds: [] }],
-  ])('remontage pendant une correction (%s) : le verdict d’avant ne conclut pas', async (_case, marker) => {
-    // Tentative #1 (id 10) corrigée ; « Refaire », envoi, changement de canal pendant le POST,
-    // retour : le Dashboard garde le dernier verdict reçu, celui de #1.
+  it('verdict de la NOUVELLE tentative reçu vue fermée (échec) : consommé au retour', async () => {
+    // Changement de canal pendant le POST (marqueur sans id), la correction échoue pendant
+    // l'absence : le Dashboard garde ce verdict et le représente au montage. C'est le sien
+    // (tentative absente des connues) → « vérification impossible », pas 30 min d'attente.
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
-      JSON.stringify({ answers: {}, ...marker })
+      JSON.stringify({ answers: {}, attemptsBefore: 1, knownAttemptIds: [10], submittedAt: Date.now() })
     );
-    let outcome: AttemptOutcome | null = { quizId: QUIZ_ID, attemptId: 10, ok: true };
-    let history: AttemptSummary[] = [summary(10)];
-    const { result, rerender } = renderHook(() =>
+    const outcome: AttemptOutcome = { quizId: QUIZ_ID, attemptId: 11, ok: false };
+    const { result } = renderHook(() =>
       useQuizAttempt({
         initialQuiz,
         onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
-        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttempts: vi.fn(async () => [summary(10)]),
         onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
         attemptOutcome: outcome,
+        codeVerificationUnavailableMessage: 'CODE_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('CODE_KO'));
+    expect(result.current.reconciling).toBe(false);
+    expect(result.current.phase).toBe('taking');
+  });
+
+  it('dernier verdict vu à l’envoi : inscrit au marqueur, il ne conclut pas l’attente au retour', async () => {
+    // Échec d'une tentative précédente (#12, supprimée : absente de l'historique), toujours
+    // présenté par le Dashboard. Envoi, puis changement de canal pendant le POST, puis retour.
+    const stale: AttemptOutcome = { quizId: QUIZ_ID, attemptId: 12, ok: false };
+    const params = {
+      initialQuiz,
+      onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+      onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+      onSubmitQuiz: vi.fn(() => new Promise<{ attemptId: number }>(() => {})),
+      attemptOutcome: stale,
+      codeVerificationUnavailableMessage: 'CODE_KO',
+    };
+    const first = renderHook(() => useQuizAttempt(params));
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    act(() => { void first.result.current.submit(); });
+    first.unmount();
+    const marker = JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!);
+    expect(marker.knownAttemptIds).toEqual([12]);
+    expect(typeof marker.submittedAt).toBe('number');
+
+    const { result } = renderHook(() => useQuizAttempt(params));
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(result.current.submitError).toBeNull();
+    expect(result.current.reconciling).toBe(true);
+  });
+
+  it.each([
+    // Envoi d'il y a 31 min (correction en échec reçue par personne) : conclusion immédiate.
+    ['marqueur ancien → « non confirmée » tout de suite', 31 * 60_000, 0],
+    // Envoi d'il y a 29 min : seule l'attente RESTANTE (≈ 1 min) court.
+    ['marqueur récent → seulement l’attente restante', 29 * 60_000, 90_000],
+  ])('échéance comptée depuis l’envoi (%s)', async (_case, age, wait) => {
+    vi.useFakeTimers();
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() - age })
+    );
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz()),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    if (wait > 0) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(result.current.reconciling).toBe(true);
+      expect(result.current.submitError).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(wait); });
+    }
+    await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    expect(result.current.reconciling).toBe(false);
+    expect(result.current.phase).toBe('taking');
+    vi.useRealTimers();
+  });
+
+  it('envoi pendant l’attente lancée au REMONTAGE (marqueur en vol) : ignoré, marqueur intact', async () => {
+    // Aucun envoi de cette vue en cours (sendingRef faux) : seule la garde de l'attente protège.
+    const marker = { answers: {}, attemptsBefore: 0, knownAttemptIds: [] as number[] };
+    localStorage.setItem(`moodit:quiz-pending-submission:${QUIZ_ID}`, JSON.stringify(marker));
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 9 }));
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz()),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz,
       })
     );
     await waitFor(() => expect(result.current.reconciling).toBe(true));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
-    expect(result.current.phase).toBe('taking');
-    expect(result.current.reconciling).toBe(true);
-
-    // La nouvelle tentative (#2, id 11) apparaît : le sondage l'ouvre.
-    history = [summary(10), summary(11, 2)];
-    outcome = null;
-    rerender();
-    await waitFor(() => expect(result.current.result?.attemptId).toBe(11), { timeout: 3000 });
+    await act(async () => { await result.current.submit(); });
+    expect(onSubmitQuiz).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!)).toEqual(marker);
   });
 
   it('second envoi pendant l’envoi ou l’attente de la correction : ignoré', async () => {

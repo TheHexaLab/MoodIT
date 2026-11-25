@@ -23,15 +23,18 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
 
     /**
      * Vrai si l'utilisateur a une tentative dans ce statut sur ce quiz : à la soumission, une
-     * tentative {@code "pending"} signale une correction encore en cours (409 « en_cours »,
-     * distinct du 409 « déjà soumis »).
+     * tentative {@code "pending"} signale une correction encore en cours. 409 « en_cours » si
+     * c'est celle d'une soumission de l'étudiant ; une RELANCE de l'enseignant
+     * ({@link #existsByQuiz_IdAndUser_IdAndStatusAndRegrade}) donne « relance » sur un quiz avec
+     * reprise, « déjà soumis » sans reprise.
      */
     boolean existsByQuiz_IdAndUser_IdAndStatus(Integer quizId, Integer userId, String status);
 
     /**
      * Comme {@link #existsByQuiz_IdAndUser_IdAndStatus}, restreint au marqueur de relance : un
      * {@code "pending"} avec {@code regrade = true} est une RELANCE de l'enseignant, pas la
-     * correction d'une soumission de l'étudiant (409 « relance » au lieu de « en_cours »).
+     * correction d'une soumission de l'étudiant (409 « relance » au lieu de « en_cours » sur un
+     * quiz avec reprise, « déjà soumis » sans reprise).
      */
     boolean existsByQuiz_IdAndUser_IdAndStatusAndRegrade(
             Integer quizId, Integer userId, String status, boolean regrade);

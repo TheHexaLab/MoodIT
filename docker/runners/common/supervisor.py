@@ -771,6 +771,63 @@ def _remove_tree_iterative(path):
             continue
 
 
+# Octets d'arguments par appel de `rm` (cf. remove_trees) : loin de ARG_MAX (2 Mio sous Linux),
+# même avec des noms de 255 octets.
+RM_BATCH_BYTES = 128 * 1024
+
+
+def rm_batches(paths, limit=RM_BATCH_BYTES):
+    """Découpe `paths` en lots dont la somme des longueurs (+1 par argument) reste sous `limit`,
+    un chemin seul plus long formant son propre lot. FONCTION PURE (testée)."""
+    batches, current, size = [], [], 0
+    for path in paths:
+        cost = len(os.fsencode(path)) + 1
+        if current and size + cost > limit:
+            batches.append(current)
+            current, size = [], 0
+        current.append(path)
+        size += cost
+    if current:
+        batches.append(current)
+    return batches
+
+
+def remove_trees(paths):
+    """Supprime chaque chemin de `paths` (dossier ou fichier) sans suivre de lien, et SANS
+    JAMAIS LEVER, avec UN `rm` par lot de chemins (rm_batches) et non un par chemin.
+
+    Un `rm` par entrée coûtait un fork complet (preexec_fn compris) chacune : 5 110 dossiers vides
+    déposés par le code soumis dans /tmp tenaient la purge 16,2 s par cas, hors de tout délai.
+    Fichiers et liens sont retirés directement ; les dossiers vont à `rm -rf` par lots, puis au
+    repli itératif s'il en reste."""
+    directories = []
+    for path in paths:
+        try:
+            if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+                os.unlink(path)
+            elif os.path.lexists(path):
+                directories.append(path)
+        except OSError:
+            continue
+    if directories and os.path.exists(RM):
+        for batch in rm_batches(directories):
+            try:
+                # oom_victim_first : comme tout lancement, il ne garde pas le -1000 du superviseur.
+                subprocess.run([RM, "-rf", "--one-file-system", "--"] + batch,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=120, check=False,
+                               preexec_fn=oom_victim_first(None))
+            except (OSError, subprocess.SubprocessError):
+                pass
+    for path in directories:
+        try:
+            remaining = os.path.lexists(path)
+        except OSError:
+            remaining = False
+        if remaining:
+            _remove_tree_iterative(path)
+
+
 def remove_tree(path):
     """Supprime `path` (dossier ou fichier) sans suivre de lien, et SANS JAMAIS LEVER.
 
@@ -780,37 +837,21 @@ def remove_tree(path):
     donc ni `ignore_errors` ni les `except OSError` ne l'arrêtaient. Le superviseur mourait sans
     JSON : un 502 « sans verdict » à la demande de l'étudiant, celui que exception_cause existe
     pour refuser. `rm -rf` (coreutils, parcours fts) ne dépend pas de la profondeur."""
-    try:
-        if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
-            os.unlink(path)
-            return
-        if not os.path.lexists(path):
-            return
-    except OSError:
-        return
-    if os.path.exists(RM):
-        try:
-            # oom_victim_first : comme tout lancement, il ne garde pas le -1000 du superviseur.
-            subprocess.run([RM, "-rf", "--one-file-system", "--", path],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=120, check=False,
-                           preexec_fn=oom_victim_first(None))
-        except (OSError, subprocess.SubprocessError):
-            pass
-    if os.path.lexists(path):
-        _remove_tree_iterative(path)
+    remove_trees([path])
 
 
 def purge_shared_dirs():
     """Vide /tmp et /dev/shm entre deux cas : ces tmpfs survivent d'un cas a l'autre, et un
     fichier depose au cas N (un nonce exfiltre, un relais) etait lisible au cas N+1."""
+    entries = []
     for directory in ("/tmp", "/dev/shm"):
         try:
-            for ident in os.listdir(directory):
-                fpath = os.path.join(directory, ident)
-                remove_tree(fpath)
+            entries += [os.path.join(directory, ident) for ident in os.listdir(directory)]
         except OSError:
             continue
+    # En UNE passe (un `rm` par lot, cf. remove_trees) : un `rm` par entrée faisait payer au cas
+    # suivant un fork par dossier que le code soumis avait déposé.
+    remove_trees(entries)
 
 
 
@@ -1695,7 +1736,8 @@ def platform_aborted(detail):
     cas que le code soumis peut forcer sous les bornes, mesuré dans les images (1 CPU, 1 Go) :
       - compilation du NOTEUR : ses bouchons viennent de l'API soumise, bornée en entrées
         (MAX_RELAYED_ENTRIES), en paramètres (MAX_RELAYED_PARAMS) et en copies de champs
-        (MAX_FIELD_COPIES) — pire noteur 15,9 s (Go, cache froid) et 392 Mo (Rust), pour 90 s
+        (MAX_FIELD_COPIES) — pire noteur jusqu'à ~32 s (Go à cache froid, /box rempli ; ~16 s à
+        vide) et 392 Mo (Rust), pour 90 s
         de délai et 1 Go ; hors bornes, refus noté avant toute compilation. Le harnais, lui,
         vient du prof ;
       - inventaire javap et javac du serveur RPC Java : bornés par le nombre de classes
@@ -2147,8 +2189,8 @@ MAX_RELAYED_PARAMS = 20_000
 # copies de champs) prenait 10,6 s et 495 Mo — à 20 000 copies, l'OOM du conteneur devenait
 # possible ; noteur Rust de 3 000 types à méthodes par défaut 426 Mo. Les autres restaient loin
 # du délai (C++ 1 s, C# 1 s, Java 6,5 s pour 3 700 statiques). Sous les bornes actuelles (1 000
-# entrées, 20 000 paramètres, 5 000 copies de champs), pire noteur mesuré : Go 15,9 s (cache de
-# compilation froid, la bibliothèque standard comprise) et 228 Mo, Rust 2,5 s et 392 Mo, Java
+# entrées, 20 000 paramètres, 5 000 copies de champs), pire noteur mesuré : Go jusqu'à ~32 s
+# (Go à cache froid, la bibliothèque standard comprise, /box rempli ; ~16 s à vide) et 238 Mo, Rust 2,5 s et 392 Mo, Java
 # 2,9 s, C# 2,7 s, C++ 0,4 s — loin des 90 s et du Go de mémoire. Une solution honnête en
 # déclare quelques dizaines.
 MAX_RELAYED_ENTRIES = 1_000
@@ -4177,8 +4219,14 @@ def cpp_object_api(source):
                 meth = None
             if meth:
                 types = _c_param_types(meth.group(3))
-                if types is not None:
-                    method_list.append((c_scalar_type(meth.group(1)), meth.group(2), types,
+                # Retour hors des types transportables malgré le motif (`signed long signed
+                # int`, que C_SCALAR_RET accepte et que c_scalar_type refuse) : écarté, comme
+                # dans c_signatures. Gardé avec un retour None, il levait KeyError dans
+                # cpp_object_dispatch — « erreur interne », job incomplet, 502 à volonté pour du
+                # code qui compile (dans une suite de `#define` inutilisée, par exemple).
+                ret = c_scalar_type(meth.group(1))
+                if types is not None and ret is not None:
+                    method_list.append((ret, meth.group(2), types,
                                         trailing_defaults(meth.group(3))))
         ctors = [types for _r, _n, types in with_default_arities(ctor_entries)]
         # Une fois par signature : `int valeur() const` et `int valeur()` (surcharge sur
@@ -7170,6 +7218,33 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
                            grader_src, grader_bin, student_src, student_bin)
 
 
+# Caches Go du NOTEUR déjà chauds (bibliothèque standard compilée par une compilation réussie)
+# dans ce job : à partir de là, chaque compilation du noteur n'y laisse rien (cf. run_go_rpc).
+GO_GRADER_CACHE_WARM = {}
+
+
+def go_cache_files(root):
+    """Fichiers présents sous `root` (chemins relatifs), sans suivre de lien. Testée."""
+    if not root:
+        return set()
+    return {os.path.relpath(os.path.join(folder, name), root)
+            for folder, _dirs, files in walk_tree(root) for name in files}
+
+
+def drop_new_cache_files(root, before):
+    """Retire de `root` les fichiers absents de `before` : les entrées que la dernière
+    compilation du noteur a ajoutées (son paquet, son édition de liens). Le cache de Go est
+    adressé par contenu et tolère une entrée absente — elle serait simplement recompilée ; une
+    paire action/sortie ajoutée ensemble part ensemble. Testée."""
+    if not root or before is None:
+        return
+    for relative in go_cache_files(root) - before:
+        try:
+            os.unlink(os.path.join(root, relative))
+        except OSError:
+            pass
+
+
 def run_go_rpc(case_dir, env, timeout_s, case_index):
     """Notation NON FALSIFIABLE d'un cas Go : harnais booléen, deux binaires, deux UID."""
     src = os.path.join(case_dir, "src")
@@ -7251,7 +7326,19 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
                 [os.path.join(student_mod, name) for name in ("go.mod", "solution.go", "serveur.go")],
                 *outputs, out_value)
         else:
+            # Cache du NOTEUR, partagé par les cas : seule la bibliothèque standard y sert d'un
+            # cas à l'autre ; le paquet du noteur (nonce et harnais différents) y ajoutait ses
+            # entrées à chaque cas — jusqu'à 13,6 Mo par cas mesurés sous les bornes, soit plus
+            # que /box sur une question à beaucoup de cas : cas suivants sautés pour « espace »,
+            # imputés à l'étudiant. Une fois le cache chaud, ce que la compilation ajoute est retiré.
+            grader_cache = env_c.get("GOCACHE")
+            warm = GO_GRADER_CACHE_WARM.get(grader_cache, False)
+            before = go_cache_files(grader_cache) if warm else None
             code, expired = run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
+            if warm:
+                drop_new_cache_files(grader_cache, before)
+            elif grader_cache and code == 0 and not expired:
+                GO_GRADER_CACHE_WARM[grader_cache] = True
         if expired or code != 0:
             stderr_text = read_capped(os.path.join(case_dir, "cc.err"))
             if label == "harnais":
@@ -7687,12 +7774,14 @@ def main():
         if case.get("canary"):
             pending_canaries -= 1   # à partir d'ici, ce canari ne réclame plus sa part
         if box_exhausted():
-            # Espace de travail saturé (par un cas précédent, ou par la copie du job) : rien
-            # à reprocher à l'étudiant, et surtout pas une falsification — un cas « sauté »
-            # n'entre pas dans le verdict des canaris.
+            # Espace de travail saturé par un cas précédent (ce qui survit d'un cas à l'autre :
+            # l'artefact gardé et, en Go, le cache de compilation de l'étudiant). Cause « espace »,
+            # IMPUTABLE : le cas est noté en échec. Jamais une accusation de falsification : un
+            # cas « sauté » n'entre pas dans le verdict des canaris.
             outcomes[case["index"]] = CaseOutcome(
-                False, "Espace de travail saturé : le code écrit trop de fichiers "
-                       "(ou des fichiers trop gros) dans son dossier temporaire.",
+                False, "Espace de travail saturé : le code écrit trop de fichiers (ou des "
+                       "fichiers trop gros) dans l'espace de travail (cache de compilation "
+                       "compris).",
                 ran=False, skipped=True, cause="espace")
             timings[case["index"]] = 0
             event("espace_sature", case=case["index"])

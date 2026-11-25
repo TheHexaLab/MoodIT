@@ -217,12 +217,36 @@ public class DockerSandbox {
 
     /** Pour les tests : délai de réponse raccourci. */
     DockerSandbox(String dockerHost, long memoryMb, long pidsLimit, double cpus, Duration responseTimeout) {
+        // Bornes refusées AU DÉMARRAGE : Docker lit 0 (et -1 pour les PID) comme « illimité ».
+        // Un SANDBOX_MEMORY_MB, SANDBOX_PIDS_LIMIT ou SANDBOX_CPUS à 0 lançait donc des
+        // conteneurs de notation sans borne mémoire, PID ou CPU, sans que rien ne le signale ;
+        // une mémoire négative faisait échouer chaque notation en 502.
+        if (memoryMb < MIN_MEMORY_MB || memoryMb > Long.MAX_VALUE / (1024 * 1024)) {
+            throw new IllegalArgumentException("Limite du bac à sable invalide : "
+                    + "app.sandbox.memory-mb (SANDBOX_MEMORY_MB) doit valoir au moins "
+                    + MIN_MEMORY_MB + " Mo (minimum de Docker), reçu " + memoryMb);
+        }
+        if (pidsLimit < 1) {
+            throw new IllegalArgumentException("Limite du bac à sable invalide : "
+                    + "app.sandbox.pids-limit (SANDBOX_PIDS_LIMIT) doit valoir au moins 1 "
+                    + "(0 et -1 signifient « illimité » pour Docker), reçu " + pidsLimit);
+        }
+        // NaN, nul, négatif ou fraction sous le nanoCPU : tous donnent nanos ≤ 0.
+        long nanos = (long) (cpus * 1_000_000_000L);
+        if (Double.isInfinite(cpus) || nanos <= 0) {
+            throw new IllegalArgumentException("Limite du bac à sable invalide : "
+                    + "app.sandbox.cpus (SANDBOX_CPUS) doit être strictement positif "
+                    + "(0 signifie « illimité » pour Docker), reçu " + cpus);
+        }
         this.dockerHost = dockerHost == null || dockerHost.isBlank() ? defaultDockerHost() : dockerHost;
         this.memoryBytes = memoryMb * 1024 * 1024;
         this.pidsLimit = pidsLimit;
-        this.nanoCpus = (long) (cpus * 1_000_000_000L);
+        this.nanoCpus = nanos;
         this.responseTimeout = responseTimeout;
     }
+
+    /** Plus petite mémoire de conteneur que Docker accepte (6 Mo). */
+    static final long MIN_MEMORY_MB = 6;
 
     /** Pour les tests : client Docker injecté (aucune résolution d'hôte). */
     DockerSandbox(DockerClient client, long memoryMb, long pidsLimit, double cpus) {
@@ -600,6 +624,13 @@ public class DockerSandbox {
                     stderr.toString(StandardCharsets.UTF_8), status == null ? -1 : status,
                     oomKilled);
         } catch (NotFoundException e) {
+            // Un 404 APRÈS la création vise le conteneur, pas l'image : supprimé en vol (arrêt
+            // du service, removeInFlight). « Image runner absente » égarait le diagnostic.
+            if (containerId != null) {
+                throw new SandboxException(closed
+                        ? "Service en cours d'arrêt : conteneur de notation supprimé"
+                        : "Conteneur de notation disparu pendant la notation", e);
+            }
             throw new SandboxException("Image runner absente : " + image
                     + " — construire les images (docker/runners/build.sh)", e);
         } catch (SandboxException e) {
