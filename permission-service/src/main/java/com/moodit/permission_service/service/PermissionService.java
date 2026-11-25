@@ -458,8 +458,8 @@ public class PermissionService {
                 "DELETE",
                 "/quizzes/{quizId}",
                 (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
-            // Tentatives « a revoir » (#116, S4) : correction echouee sans verdict au-dela du
-            // plafond. Les voir et relancer leur correction relevent de la gestion du quiz. La
+            // Tentatives « a revoir » (#116, S4) : correction echouee et gardee par core (relance
+            // en echec, ou plafond d'echecs atteint). Les voir et relancer leur correction relevent de la gestion du quiz. La
             // regle ne porte que sur le quiz : core verifie que la tentative lui appartient (404).
             rule(
                 "GET",

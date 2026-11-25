@@ -40,7 +40,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Contrat HTTP de {@link QuizController} hors soumission (couverte par QuizControllerSubmitTest) :
- * passation, édition, historique, révision d'une tentative, mise à jour et suppression.
+ * passation, édition, historique, révision d'une tentative, mise à jour et suppression, tentatives
+ * « à revoir » (GET /review-attempts) et relance de leur correction (POST …/regrade).
  */
 @WebMvcTest(controllers = QuizController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)

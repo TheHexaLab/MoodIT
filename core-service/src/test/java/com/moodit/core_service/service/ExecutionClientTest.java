@@ -167,7 +167,7 @@ class ExecutionClientTest {
         assertThat(client.readTimeoutMs("Python", 1, 5_000)).isEqualTo(10_000 + 145_000);
         // Compilé : UNE attente de file + miroir du mur de DockerEvaluator — 30 s de base +
         // (N + 2 canaris) × (run + 10 s de marge + les COMPILATIONS du cas + 5 s d'inventaire
-        // `--list`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
+        // `javap`). 4 unités = 1 harnais → 3 cas. La formule est écrite TERME À TERME : tout
         // terme ajouté au perCase serveur doit apparaître ici, sinon le miroir est plus court
         // que le mur réel et le read timeout expire pendant une notation en cours (#216).
         // TROIS compilations par cas en Java (chemin non falsifiable : code soumis seul pour

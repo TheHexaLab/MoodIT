@@ -757,8 +757,8 @@ class ExecutionServiceTest {
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
-        // Un harnais BOOLÉEN, lui, n'en déclenche aucun : c'est le format sûr, et il doit
-        // atteindre le runner (cf. boolean_harness_reaches_runner_in_all_six_languages).
+        // Ni les quatre refus ni le témoin refusé par le limiteur n'ont appelé le runner (qu'un
+        // harnais booléen l'atteigne hors saturation : boolean_harness_reaches_runner_in_all_six_languages).
         verifyNoInteractions(busyDocker);
 
         // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.

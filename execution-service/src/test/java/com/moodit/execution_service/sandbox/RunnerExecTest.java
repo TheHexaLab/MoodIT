@@ -82,6 +82,21 @@ class RunnerExecTest {
     }
 
     @Test
+    void absurd_time_limit_floored_to_1ms_never_negative_wall() {
+        // EvaluateRequest.timeoutMs n'a pas de @Min : sans le plancher, -100 000 donnait un mur
+        // négatif — conteneur aussitôt au mur, 502 « sans verdict » compté contre l'étudiant.
+        supervisorReturns("{\"v\":1,\"compile\":null,\"run\":{\"stdout\":\"\",\"stderr\":\"\",\"code\":0,\"signal\":null}}");
+        for (int limit : new int[] {-100_000, 0}) {
+            org.mockito.Mockito.clearInvocations(sandbox);
+            runner.execute("bash", List.of(new RunnerExec.File("main.sh", "x")), null, limit);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
+            verify(sandbox).run(any(), files.capture(), eq(75_000L + 1L));
+            assertThat(files.getValue().get("job.json")).contains("\"timeout_ms\":1");
+        }
+    }
+
+    @Test
     void compile_stage_and_signal_mapped() {
         supervisorReturns("""
                 {"v":1,

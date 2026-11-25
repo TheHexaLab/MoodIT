@@ -123,7 +123,7 @@ public class ExecutionClient {
      *       35 s de cycle de vie du conteneur (création, copie, arrêt) ;</li>
      *   <li><b>Compilés</b> — UN conteneur pour tout le job : une seule attente de file, puis le
      *       miroir du mur de DockerEvaluator (30 s + (N+2) × (run planché VM + 10 s + compilations
-     *       × 90 s + 5 s d'inventaire {@code --list}), 3 compilations par cas en Java et 2
+     *       × 90 s + 5 s d'inventaire {@code javap}), 3 compilations par cas en Java et 2
      *       ailleurs ; en C/C++, + 30 s d'outils par cas — sondes des noms réservés et
      *       {@code nm} — et + 10 s de préprocesseur par job), plus 35 s de cycle de vie du
      *       conteneur.</li>

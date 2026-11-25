@@ -1443,7 +1443,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         # sur mono, le runtime le plus ancien du parc.
         self.assertIn('a0.ToString("G17"', supervisor.cs_send_args(["double"]))
         self.assertIn('+ "|" + MooditRpc.Hexe(a0)', supervisor.cs_send_args(["string"]))
-        server = supervisor.cs_server_source("Solution")
+        server = supervisor.cs_server_source(["Solution"])
         self.assertIn('ToString("G17"', server)
         self.assertIn('ToString("G9"', server)
 
@@ -1533,7 +1533,7 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         ("rust", lambda: supervisor.rust_server_source([("i32", "f", [])], "fn f() {}")),
         ("rust objets", lambda: supervisor.rust_server_source(
             [], "struct R { c: i32 }", [("R", [], [("i32", "m", [])])], {"R": [("c", "i32")]})),
-        ("csharp", lambda: supervisor.cs_server_source("Solution")),
+        ("csharp", lambda: supervisor.cs_server_source(["Solution"])),
         ("c", lambda: supervisor.c_server_source([("int", "f", [])], "int f(void){return 1;}")),
         ("cpp", lambda: supervisor.c_server_source(
             [("int", "f", [])], "int f(void){return 1;}", cpp=True)),
@@ -1718,7 +1718,7 @@ class VisibilityNotRequiredTest(unittest.TestCase):
         # NonPublic. Sinon le bouchon est genere, le noteur compile, puis l'appel echoue a
         # l'execution : une reponse JUSTE notee 0, avec un diagnostic qui accuse le code
         # de l'etudiant.
-        server = supervisor.cs_server_source("Solution")
+        server = supervisor.cs_server_source(["Solution"])
         self.assertEqual(server.count("BindingFlags.NonPublic"), 3)
 
 
@@ -3959,9 +3959,12 @@ class OomAndLockIsolationTest(unittest.TestCase):
     def test_code_depths_is_linear(self):
         # Chaque `r` tentait une chaîne brute sur une COPIE du reste du texte : quadratique, 6 s
         # pour 100 000 caractères de code soumis, refaites à chaque cas. Mesuré par un RAPPORT
-        # (growth_ratio, indépendant de la vitesse et de la charge de la machine).
+        # (growth_ratio, indépendant de la vitesse et de la charge de la machine). 32 × 10 000 :
+        # sous 16 boucles CPU, l'ancien code (0d975e01^) donnait 19,1 ; il ne donnait que 4,9 à
+        # 32 × 5 000, 7,7 à 32 × 8 000 et ~5 à 9 × 22 000, trop près du seuil. Code actuel 0,5
+        # à 1,1.
         ratio = growth_ratio(supervisor.code_depths,
-                             lambda size: ("r" * size + "{" + "R" * size,), 22_000, 198_000)
+                             lambda size: ("r" * size + "{" + "R" * size,), 10_000, 320_000)
         self.assertLess(ratio, 4, "code_depths n'est plus linéaire (rapport %.1f)" % ratio)
         depths = supervisor.code_depths("r" * 50_000 + "{" + "R" * 50_000)
         self.assertEqual((depths[49_999], depths[50_000], depths[-1]), (0, 0, 1))
@@ -4505,6 +4508,10 @@ class ExtractionBoundsTest(unittest.TestCase):
             [("R", [["int"], []], [("int", "m", ["int", "int"])]),          # C++, Java
              ("G", [("NewG", ["int"], False)], [("int", "m", ["int"])]),     # Go
              ("U", [("new", ["i32", "i32"])], [])]))                        # Rust
+        # 20 000 au plus : le noteur Rust (toute l'API) de 99 000 paramètres était tué par l'OOM
+        # à 1,09 Go (1 CPU, 1 Go) — une compilation du noteur tuée est « interrompue », sans note,
+        # et ne doit pas être provocable ; à 20 000, 2,5 s et 392 Mo.
+        self.assertLessEqual(supervisor.MAX_RELAYED_PARAMS, 20_000)
         supervisor.check_relayed_params([("int", "f", ["int"] * supervisor.MAX_RELAYED_PARAMS)])
         with self.assertRaises(supervisor.SubmissionRefused) as raised:
             supervisor.check_relayed_params([("int", "f", ["int"])] * 2,
@@ -4567,15 +4574,47 @@ class ExtractionBoundsTest(unittest.TestCase):
         src = ("class B { public int M(%s) { return 0; } }\n" % params
                + "".join("class D%d : B {}\n" % k for k in range(30)))
         ex = supervisor.cs_canonical_types(supervisor.cs_strip_comments(src))
-        self.assertGreater(supervisor.cs_relayed_params(ex), supervisor.MAX_RELAYED_PARAMS)
-        # Constructeurs de TOUTES les classes, arités réduites comprises : 3 + 2 + 1.
-        self.assertEqual(6, supervisor.cs_relayed_params(
+        self.assertGreater(supervisor.cs_relayed_params(ex)[0], supervisor.MAX_RELAYED_PARAMS)
+        # Constructeurs de TOUTES les classes, arités réduites comprises : 3 + 2 + 1 paramètres,
+        # trois entrées.
+        self.assertEqual((6, 3), supervisor.cs_relayed_params(
             "class R { public R(int a, int b = 1, int c = 2) {} }"))
         # Avant le choix de la classe que vise le harnais : canaris et cas réels ensemble.
         self.assert_runner_checks_before(supervisor.run_csharp_rpc, "cs_student_class(",
                                          "cs_grader_source(")
         self.assert_runner_checks_before(supervisor.run_java_rpc, "java_stub_source(",
                                          "java_grader_objects(")
+
+    def test_relayed_entries_bounded(self):
+        # La compilation du NOTEUR expirée ou tuée est « interrompue », sans note : elle ne doit
+        # pas être provocable. Or le noteur grossit avec le NOMBRE d'entrées, pas seulement avec
+        # les paramètres : 2 731 méthodes Go sans paramètre (5 champs) faisaient un noteur de
+        # 495 Mo à la compilation (1 CPU, 1 Go). Borne : MAX_RELAYED_ENTRIES.
+        bound = supervisor.MAX_RELAYED_ENTRIES
+        self.assertLessEqual(bound, 1_000)
+        self.assertEqual(5, supervisor.relayed_entries(
+            [("int", "f", [])], [("R", [[], ["int"]], [("int", "m", [])]),
+                                 ("G", [("NewG", [], False)], [])]))
+        supervisor.check_relayed_params([("int", "f%d" % k, []) for k in range(bound)])
+        with self.assertRaises(supervisor.SubmissionRefused) as raised:
+            supervisor.check_relayed_params([("int", "f", [])], extra_entries=bound)
+        self.assertIn(str(bound), str(raised.exception))
+        # Par langage, sans paramètre : seul le nombre d'entrées dépasse.
+        cpp = "struct R {\n" + "".join("int m%d(){return 0;}\n" % k for k in range(bound + 1)) + "};\n"
+        ex = supervisor.blank_code(cpp)
+        with self.assertRaises(supervisor.SubmissionRefused):
+            supervisor.check_relayed_params(supervisor.c_signatures(ex, cpp=True),
+                                            supervisor.cpp_object_api(ex))
+        cs = "class R {\n" + "".join("public int M%d() => 0;\n" % k for k in range(bound + 1)) + "}\n"
+        relayed, entries = supervisor.cs_relayed_params(cs)
+        self.assertEqual((0, bound + 1), (relayed, entries))
+        self.assertIn("extra_entries=entries", inspect.getsource(supervisor.run_csharp_rpc))
+        self.assertIn("extra_entries=", inspect.getsource(supervisor.run_java_rpc))
+
+    def test_field_copies_bound_keeps_go_grader_small(self):
+        # 13 600 copies de champs (2 731 méthodes à récepteur pointeur, 5 champs) : noteur Go de
+        # 495 Mo à la compilation. 20 000 copies admises rendaient l'OOM du conteneur possible.
+        self.assertLessEqual(supervisor.MAX_FIELD_COPIES, 5_000)
 
     def test_go_embedded_types_are_deduplicated(self):
         # 19 000 lignes `B` dans une structure embarquée par 3 000 types : 57 millions de
@@ -4684,6 +4723,27 @@ class PlatformInterruptionTest(unittest.TestCase):
         with unittest.mock.patch.object(supervisor, "run_proc", lambda *a, **k: (1, False)):
             self.assertEqual(["valeur"], supervisor.c_reserved_names(["valeur"], "gcc", "-std=c17",
                                                                      self.directory, {}))
+
+    def test_java_class_count_is_bounded_before_javap(self):
+        # 7 611 `class qXXX{}` (99 Ko) : javap expirait à chaque cas, canaris compris, et
+        # l'expiration d'un outil est « interrompue » — tentative rejouée à volonté.
+        bound = supervisor.JAVA_MAX_CLASSES
+        self.assertLessEqual(bound, 256)
+        self.assertIsNone(supervisor.java_class_count_refusal(bound))
+        refusal = supervisor.java_class_count_refusal(bound + 1)
+        self.assertIn(str(bound + 1), refusal)
+        self.assertFalse(supervisor.platform_aborted(refusal))
+        source = inspect.getsource(supervisor.run_java_rpc)
+        self.assertLess(source.index("java_class_count_refusal("), source.index('["javap"'))
+
+    def test_java_rpc_server_compile_abort_is_interrupted(self):
+        # javac du SERVEUR RPC expiré ou tué : « Erreur interne du noteur » sans cause, donc un 0
+        # définitif. Avec la borne de classes, le code soumis ne peut pas le pousser au délai.
+        source = inspect.getsource(supervisor.run_java_rpc)
+        server = source[source.index('"MooditServer.java")],'):]
+        abort = server.index("TOOL_ABORTED")
+        self.assertLess(server.index("expired or (code is not None and code < 0)"), abort)
+        self.assertLess(abort, server.index('"Erreur interne du noteur (serveur RPC)"'))
 
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes

@@ -80,8 +80,8 @@ function TestResults({
 }): React.ReactElement {
   if (tests == null) {
     // Pas de verdicts (question Code sans harnais, ou résultat « en cours ») : placeholder.
-    // La soumission vérifie désormais le code de façon SYNCHRONE, donc une tentative
-    // enregistrée porte normalement déjà ses verdicts.
+    // La correction est ASYNCHRONE (202 puis verdict poussé par WebSocket) : tant qu'elle tourne,
+    // la tentative n'a pas encore les verdicts de ses harnais.
     return (
       <p className={styles.testNote}>
         <Spinner tone="current" size={14} /> {labels.evaluating}

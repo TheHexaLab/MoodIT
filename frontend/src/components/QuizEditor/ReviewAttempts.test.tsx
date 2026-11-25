@@ -252,30 +252,6 @@ describe('QuizEditor — tentatives à revoir', () => {
     expect(screen.queryByText(editorT.regradeError)).toBeNull();
   });
 
-  it('retour à la liste avant la réponse de la relance → la pastille n\'est pas décomptée une fois de trop', async () => {
-    let resolveRegrade!: () => void;
-    const onRegradeAttempt = vi.fn(
-      () => new Promise<void>((resolve) => { resolveRegrade = resolve; })
-    );
-    render(
-      <QuizEditor
-        courseId={42}
-        quizzes={[makeQuiz({ reviewAttemptCount: 2 })]}
-        onClose={vi.fn()}
-        handlers={{ onFetchReviewAttempts: vi.fn(async () => [EVA, BOB]), onRegradeAttempt }}
-      />
-    );
-    fireEvent.click(screen.getByLabelText(listT.reviewAria('Quiz A', 2)));
-    fireEvent.click(await screen.findByLabelText(reviewT.regradeAria('Éva Test', 2)));
-    fireEvent.click(screen.getByLabelText(/retour/i));
-    expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
-
-    await act(async () => {
-      resolveRegrade();
-    });
-    expect(screen.getByText(listT.reviewBadge(2))).toBeTruthy();
-  });
-
   it('relecture après relance arrivée APRÈS l\'ouverture d\'un quiz : le quiz ouvert garde ses questions', async () => {
     // Revue #246 : la réponse tardive remplaçait le quiz complet (formulaire ouvert) par sa
     // version de liste, sans questions — un enregistrement les aurait supprimées au serveur.

@@ -375,8 +375,9 @@ export async function runCode(input: RunCodeInput): Promise<RunResult> {
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────
 // Les questions sont éditées EN MÉMOIRE dans l'éditeur et persistées en un seul appel
-// (create/update du quiz), pas une requête par question. Le backend assigne les ids
-// (il ignore les ids temporaires négatifs de l'éditeur, ainsi que les harnais de code).
+// (create/update du quiz), pas une requête par question. Le backend assigne les ids : il
+// réutilise ceux qu'il connaît (mise à jour) et ignore les ids temporaires négatifs de l'éditeur.
+// Les harnais de code partent avec leur question et sont enregistrés (table Test_Case).
 
 /**
  * Refus métier d'un enregistrement de quiz (400, texte brut en français de core ; 413, corps

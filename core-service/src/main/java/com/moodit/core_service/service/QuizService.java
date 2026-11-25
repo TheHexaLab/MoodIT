@@ -74,7 +74,8 @@ public class QuizService {
 
     /**
      * Statut d'une tentative gardée « à revoir » par l'enseignant (#116, S4) : sa correction a
-     * échoué SANS VERDICT trop souvent pour être encore supprimée et resoumise.
+     * échoué et failGrading l'a gardée — relance par l'enseignant, ou plafond atteint sur un échec
+     * sans verdict ou sur un quiz sans reprise.
      */
     public static final String REVIEW = "review";
 
@@ -673,7 +674,7 @@ public class QuizService {
 
     /**
      * Tentatives « à revoir » d'un quiz (#116, S4), pour l'enseignant : leur correction a échoué
-     * sans verdict au-delà du plafond. Autorisation par rôle assurée en amont par le
+     * et failGrading les a gardées (relance, ou plafond atteint). Autorisation par rôle assurée en amont par le
      * permission-service (gestionnaires du contenu du quiz).
      */
     @Transactional(readOnly = true)
@@ -693,7 +694,9 @@ public class QuizService {
     /**
      * L'enseignant RELANCE la correction d'une tentative « à revoir » (#116, S4) : elle repasse en
      * {@code "pending"} et repart en correction après commit, comme une soumission. Si elle échoue
-     * encore, elle revient à revoir (le plafond est déjà atteint, cf. {@link #failGrading}) ; si
+     * encore, quelle que soit la cause, elle revient à revoir grâce à son marqueur de relance
+     * ({@link Attempt#isRegrade()}, cf. {@link #failGrading}) — pas grâce au plafond : sur un quiz
+     * avec reprise, une autre tentative corrigée entre-temps a pu remettre le compte à zéro ; si
      * elle aboutit, l'étudiant reçoit son résultat ({@code quiz:attempt-graded}).
      *
      * <p>404 si la tentative n'appartient pas à ce quiz (la règle d'autorisation ne porte que sur

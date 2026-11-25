@@ -127,10 +127,11 @@ class DockerEvaluatorTest {
 
     @Test
     void interrupted_case_is_no_verdict_internally_and_readable_in_tester() {
-        // Cas INTERROMPU par la plateforme (compilation du noteur expirée, inventaire javap ou
-        // sonde des noms réservés expirés) : le superviseur le compte « incomplet » (cause
-        // « interrompu »). Il arrivait avant comme un verdict ordinaire : un 0 définitif que
-        // personne ne pouvait rejouer, regradeAttempt n'acceptant que « à revoir ».
+        // CONTRAT côté Java : tout job « incomplet » est sans verdict en interne et lisible au
+        // « Tester », quel que soit le détail — ici celui d'un cas INTERROMPU par la plateforme.
+        // Que le superviseur marque bien ces cas « incomplet » (cause « interrompu ») est vérifié
+        // côté Python (test_supervisor.py, test_platform_aborted_* et suivants) : ce test-ci
+        // fournit lui-même « incomplet » et ne protège pas contre une régression du superviseur.
         String aborted = "Le harnais n'a pas fini de compiler (temps limite de compilation "
                 + "dépassé ou compilateur arrêté) : rejouer la correction.";
         supervisorReturns("""
@@ -578,7 +579,7 @@ class DockerEvaluatorTest {
     @Test
     void wall_capped_for_public_call() {
         supervisorReturns("{\"v\":1,\"results\":[],\"events\":[],\"canaries\":\"ok\"}");
-        // 10 cas × (60 s + 10 s + 90 s) dépasserait largement le plafond public (4 min).
+        // 10 cas × (60 s + 10 s + 2 × 90 s + 5 s) dépasserait largement le plafond public (4 min).
         List<TestCaseInput> many = java.util.stream.IntStream.range(0, 10)
                 .mapToObj(i -> new TestCaseInput("c" + i, "h", 1)).toList();
         evaluator.evaluate("Go", "code", many, 60_000, DockerEvaluator.PUBLIC_WALL_MS);

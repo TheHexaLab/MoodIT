@@ -9,6 +9,7 @@ import com.moodit.core_service.dto.QuestionResultDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
 import com.moodit.core_service.dto.QuizSubmissionDTO;
 import com.moodit.core_service.dto.SubmittedAnswerDTO;
+import com.moodit.core_service.model.Attempt;
 import com.moodit.core_service.model.Course;
 import com.moodit.core_service.model.Language;
 import com.moodit.core_service.model.QType;
@@ -331,6 +332,49 @@ class QuizServiceSubmitIT {
     assertThat(count("SELECT count(*) FROM attempt WHERE regrade = TRUE")).isZero();
     assertThat(quizService.getAttemptResult(regradedId, USER_EMAIL).getEarned()).isEqualTo(10.0);
     TestTransaction.end();
+  }
+
+  @Test
+  @DisplayName("Compteur « à revoir » de l'éditeur : tentatives review du cours, par quiz, sur une vraie base")
+  void reviewCounter_countsReviewAttemptsOfTheCourseOnly() {
+    // La requête JPQL (AttemptRepository.countByStatusPerQuiz) n'est que mockée dans les tests
+    // unitaires : ici, son filtre par cours, son filtre par statut et son regroupement par quiz
+    // tournent vraiment.
+    Quiz quiz = em.find(Quiz.class, quizId);
+    User user = em.getEntityManager()
+        .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
+        .setParameter("email", USER_EMAIL).getSingleResult();
+    Course other = Course.builder().title("Autre cours").code("C2").build();
+    em.persist(other);
+    Quiz otherQuiz = Quiz.builder()
+        .title("Autre quiz").isDaily(false).isPublished(true).allowRetry(true)
+        .position(0).createdAt(LocalDateTime.now()).course(other).build();
+    em.persist(otherQuiz);
+    persistAttempt(quiz, user, 1, QuizService.REVIEW);
+    persistAttempt(quiz, user, 2, QuizService.REVIEW);
+    persistAttempt(quiz, user, 3, "done");
+    persistAttempt(otherQuiz, user, 1, QuizService.REVIEW);
+    Integer courseId = quiz.getCourse().getId();
+    Integer otherCourseId = other.getId();
+    em.flush();
+    em.clear();
+
+    assertThat(quizService.listQuizzes(courseId, false))
+        .singleElement()
+        .satisfies(q -> assertThat(q.getReviewAttemptCount()).isEqualTo(2));
+    assertThat(quizService.listQuizzes(otherCourseId, false))
+        .singleElement()
+        .satisfies(q -> assertThat(q.getReviewAttemptCount()).isEqualTo(1));
+  }
+
+  private void persistAttempt(Quiz quiz, User user, int attemptNo, String status) {
+    Attempt attempt = new Attempt();
+    attempt.setQuiz(quiz);
+    attempt.setUser(user);
+    attempt.setAttemptNo(attemptNo);
+    attempt.setStatus(status);
+    attempt.setSubmittedAt(LocalDateTime.now());
+    em.persist(attempt);
   }
 
   /** Purge les données committées (base H2 partagée par les tests de la classe). */

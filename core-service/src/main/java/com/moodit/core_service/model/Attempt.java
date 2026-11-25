@@ -40,8 +40,9 @@ public class Attempt {
      * Cycle de vie de la correction (soumission asynchrone) : {@code "pending"} pendant que le
      * sandbox corrige le code, {@code "done"} une fois la tentative corrigée et consultable. Une
      * tentative dont l'évaluation code échoue est SUPPRIMÉE (jamais persistée en {@code "failed"}),
-     * sauf au-delà du plafond d'échecs SANS VERDICT de l'étudiant sur ce quiz : elle reste alors en
-     * {@code "review"}, à revoir par l'enseignant, qui peut relancer la correction (#116, S4).
+     * sauf si QuizService la garde (relance par l'enseignant, ou plafond d'échecs atteint sur un
+     * échec sans verdict ou sur un quiz sans reprise) : elle reste alors en {@code "review"}, à
+     * revoir par l'enseignant, qui peut relancer la correction (#116, S4).
      * Défaut {@code "done"} : une tentative créée hors du flux async (seed) est déjà corrigée.
      */
     @Column(name = "status", nullable = false, length = 16)

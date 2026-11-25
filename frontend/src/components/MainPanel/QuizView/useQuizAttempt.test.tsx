@@ -638,6 +638,41 @@ describe('tentative à revoir par l\'enseignant', () => {
     expect(result.current.result?.attemptId).toBe(57);
   });
 
+  it('relance réussie, lecture en échec APRÈS un changement de vue : pas de rechargement en repli', async () => {
+    // Le repli (`reload`) ne vaut que si la tentative relancée est toujours affichée : sinon il
+    // rechargerait tout l'écran (chargement, focus perdu) sous les yeux de l'étudiant.
+    const onFetchAttempts = vi
+      .fn<(quizId: number) => Promise<AttemptSummary[]>>()
+      .mockResolvedValueOnce([review(56), summary(57, 2)])
+      .mockResolvedValue([summary(56), summary(57, 2)]);
+    let fail56!: () => void;
+    const onFetchAttemptResult = vi.fn((_q: number, id: number) =>
+      id === 56
+        ? new Promise<ReturnType<typeof makeResult>>((_res, rej) => { fail56 = () => rej(new Error('503')); })
+        : Promise.resolve(makeResult(id))
+    );
+    // Espion STABLE : chaque rechargement relit le quiz.
+    const onFetchQuiz = vi.fn(async () => makeQuiz({ allowRetry: true }));
+    let outcome: AttemptOutcome | null = null;
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({ initialQuiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, attemptOutcome: outcome })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(57));
+    act(() => result.current.selectAttempt(56));
+    expect(result.current.awaitingReview).toBe(true);
+
+    outcome = { quizId: QUIZ_ID, attemptId: 56, ok: true };
+    rerender();
+    await waitFor(() => expect(onFetchAttemptResult).toHaveBeenCalledWith(QUIZ_ID, 56));
+    // L'étudiant revient à #57 avant l'échec de la lecture.
+    await act(async () => { await result.current.selectAttempt(57); });
+    await act(async () => { fail56(); });
+    expect(onFetchQuiz).toHaveBeenCalledTimes(1);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.currentAttemptId).toBe(57);
+    expect(result.current.result?.attemptId).toBe(57);
+  });
+
   it('relance réussie, résultat illisible : rechargement complet en repli', async () => {
     const onFetchAttempts = vi
       .fn<(quizId: number) => Promise<AttemptSummary[]>>()

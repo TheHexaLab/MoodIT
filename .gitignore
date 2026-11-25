@@ -14,6 +14,12 @@
 /backups/
 /update.log
 /.update.lock
+# Dump du rejeu des harnais (deploy/DEPLOY.md, « Changement de schéma ») : il porte les harnais,
+# donc les cas cachés de la prod — le dépôt est public.
+/precheck-*.sql.gz
+# Bibliothèques JSX/TSX extraites pour les tests d'intégration d'execution-service (CI, et en
+# local selon « Comment tester »).
+/vendor-ci/
 
 # ==============================
 # Core Service — Java / Spring Boot / Gradle

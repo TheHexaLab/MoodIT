@@ -74,7 +74,7 @@ STUDENT_GID = 1300
 STUDENT_UID_RANGE = (1 << 24, (1 << 31) - 2)
 READY_WAIT_S = 30
 COMPILE_TIMEOUT_S = 90
-LIST_TIMEOUT_S = 5              # inventaire `--list` : s'ajoute au pire cas, donc borné court
+LIST_TIMEOUT_S = 5              # inventaire javap (Java) : s'ajoute au pire cas, donc borné court
 # Outils C/C++ autour des deux compilations, bornés court eux aussi et budgétés par
 # DockerEvaluator (miroir dans core, ExecutionClient) : la sonde des noms réservés (`gcc
 # -fsyntax-only`, plusieurs sondes au plus dans ce délai TOTAL par cas), `nm` sur le binaire
@@ -1455,9 +1455,17 @@ class CaseOutcome:
         # canari, dont le harnais est fixe, la cause est forcément le générateur de bouchons :
         # cause non concluante, jamais une accusation (cf. inconclusive).
         self.harness_build = harness_build
-        # Cause d'un saut : "erreur" (superviseur), "budget" (budget global), "espace" (disque
-        # sature par le code soumis). Seules les deux premieres peuvent ne pas etre imputables.
-        # Ou d'un cas INTERROMPU par la plateforme : "interrompu" (cf. platform_aborted).
+        # Cause d'un cas qui n'a pas de verdict ordinaire (None sinon). NON IMPUTABLES au code
+        # soumis, et seules à rendre le job « incomplet » (cf. grading_incomplete) :
+        #   "erreur"       exception de LOGIQUE du superviseur pendant le cas (sauté) ;
+        #   "interrompu"   la plateforme l'a interrompu sans verdict : compilation du noteur ou
+        #                  outil expirés ou tués (cf. platform_aborted) — jamais provocable par
+        #                  le code soumis, qui est refusé en amont par des bornes (cf. plus bas).
+        # IMPUTABLES (le cas est noté, en échec ; un canari ainsi sauté n'accuse pas) :
+        #   "budget"       budget global de la notation épuisé avant le cas (sauté) ;
+        #   "espace"       /box saturé avant le cas, par le code soumis (sauté) ;
+        #   "environnement" OSError pendant le cas : disque, liens ou processus que l'étudiant
+        #                  partage et peut provoquer (sauté).
         self.cause = cause
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
@@ -1587,7 +1595,21 @@ def platform_aborted(detail):
     (TOOL_ABORTED) : le message vient de NOUS, en tête (un diagnostic du compilateur ne vient
     qu'après « Échec de compilation : »). Ce n'est pas une note : sur le chemin interne, le job
     est « incomplet » (cf. grading_incomplete) et la tentative est à reprendre — un 0 définitif
-    ne pouvait être rejoué par personne. Le « Tester » du prof garde le message."""
+    ne pouvait être rejoué par personne. Le « Tester » du prof garde le message.
+
+    Une interruption n'a PAS de note : elle doit donc être impossible à provoquer par le code
+    soumis, sinon elle offre des essais gratuits (502, tentative rejouée jusqu'au plafond). Pire
+    cas que le code soumis peut forcer sous les bornes, mesuré dans les images (1 CPU, 1 Go) :
+      - compilation du NOTEUR : ses bouchons viennent de l'API soumise, bornée en entrées
+        (MAX_RELAYED_ENTRIES), en paramètres (MAX_RELAYED_PARAMS) et en copies de champs
+        (MAX_FIELD_COPIES) — pire noteur 15,9 s (Go, cache froid) et 392 Mo (Rust), pour 90 s
+        de délai et 1 Go ; hors bornes, refus noté avant toute compilation. Le harnais, lui,
+        vient du prof ;
+      - inventaire javap et javac du serveur RPC Java : bornés par le nombre de classes
+        produites (JAVA_MAX_CLASSES) — 1,1 s et 2,1 s à 256 classes, pour 5 s et 90 s ;
+      - sondes des noms réservés C/C++ : elles ne portent que les noms que le HARNAIS emploie,
+        au plus C_PROBE_MAX + 2 compilations d'un fichier d'en-têtes (0,2 s chacune), pour 20 s.
+    Ce qui reste (hôte surchargé, démon lent) est un vrai incident de plateforme."""
     return (detail or "").startswith((HARNESS_BUILD_ABORTED, TOOL_ABORTED))
 
 
@@ -2016,9 +2038,27 @@ MAX_DEFAULT_PARAMS = 8
 
 # Paramètres RELAYÉS en tout par l'API finale d'une soumission (cf. check_relayed_params) : le
 # code généré (bouchons du noteur, aiguillage du serveur) écrit au moins une ligne par paramètre.
-# Sans héritage ni arité réduite, un code soumis de 100 000 caractères en déclare au plus
-# ~50 000 (`func f(a, b, c int)` en Go) : la borne n'est atteinte que par une démultiplication.
-MAX_RELAYED_PARAMS = 100_000
+# 20 000 et non 100 000 : la compilation du NOTEUR expirée ou tuée est « interrompue », sans
+# note, et ne doit donc pas être provocable. Mesuré dans les images (1 CPU, 1 Go, la
+# configuration de production) : le noteur Rust, qui reçoit TOUTE l'API, de 990 méthodes à 100
+# paramètres (99 000) était tué par l'OOM à 1,09 Go ; à 20 000 paramètres il compile en 2,5 s
+# et 392 Mo (et le serveur de l'étudiant, compilé AVANT lui, est déjà tué à 1 Go : échec de
+# compilation noté). Une solution honnête relaie quelques dizaines de paramètres.
+MAX_RELAYED_PARAMS = 20_000
+
+# Fonctions, constructeurs et méthodes RELAYÉS en tout (une entrée = un bouchon dans le noteur et
+# une branche dans le serveur). La compilation du NOTEUR expirée ou tuée est « interrompue »,
+# sans note (cf. platform_aborted) : elle ne doit pas être provocable par le code soumis. Mesuré
+# dans les images (1 CPU, 1 Go, la configuration de production), avant cette borne : le noteur
+# Go d'un type nommé par le harnais à 2 731 méthodes à récepteur pointeur et 5 champs (13 600
+# copies de champs) prenait 10,6 s et 495 Mo — à 20 000 copies, l'OOM du conteneur devenait
+# possible ; noteur Rust de 3 000 types à méthodes par défaut 426 Mo. Les autres restaient loin
+# du délai (C++ 1 s, C# 1 s, Java 6,5 s pour 3 700 statiques). Sous les bornes actuelles (1 000
+# entrées, 20 000 paramètres, 5 000 copies de champs), pire noteur mesuré : Go 15,9 s (cache de
+# compilation froid, la bibliothèque standard comprise) et 228 Mo, Rust 2,5 s et 392 Mo, Java
+# 2,9 s, C# 2,7 s, C++ 0,4 s — loin des 90 s et du Go de mémoire. Une solution honnête en
+# déclare quelques dizaines.
+MAX_RELAYED_ENTRIES = 1_000
 
 
 def relayed_params(method_list=(), obj_list=()):
@@ -2034,7 +2074,12 @@ def relayed_params(method_list=(), obj_list=()):
     return total
 
 
-def check_relayed_params(method_list=(), obj_list=(), extra=0):
+def relayed_entries(method_list=(), obj_list=()):
+    """Nombre de fonctions, constructeurs et méthodes relayés. FONCTION PURE (testée)."""
+    return len(method_list) + sum(len(ctors) + len(methods) for _t, ctors, methods in obj_list)
+
+
+def check_relayed_params(method_list=(), obj_list=(), extra=0, extra_entries=0):
     """Refuse (SubmissionRefused) une API dont le code généré relaierait plus de
     MAX_RELAYED_PARAMS paramètres. FONCTION PURE (testée). Appelée par chaque runner sur son API
     FINALE (fonctions, constructeurs et méthodes, après héritage et arités réduites), avant
@@ -2043,7 +2088,16 @@ def check_relayed_params(method_list=(), obj_list=(), extra=0):
     Les bornes d'héritage comptent des méthodes, pas leurs paramètres : une base dont la méthode
     a 4 000 paramètres, héritée par 2 500 dérivées (90 Ko), faisait un serveur C++ de 768 M
     caractères (3,6 Go) ; une méthode par défaut de trait Rust, ou une méthode Go promue par
-    composition, autant. `extra` : paramètres comptés à part par l'appelant (C#)."""
+    composition, autant. `extra`, `extra_entries` : paramètres et entrées comptés à part par
+    l'appelant (C#, statiques Java par classe). Borne aussi le NOMBRE d'entrées
+    (MAX_RELAYED_ENTRIES) : c'est lui qui fait la taille du noteur, dont la compilation expirée
+    ne doit jamais venir du code soumis."""
+    entries = relayed_entries(method_list, obj_list) + extra_entries
+    if entries > MAX_RELAYED_ENTRIES:
+        raise SubmissionRefused(
+            "API trop grande pour la notation : le code soumis demande de relayer %d fonctions, "
+            "méthodes et constructeurs (au plus %d), comptés après héritage et valeurs par "
+            "défaut. Réduisez leur nombre." % (entries, MAX_RELAYED_ENTRIES))
     total = relayed_params(method_list, obj_list) + extra
     if total > MAX_RELAYED_PARAMS:
         raise SubmissionRefused(
@@ -2943,8 +2997,10 @@ def go_object_api(source):
 
 
 # Copies de champs admises dans le code généré (cf. check_field_copies) : une structure réelle
-# de dix champs et vingt méthodes en demande 200.
-MAX_FIELD_COPIES = 20_000
+# de dix champs et vingt méthodes en demande 200. 5 000 et non 20 000 : le noteur Go recopie
+# les champs dans chaque méthode à récepteur pointeur, et 13 600 copies y coûtaient déjà 495 Mo
+# à la compilation (1 CPU, 1 Go) — une compilation tuée serait « interrompue », sans note.
+MAX_FIELD_COPIES = 5_000
 
 
 def check_field_copies(obj_list, field_list):
@@ -5861,21 +5917,22 @@ def cs_object_api(source, klass):
 
 
 def cs_relayed_params(source):
-    """Paramètres des constructeurs (arités réduites comprises) et des méthodes d'instance
-    (héritées comprises) de TOUTES les classes du code soumis. FONCTION PURE (testée).
+    """(paramètres, entrées) des constructeurs (arités réduites comprises) et des méthodes
+    d'instance (héritées comprises) de TOUTES les classes du code soumis. FONCTION PURE (testée).
 
     Le noteur ne relaie que la classe que vise le harnais, mais compter celle-là seule ferait
     dépendre le refus du harnais : les canaris (harnais muet) seraient jugés sur une autre classe
     que les cas réels. Compter toutes les classes majore l'API relayée, pour tous les cas."""
     src_text = source or ""
-    total = sum(len(m[2]) for methods in _cs_members_with_inherited(src_text).values()
-                for m in methods)
+    members = [m for methods in _cs_members_with_inherited(src_text).values() for m in methods]
+    total, entries = sum(len(m[2]) for m in members), len(members)
     for ident, params in CS_CTOR_ANY.findall(src_text):
         types = _cs_param_types(params)
         if types is not None:
-            total += sum(len(t) for _r, _n, t in with_default_arities(
-                [(None, ident, types, trailing_defaults(params))]))
-    return total
+            arities = with_default_arities([(None, ident, types, trailing_defaults(params))])
+            total += sum(len(t) for _r, _n, t in arities)
+            entries += len(arities)
+    return total, entries
 
 
 # `class Carre : Forme, IComparable` : la PREMIERE base est la classe mère quand c'en est une.
@@ -6341,6 +6398,28 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
                     EXIT_STATE.lost = True
 
 
+# Classes produites par la compilation du code soumis, au plus (fichiers .class, imbriquées et
+# anonymes comprises) : la même borne que l'artefact gardé d'un cas à l'autre. Au-delà, javap
+# (LIST_TIMEOUT_S, 5 s) et le javac du serveur RPC, qui les lisent toutes, pouvaient être
+# poussés au délai PAR LE CODE SOUMIS — or leur expiration est « interrompue » (cf.
+# platform_aborted), sans note : 7 611 `class qXXX{}` (99 Ko) faisaient expirer javap à chaque
+# cas, canaris compris, et la tentative était rejouée à volonté. Mesuré (1 CPU, 1 Go) : javap
+# 1,1 s et javac du serveur 2,1 s pour 256 classes, l'essentiel étant le démarrage de la JVM ;
+# une solution honnête en a quelques-unes.
+JAVA_MAX_CLASSES = STUDENT_ARTIFACT_MAX_FILES
+
+
+def java_class_count_refusal(count):
+    """Message de refus si la compilation du code soumis a produit plus de JAVA_MAX_CLASSES
+    classes, sinon None. FONCTION PURE (testée). Ne dépend que du code soumis : canaris et cas
+    réels sont refusés ensemble."""
+    if count <= JAVA_MAX_CLASSES:
+        return None
+    return ("Trop de classes pour la notation : la compilation du code soumis en produit %d "
+            "(au plus %d, classes imbriquées et anonymes comprises). Regroupez-les."
+            % (count, JAVA_MAX_CLASSES))
+
+
 def run_java_rpc(case_dir, env, timeout_s, case_index):
     """Notation NON FALSIFIABLE d'un cas Java : harnais booléen, deux processus, deux UID.
 
@@ -6404,8 +6483,14 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     klass = os.path.basename(student_file)[:-len(".java")]
     # Classes ANONYMES et LOCALES ecartees (java_nameable_class) : le harnais ne peut pas les
     # nommer, et leur bouchon ne compilait pas.
-    binary_names = sorted(ident[:-len(".class")] for ident in os.listdir(student_classes)
-                      if ident.endswith(".class") and not ident.startswith("Moodit")
+    class_files = [ident for ident in os.listdir(student_classes) if ident.endswith(".class")]
+    # Borne AVANT javap : un inventaire expiré est « interrompu » (outil de la plateforme), ce
+    # qui n'est vrai que si le code soumis ne peut pas le provoquer (cf. java_class_count_refusal).
+    refusal = java_class_count_refusal(len(class_files))
+    if refusal:
+        return None, refusal
+    binary_names = sorted(ident[:-len(".class")] for ident in class_files
+                      if not ident.startswith("Moodit")
                       and java_nameable_class(ident[:-len(".class")]))
     code, expired = run_proc(["javap", "-p", "-cp", student_classes] + binary_names,
                             case_dir, env, LIST_TIMEOUT_S,
@@ -6461,7 +6546,8 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # API FINALE, toutes classes, avant toute génération et sans regarder le harnais.
     check_relayed_params(method_list, obj_list + [(klass, own_ctors, own_instance)],
                          extra=sum(len(m[2]) for statics in class_statics.values()
-                                   for m in statics))
+                                   for m in statics),
+                         extra_entries=sum(len(statics) for statics in class_statics.values()))
     if code != 0 or not (method_list or obj_list or (own_ctors and own_instance)):
         return None, ("Aucune méthode statique ni objet exploitable dans la classe "
                       + klass + " (types acceptés : int, long, double, boolean, String).")
@@ -6506,7 +6592,13 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             case_dir, env, COMPILE_TIMEOUT_S,
                             os.path.join(case_dir, "sc.out"), os.path.join(case_dir, "sc.err"),
                             preexec_compile)
-    if expired or code != 0:
+    if expired or (code is not None and code < 0):
+        # Expirée ou tuée : avec au plus JAVA_MAX_CLASSES classes soumises, ce javac prend 2 s
+        # (mesuré, 1 CPU) : le code soumis ne peut pas le pousser au délai, c'est la plateforme.
+        return None, (TOOL_ABORTED + " : la compilation du serveur RPC (javac) n'a pas fini "
+                      "(temps limite dépassé ou compilateur arrêté). Le code soumis n'est pas "
+                      "en cause : la correction est à rejouer.")
+    if code != 0:
         return None, "Erreur interne du noteur (serveur RPC)"
 
     # 5. CLOISONNEMENT : chacun chez soi, 700. L'étudiant ne peut pas lire le noteur (ni son
@@ -6575,7 +6667,8 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
     extraction = cs_canonical_types(cs_strip_comments(student_source))
     method_list = cs_signatures(extraction)
     # Sur TOUTES les classes, avant de choisir celle que vise le harnais (cf. cs_relayed_params).
-    check_relayed_params(method_list, extra=cs_relayed_params(extraction))
+    relayed, entries = cs_relayed_params(extraction)
+    check_relayed_params(method_list, extra=relayed, extra_entries=entries)
     harness = harness_rpc_body(case_dir) or ""
     klass = cs_student_class(extraction, harness)
     ctors, instance = cs_object_api(extraction, klass)

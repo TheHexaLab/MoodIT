@@ -59,8 +59,8 @@ public class QuizController {
     }
 
     /**
-     * Tentatives « à revoir » du quiz, pour l'enseignant (#116, S4) : leur correction a échoué sans
-     * verdict au-delà du plafond. Autorisation par rôle assurée en amont par le permission-service
+     * Tentatives « à revoir » du quiz, pour l'enseignant (#116, S4) : leur correction a échoué et
+     * QuizService les a gardées (relance, ou plafond atteint). Autorisation par rôle assurée en amont par le permission-service
      * (règle GET /quizzes/{quizId}/review-attempts).
      */
     @GetMapping("/{quizId}/review-attempts")

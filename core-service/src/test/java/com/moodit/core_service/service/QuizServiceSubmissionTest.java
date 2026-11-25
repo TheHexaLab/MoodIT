@@ -803,7 +803,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
     // ── getMyAttempts ───────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Historique : seules les tentatives done, score recalculé et date en UTC")
+    @DisplayName("Historique : tentatives en correction ordinaire (pending) exclues, score recalculé et date en UTC")
     void getMyAttempts_filtreLesPendingEtCalculeLeScore() {
         Question q = question(10, SINGLE, 2.0, 0);
         answer(q, 1, "ok", true);

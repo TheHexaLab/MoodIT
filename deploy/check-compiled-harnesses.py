@@ -56,7 +56,10 @@ solution s'acquitte par --ack (ids séparés par des virgules), à repasser à l
   EXEC_URL        URL d'execution-service, sinon l'IP du conteneur sur son réseau Docker et
                   le port de son EXEC_SERVICE_PORT (8085 par défaut)
                   (joignable depuis un hôte Linux ; sous Docker Desktop, donner EXEC_URL) ;
-  INTERNAL_TOKEN  jeton interne, sinon lu dans l'environnement du conteneur execution-service.
+  INTERNAL_TOKEN  jeton interne, sinon lu dans l'environnement du conteneur execution-service ;
+  EXEC_INTERNAL_QUEUE_WAIT_MS, EXEC_INTERPRETED_BUDGET_MS
+                  à donner seulement si le .env d'execution-service les change : le délai
+                  d'attente de chaque réponse en dépend (read_timeout_s).
 Le jeton n'est jamais affiché.
 """
 
@@ -78,13 +81,22 @@ RESERVED_NAME = "Nom réservé : « "
 
 # Déclarations que le noteur lit dans un code (mêmes motifs que CodeAssembler : PY_DEF/PY_CLASS,
 # JS_CALLABLE/JS_CLASS, BASH_FUNC). Un nom que le code de départ déclare n'est jamais refusé.
+# Un nom que le noteur lit et que ce script raterait sortait À VÉRIFIER (« aucune fonction du code
+# de départ »), et --unpublish fermait un quiz juste : chaque forme reconnue par CodeAssembler
+# doit l'être ici. Identifiants UNICODE comme côté Java (`[\p{L}_]\w*` sous `(?U)`) : en `re`,
+# `[^\W\d]` est une lettre ou `_` (`\w` y est Unicode), `def carré` compte donc pour `carré`.
+_NAME = r"[^\W\d]\w*"
+_JS_NAME = r"(?:[^\W\d]|\$)[\w$]*"
 _JS_EXPORT = r"(?:export\s+(?:default\s+)?)?"
 DECLARATIONS = {
-    "Python": (r"(?m)^(?:async\s+)?def\s+([A-Za-z_]\w*)", r"(?m)^class\s+([A-Za-z_]\w*)"),
-    "JavaScript": (r"(?m)^" + _JS_EXPORT + r"(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)",
-                   r"(?m)^" + _JS_EXPORT + r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=",
-                   r"(?m)^" + _JS_EXPORT + r"(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)"),
-    "Bash": (r"(?m)^(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)",),
+    # PY_DEF : `def f`, `async def f` et `f = lambda …` (fonction de premier niveau aussi).
+    "Python": (r"(?m)^(?:(?:async\s+)?def\s+(" + _NAME + r")|(" + _NAME + r")\s*=\s*lambda\b)",
+               r"(?m)^class\s+(" + _NAME + r")"),
+    "JavaScript": (r"(?m)^" + _JS_EXPORT + r"(?:async\s+)?function\s*(?:\*\s*)?(" + _JS_NAME + r")",
+                   r"(?m)^" + _JS_EXPORT + r"(?:const|let|var)\s+(" + _JS_NAME + r")\s*=",
+                   r"(?m)^" + _JS_EXPORT + r"(?:abstract\s+)?class\s+(" + _JS_NAME + r")"),
+    # BASH_FUNC : `f()`, `function f()` et `function f {` (sans parenthèses).
+    "Bash": (r"(?m)^(?:function\s+(" + _NAME + r")|(" + _NAME + r")\s*\(\s*\))",),
 }
 DECLARATIONS["TypeScript"] = DECLARATIONS["JavaScript"]
 
@@ -116,7 +128,9 @@ def declared_names(language, start_code):
     """Noms que le code de départ déclare, lus comme le noteur. FONCTION PURE (testée)."""
     names = set()
     for pattern in DECLARATIONS.get(language, ()):
-        names.update(re.findall(pattern, start_code or ""))
+        for match in re.finditer(pattern, start_code or ""):
+            # Motifs à plusieurs formes : le premier groupe capturé, comme matchAll côté Java.
+            names.add(next(group for group in match.groups() if group))
     return names
 
 
@@ -212,6 +226,45 @@ OK = "OK"
 # Même borne que core (ExecutionClient) : un temps limite plus long n'est jamais demandé.
 MAX_TIMEOUT_MS = 60_000
 
+# Délai d'attente de la réponse : le PIRE CAS serveur, miroir de core-service
+# ExecutionClient.readTimeoutMs (mêmes termes, mêmes défauts). Plus court, le script renonçait
+# pendant une correction encore en cours : « le noteur n'a pas répondu », À VÉRIFIER, et
+# --unpublish fermait un quiz juste. Les termes :
+_BASE_READ_MS = 10_000            # app.execution-service.read-timeout-ms de core
+_PER_TEST_MS = 20_000             # app.execution-service.per-test-timeout-ms de core
+_RUN_MARGIN_MS = 5_000            # RUN_MARGIN_MS
+_EXEC_WALL_MS = 75_000            # EXEC_WALL_SLACK_MS (RunnerExec.WALL_OVERHEAD_MS)
+_CONTAINER_LIFECYCLE_MS = 35_000  # CONTAINER_LIFECYCLE_MS
+_EVAL_MAX_WALL_MS = 15 * 60_000   # EVAL_MAX_WALL_MS (DockerEvaluator.MAX_WALL_MS)
+# Réglages d'execution-service partagés par le .env commun (lus ici dans l'environnement du
+# script s'ils y sont, sinon leur défaut d'application.properties).
+_DEFAULT_QUEUE_WAIT_MS = 120_000          # EXEC_INTERNAL_QUEUE_WAIT_MS
+_DEFAULT_INTERPRETED_BUDGET_MS = 900_000  # EXEC_INTERPRETED_BUDGET_MS
+# Marge au-delà du pire cas modélisé : surestimer ne coûte que de l'attente.
+_READ_SAFETY_MS = 60_000
+
+
+def _env_ms(environ, name, default):
+    value = (environ.get(name) or "").strip()
+    return int(value) if value.isdigit() else default
+
+
+def read_timeout_s(environ):
+    """Délai d'attente de la réponse du noteur, en secondes. FONCTION PURE (testée).
+
+    Compilé : une attente de place interne, puis le mur du conteneur (15 min au plus) et son
+    cycle de vie. Interprété : le budget global du serveur, plus l'unité déjà partie quand il
+    expire (attente de place + temps limite + marge + mur exec + cycle de vie). Le script ne
+    rejoue ni SQL ni vues (deux unités de dépassement côté core)."""
+    queue = _env_ms(environ, "EXEC_INTERNAL_QUEUE_WAIT_MS", _DEFAULT_QUEUE_WAIT_MS)
+    budget = _env_ms(environ, "EXEC_INTERPRETED_BUDGET_MS", _DEFAULT_INTERPRETED_BUDGET_MS)
+    compiled = (_BASE_READ_MS + queue + _EVAL_MAX_WALL_MS + _RUN_MARGIN_MS
+                + _CONTAINER_LIFECYCLE_MS)
+    unit = (queue + max(_PER_TEST_MS, MAX_TIMEOUT_MS + _RUN_MARGIN_MS) + _EXEC_WALL_MS
+            + _CONTAINER_LIFECYCLE_MS)
+    interpreted = _BASE_READ_MS + budget + unit
+    return (max(compiled, interpreted) + _READ_SAFETY_MS) / 1000
+
 INVENTORY_SQL = """
 SELECT COALESCE(json_agg(row_to_json(t)), '[]') FROM (
   SELECT qz.id AS quiz_id, qz.title AS quiz_title, qz.is_published AS published,
@@ -238,7 +291,9 @@ def classify(detail, passed, start_code=""):
     if text.startswith((HARNESS_BUILD_ABORTED, TOOL_ABORTED)):
         # Compilation du noteur, inventaire javap ou sonde des noms réservés expirés ou tués
         # (machine chargée) : pas un diagnostic. Sur le chemin interne, ces cas arrivent déjà en
-        # 502 « sans verdict » (exception ci-dessous) ; le préfixe n'est qu'un filet.
+        # 502 « sans verdict » (exception ci-dessous) ; le préfixe n'est qu'un filet. Même
+        # verdict que le repli final aujourd'hui : la branche est EN TÊTE pour qu'aucune règle
+        # OK ou BLOQUANT ajoutée plus bas ne puisse s'appliquer à ces messages.
         return TO_CHECK
     if text.startswith(HARNESS_BUILD_ERROR):
         # BLOQUANT seulement sur un vrai diagnostic du compilateur, et pas quand le harnais
@@ -357,8 +412,9 @@ def evaluate(base_url, token, question):
     request = urllib.request.Request(
         base_url + "/internal/exec/evaluate", data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json", "X-Internal-Token": token}, method="POST")
-    # Une correction compilée peut tenir plusieurs minutes (compilations + attente d'une place).
-    with urllib.request.urlopen(request, timeout=900) as response:
+    # Une correction peut tenir une vingtaine de minutes (attente d'une place, compilations ou
+    # budget interprété) : cf. read_timeout_s.
+    with urllib.request.urlopen(request, timeout=read_timeout_s(os.environ)) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

@@ -283,9 +283,16 @@ describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
     );
     expect(screen.getByText('#2 · à revoir').getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(screen.getByText('#1 · 2/3'));
+    // Vers une tentative CORRIGÉE, au clavier : son corrigé est lu (chargement, barre démontée),
+    // puis le résumé monte une nouvelle barre ; le focus est rendu à la puce du même id.
+    const gradedChip = screen.getByText('#1 · 2/3');
+    gradedChip.focus();
+    fireEvent.click(gradedChip);
     await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
     expect(onFetchAttemptResult).toHaveBeenCalledWith(55, 8);
+    expect(gradedChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#1 · 2/3');
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
 
     // Et retour à la tentative à revoir depuis le résumé, au clavier : la puce activée
     // disparaît avec le résumé, le focus est rendu à la puce du même id dans la nouvelle barre.

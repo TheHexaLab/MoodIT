@@ -423,6 +423,20 @@ describe('QuestionFormBody', () => {
     expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(3000);
   });
 
+  it('code : la valeur enregistrée est bornée dès la saisie, sans attendre la sortie du champ', () => {
+    // « Ajouter » cliqué sans blur du champ : seul le bornage de la saisie (onChange) protège
+    // l'enregistrement d'un 75 s hors bornes.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel), { target: { value: '75' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(60_000);
+  });
+
   it('code : la frappe n’est pas réécrite en cours de saisie (bornage au blur)', () => {
     // Sans tampon texte, le clamp s'appliquait à CHAQUE frappe : taper « 75 » affichait « 7 »
     // puis « 60 », et l'utilisateur ne pouvait plus corriger sa saisie.

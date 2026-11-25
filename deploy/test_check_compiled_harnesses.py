@@ -8,6 +8,7 @@ Lancer : python3 deploy/test_check_compiled_harnesses.py
 
 import importlib.util
 import os
+import re
 import unittest
 from unittest import mock
 
@@ -45,7 +46,9 @@ class ClassifyTest(unittest.TestCase):
 
     def test_compilation_du_harnais_expiree_a_verifier(self):
         # Compilation du noteur expirée ou tuée sur une machine chargée : pas un diagnostic,
-        # jamais un quiz fermé par --unpublish.
+        # jamais un quiz fermé par --unpublish. Ce test garde le RÉSULTAT, pas la branche des
+        # préfixes : sans elle, le repli final rend aussi À VÉRIFIER (aucun détail ne peut les
+        # distinguer). Que les préfixes suivent le superviseur, c'est SupervisorDriftTest.
         detail = ("Le harnais n'a pas fini de compiler (temps limite de compilation dépassé ou "
                   "compilateur arrêté) : rejouer la correction.")
         self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f(int x) { return x; }"))
@@ -281,6 +284,36 @@ class ClassifyTest(unittest.TestCase):
         self.assertFalse(chk.harness_uses_start_code("JavaScript", "function f() {}", "$f(1)"))
         self.assertTrue(chk.harness_uses_start_code("JavaScript", "function f() {}", "f(1) === 2"))
 
+    def test_formes_de_declaration_reconnues_par_le_noteur(self):
+        # Revue #246 : formes que CodeAssembler lit (PY_DEF, BASH_FUNC, `\p{L}`) et que le script
+        # ratait — le nom imposé n'était pas vu, la question sortait À VÉRIFIER, et --unpublish
+        # fermait un quiz juste. Une forme par cas.
+        for language, start, name in (
+                # Python : fonction de premier niveau écrite en lambda.
+                ("Python", "max = lambda l: 0\n", "max"),
+                ("Python", "carre=lambda x: x * x\n", "carre"),
+                # Bash : `function f {`, sans parenthèses.
+                ("Bash", "function carre {\n  echo $(( $1 * $1 ))\n}\n", "carre"),
+                # Identifiants Unicode (première lettre accentuée) : Python, JS/TS, Bash.
+                ("Python", "def écart(a, b):\n    pass\n", "écart"),
+                ("Python", "class Élève:\n    pass\n", "Élève"),
+                ("JavaScript", "function écart(a, b) {}\n", "écart"),
+                ("TypeScript", "export const élève = (n: number) => n;\n", "élève"),
+                ("TypeScript", "class Élève {}\n", "Élève"),
+                ("Bash", "écart() { :; }\n", "écart"),
+                ("Bash", "function écart { :; }\n", "écart")):
+            with self.subTest(language=language, start=start):
+                self.assertEqual({name}, chk.declared_names(language, start))
+                question = {"language": language, "start_code": start,
+                            "cases": [{"id": 1, "name": "a", "harnessCode": name + "(1)",
+                                       "weight": 1}]}
+                with mock.patch.object(chk, "evaluate", return_value=[{"passed": True}]):
+                    self.assertEqual((chk.OK, []), chk.check_question("http://x", "t", question))
+        # Les formes déjà reconnues le restent, et un chiffre n'ouvre pas un nom.
+        self.assertEqual({"f", "g"}, chk.declared_names("Bash", "function f() { :; }\ng () { :; }"))
+        self.assertEqual({"_x"}, chk.declared_names("Python", "_x = lambda: 1\n1y = lambda: 2"))
+        self.assertEqual(set(), chk.declared_names("Python", "    f = lambda: 1\nlambdas = 3"))
+
     def test_harnais_qui_teste_une_exception_a_verifier(self):
         # Revue #246 : le rejeu du code de départ (qui ne lève rien) rend « faux » comme pour un
         # harnais normal, donc OK ; après la bascule, toute bonne réponse échoue.
@@ -371,6 +404,96 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(8085, chk.exec_port(["PATH=/usr/bin", ""]))
         self.assertEqual(8085, chk.exec_port(["EXEC_SERVICE_PORT="]))
         self.assertEqual(8085, chk.exec_port(["EXEC_SERVICE_PORT=abc", "AUTRE_EXEC_SERVICE_PORT=1"]))
+
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SUPERVISOR = os.path.join(_ROOT, "docker", "runners", "common", "supervisor.py")
+_CODE_ASSEMBLER = os.path.join(_ROOT, "execution-service", "src", "main", "java", "com", "moodit",
+                               "execution_service", "assembly", "CodeAssembler.java")
+
+
+class SupervisorDriftTest(unittest.TestCase):
+    """Les libellés que le script reconnaît sont COPIÉS du superviseur et de CodeAssembler : s'ils
+    y changent, le script ne les reconnaît plus, en silence (un harnais qui tourne sortirait À
+    VÉRIFIER, un « ne compile pas » ne serait plus BLOQUANT). Revue #246."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Chargé par importlib depuis son chemin (compatible `python -I`) : rien n'en est lancé,
+        # son main() n'est appelé que sous `__main__`.
+        spec = importlib.util.spec_from_file_location("moodit_supervisor", _SUPERVISOR)
+        cls.supervisor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.supervisor)
+        with open(_SUPERVISOR, encoding="utf-8") as f:
+            cls.supervisor_source = f.read()
+
+    def test_prefixes_egaux_a_ceux_du_superviseur(self):
+        for name in ("HARNESS_BUILD_ERROR", "HARNESS_BUILD_ABORTED", "TOOL_ABORTED"):
+            with self.subTest(name=name):
+                self.assertEqual(getattr(self.supervisor, name), getattr(chk, name))
+
+    def test_preuves_d_execution_ecrites_par_le_superviseur(self):
+        # Chaque préfixe de HARNESS_RAN ouvre un littéral du superviseur (message ou gabarit de
+        # noteur) : le guillemet devant interdit un simple fragment de phrase.
+        for prefix in chk.HARNESS_RAN:
+            with self.subTest(prefix=prefix):
+                self.assertIn('"' + prefix, self.supervisor_source)
+
+    def test_types_acceptes_ecrit_par_le_superviseur(self):
+        self.assertIn("(" + chk.NO_TRANSPORTABLE_SIGNATURE + " : ", self.supervisor_source)
+
+    def test_nom_reserve_egal_au_prefixe_de_code_assembler(self):
+        with open(_CODE_ASSEMBLER, encoding="utf-8") as f:
+            source = f.read()
+        prefixes = re.findall(r'\bSHADOW_PREFIX\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', source)
+        self.assertEqual([chk.RESERVED_NAME], prefixes)
+
+
+class ReadTimeoutTest(unittest.TestCase):
+    """Revue #246 : 900 s, plus court que le pire cas serveur — le script renonçait pendant une
+    correction en cours, et --unpublish fermait un quiz juste."""
+
+    def test_couvre_le_pire_cas_serveur(self):
+        # Interprété (défauts) : base 10 s + budget 900 s + l'unité déjà partie (attente 120 s +
+        # temps limite 60 s + marge 5 s + mur 75 s + cycle de vie 35 s) = 1 205 s.
+        self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 900 + 120 + 60 + 5 + 75 + 35)
+        # Compilé : base 10 s + attente 120 s + mur 900 s + marge 5 s + cycle de vie 35 s.
+        self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 120 + 900 + 5 + 35)
+
+    def test_suit_les_reglages_partages_du_serveur(self):
+        default = chk.read_timeout_s({})
+        self.assertGreaterEqual(chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "1800000"}),
+                                default + 900)
+        self.assertGreaterEqual(chk.read_timeout_s({"EXEC_INTERNAL_QUEUE_WAIT_MS": "300000"}),
+                                default + 180)
+        # Valeur vide ou illisible : le défaut du service.
+        self.assertEqual(default, chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "",
+                                                      "EXEC_INTERNAL_QUEUE_WAIT_MS": "abc"}))
+
+    def test_la_demande_attend_ce_delai(self):
+        seen = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"[]"
+
+        def urlopen(request, timeout):
+            seen["timeout"] = timeout
+            return Response()
+
+        question = {"language": "Java", "start_code": "class S {}", "cases": []}
+        with mock.patch.object(chk.urllib.request, "urlopen", urlopen), \
+                mock.patch.dict(chk.os.environ, {"EXEC_INTERPRETED_BUDGET_MS": "1800000"}):
+            chk.evaluate("http://x", "t", question)
+            expected = chk.read_timeout_s(chk.os.environ)
+        self.assertEqual(expected, seen["timeout"])
+        self.assertGreaterEqual(seen["timeout"], 10 + 1800 + 120 + 60 + 5 + 75 + 35)
 
 
 class CaseNameTest(unittest.TestCase):
