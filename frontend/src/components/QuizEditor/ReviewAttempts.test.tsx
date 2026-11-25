@@ -439,6 +439,26 @@ describe('ReviewAttemptsBody — focus et relance unique', () => {
     await screen.findByText(reviewT.empty);
     expect(document.activeElement).toBe(screen.getByText(reviewT.intro));
   });
+
+  it('DERNIÈRE ligne relancée alors qu\'il en reste au-dessus → focus sur la ligne du dessus', async () => {
+    render(
+      <ReviewAttemptsBody
+        quizId={7}
+        onFetch={async () => [EVA, BOB]}
+        onRegrade={vi.fn(async () => undefined)}
+        onRegraded={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+    const bob = await screen.findByLabelText(reviewT.regradeAria('Bob Test', 1));
+    const focused = await focusWhenShown(
+      () => fireEvent.click(bob),
+      () => screen.queryByText('Bob Test') == null
+    );
+    const eva = screen.getByLabelText(reviewT.regradeAria('Éva Test', 2));
+    expect(focused).toBe(eva);
+    expect(document.activeElement).toBe(eva);
+  });
 });
 
 describe('reviewAttemptsLabels', () => {

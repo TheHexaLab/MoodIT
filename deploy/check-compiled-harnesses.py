@@ -150,6 +150,14 @@ def harness_uses_start_code(language, start_code, harness):
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
 HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
 TOOL_ABORTED = "Un outil de la notation n'a pas abouti"
+# Signature d'un compilateur TUÉ sous son pilote (copie de TOOL_KILLED du superviseur) : gcc, g++
+# et `go build` survivent à la mort de leur travailleur (cc1, compile) et sortent en 1, comme pour
+# un vrai diagnostic. Un « Le harnais ne compile pas » qui la porte (superviseur antérieur à sa
+# reconnaissance, ou copie divergente) n'est pas une preuve contre le harnais.
+TOOL_KILLED = re.compile(
+    r"^(?:gcc|g\+\+|cc|c\+\+): fatal error: Killed signal terminated program [\w+.-]+$"
+    r"|^collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
+    r"|^[\w./-]+: /\S+/pkg/tool/\w+/(?:compile|link|asm): signal: killed$", re.M)
 NO_TRANSPORTABLE_SIGNATURE = "types acceptés"
 
 # Nom introuvable, d'après le diagnostic du compilateur de chaque langage compilé :
@@ -331,6 +339,10 @@ def classify(detail, passed, start_code=""):
         # --unpublish ne ferme un quiz que si la preuve est là.
         diagnostic = text.split("\n", 1)[1].strip() if "\n" in text else ""
         if not diagnostic or missing_from_start_code(diagnostic, start_code):
+            return TO_CHECK
+        # Compilateur TUÉ (OOM) sous gcc/g++/go build, qui sortent en 1 : pas un diagnostic, et
+        # --unpublish fermerait un quiz juste.
+        if TOOL_KILLED.search(diagnostic):
             return TO_CHECK
         return BLOCKING
     if NO_TRANSPORTABLE_SIGNATURE in text:

@@ -25,8 +25,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  *       corrections (la dernière reste à « Exécuter »/« Tester » ; une seule de ces places est
  *       hors d'atteinte des appels publics, cf. {@code ExecutionLimiter}) : moins laisse des places
  *       inutilisées, plus fait attendre des corrections dans la file d'execution-service jusqu'à
- *       leur abandon (tentative supprimée). Cœur = maximum, car un {@link ThreadPoolTaskExecutor} ne dépasse son cœur
- *       qu'une fois la file pleine.
+ *       leur abandon (tentative supprimée, sauf relance de l'enseignant ou plafond atteint, gardée « à revoir », cf. QuizService#failGrading).
+ *       Cœur = maximum, car un {@link ThreadPoolTaskExecutor} ne dépasse son cœur qu'une fois
+ *       la file pleine.
  * </ul>
  *
  * <p>Une tâche refusée (file pleine) n'est jamais perdue en silence : le listener abandonne alors la

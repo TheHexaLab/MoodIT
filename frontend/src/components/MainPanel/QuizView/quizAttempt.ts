@@ -218,8 +218,9 @@ export interface CodeEvaluationInput {
   /**
    * Code de départ de la question (#22) : une fonction qu'il déclare est celle que l'énoncé
    * impose, et peut porter le nom d'une intégrée (`sum`, `max`) sans être refusée comme « Nom
-   * réservé » — en Python, JavaScript, TypeScript et Bash seulement (CodeAssembler.notImposed,
-   * execution-service). En PHP et dans les six compilés, le refus vaut quel que soit ce code.
+   * réservé ». Il ne sert qu'en Python, JavaScript, TypeScript et Bash (CodeAssembler.notImposed,
+   * execution-service). Java, C, C++ et Go refusent un nom réservé quel que soit ce code
+   * (supervisor.py du runner) ; PHP, Rust et C# n'ont pas ce refus.
    */
   startCode?: string;
 }
@@ -273,7 +274,10 @@ export interface QuestionResult {
    * (`Question.startCode`), l'état `answer` ayant été réinitialisé au template au chargement.
    */
   submittedCode?: string;
-  /** Code : résultat par harnais. `null` si non évalué (ex. mode mock navigateur). */
+  /**
+   * Code : résultat par harnais. `null` faute de verdict : question sans harnais, ou aucun verdict
+   * enregistré pour les harnais actuels (harnais modifiés, question ajoutée après la tentative).
+   */
   tests?: CodingTestResult[] | null;
 }
 

@@ -340,8 +340,9 @@ export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTe
     language: input.language,
     code: input.code,
     timeoutMs: input.execTimeoutMs,
-    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare,
-    // en Python, JavaScript, TypeScript et Bash seulement (PHP et compilés : refus inchangé).
+    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare.
+    // Il ne sert qu'en Python/JS/TS/Bash ; Java, C, C++ et Go refusent quel que soit ce code ;
+    // PHP, Rust et C# n'ont pas ce refus.
     startCode: input.startCode,
     testCases: input.testCases.map((t) => ({
       name: t.name,

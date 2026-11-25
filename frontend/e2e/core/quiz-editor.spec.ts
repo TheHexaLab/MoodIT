@@ -121,8 +121,8 @@ test('créer un quiz avec les 6 types : publié visible chez l’étudiant, brou
   await page.getByRole('button', { name: 'Créer un quiz' }).click();
   await expect(page.getByRole('heading', { name: 'Nouveau quiz' })).toBeVisible();
 
-  // Titre et interrupteurs saisis APRÈS les questions : ils sont perdus au retour de l'éditeur de
-  // question (bogue couvert par le test « méta conservées » plus bas).
+  // Titre et interrupteurs saisis APRÈS les questions (ordre libre : ils survivent au retour de
+  // l'éditeur de question, cf. le test « les méta du quiz survivent à l'ajout d'une question »).
   await startQuestion(page, 'Vrai/Faux', 'Le ciel est bleu.', 1);
   await addButton(page).click();
 

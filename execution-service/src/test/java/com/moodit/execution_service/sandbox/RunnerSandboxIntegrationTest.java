@@ -110,7 +110,8 @@ class RunnerSandboxIntegrationTest {
         // Mémoire partagée System V : comptée dans le cgroup, mais hors des tmpfs bornés, et elle
         // SURVIT au processus qui l'a créée. Sans `kernel.shm_rmid_forced=1`, des segments jamais
         // détruits s'accumulaient jusqu'à l'OOM du cgroup, qui tuait le superviseur : conteneur
-        // mort sans JSON, donc une SandboxException ici (502, tentative rejouable à volonté).
+        // mort sans JSON, donc une SandboxException ici (en prod, un 502 « sans verdict » : compté
+        // par core et plafonné, puis tentative « à revoir », cf. S4).
         // Conteneur à 512 Mo pour que la sonde reste courte ; elle demande 800 Mo.
         DockerEvaluator small = new DockerEvaluator(
                 new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",
@@ -357,7 +358,8 @@ class RunnerSandboxIntegrationTest {
         // soumis ramenait son oom_score_adj au niveau du PID 1, puis tenait de la mémoire noyau
         // HORS de son RSS (memfd jamais projeté) ; l'OOM du cgroup tuait alors le plus lourd,
         // le superviseur — conteneur mort sans JSON (sortie 137 mesurée), donc une
-        // SandboxException ici, 502 et tentative rejouable en prod. Conteneur à 512 Mo ; la
+        // SandboxException ici (en prod, 502 « sans verdict », compté et plafonné par core).
+        // Conteneur à 512 Mo ; la
         // sonde demande 2 Go.
         DockerEvaluator small = new DockerEvaluator(
                 new DockerSandbox("", 512, 512, 2.0), "moodit-runner-",

@@ -3899,7 +3899,12 @@ class OomAndLockIsolationTest(unittest.TestCase):
             raise OSError("lancement simulé")
 
         marks = []
-        with tempfile.TemporaryDirectory() as d,                 unittest.mock.patch.object(supervisor.subprocess, "Popen", fake_popen),                 unittest.mock.patch.object(supervisor, "event", lambda *a, **k: None),                 unittest.mock.patch.object(supervisor, "EXIT_STATE", supervisor.ExitState()),                 unittest.mock.patch.object(supervisor, "demote_grader", lambda: None),                 unittest.mock.patch.object(supervisor, "demote_student", lambda: None):
+        with tempfile.TemporaryDirectory() as d, \
+                unittest.mock.patch.object(supervisor.subprocess, "Popen", fake_popen), \
+                unittest.mock.patch.object(supervisor, "event", lambda *a, **k: None), \
+                unittest.mock.patch.object(supervisor, "EXIT_STATE", supervisor.ExitState()), \
+                unittest.mock.patch.object(supervisor, "demote_grader", lambda: None), \
+                unittest.mock.patch.object(supervisor, "demote_student", lambda: None):
             supervisor.run_proc(["true"], d, {}, 1, os.path.join(d, "o"), os.path.join(d, "e"),
                                 None)
             supervisor.run_pair(["g"], ["s"], d, {}, {}, 1, os.path.join(d, "ge"),
@@ -4131,6 +4136,32 @@ class StudentBuildMemoTest(unittest.TestCase):
                 self.assertEqual(state.killed_by_signal, killed)
                 self.assertEqual([e["type"] for e in supervisor.EVENTS],
                                  ["echec_compilation_rejoue"])
+
+    def test_worker_killed_under_a_surviving_driver_is_inconclusive(self):
+        # gcc → cc1 et go build → compile : l'OOM tue le TRAVAILLEUR, le pilote survit et sort
+        # en 1, comme pour un vrai diagnostic. Seul le compteur d'OOM du cgroup le dit (le stderr
+        # est celui du code soumis, qui peut en imprimer la signature) : la compilation devient
+        # non concluante — rejouée une fois constatée deux fois, cause marquée « tuée ».
+        killed_stderr = "gcc: fatal error: Killed signal terminated program cc1\ncompilation terminated.\n"
+        counter = iter(range(100))
+        calls, run = self.fake_run((1, False), err_text=killed_stderr)
+        with unittest.mock.patch.object(supervisor, "run_proc", run), \
+                unittest.mock.patch.object(supervisor, "oom_kills", lambda: next(counter)):
+            for index in (1, 2, 3):
+                self.assertEqual(self.compile(*self.case(index)), (1, False))
+                self.assertTrue(supervisor.EXIT_STATE.killed_by_signal)
+        self.assertEqual(len(calls), 2)
+        # La MÊME signature sans OOM du conteneur (forgée par le code soumis, cf. tool_killed) :
+        # un échec ordinaire, concluant, rejoué dès le 2e cas.
+        self.reset()
+        calls, run = self.fake_run((1, False), err_text=killed_stderr)
+        with unittest.mock.patch.object(supervisor, "run_proc", run), \
+                unittest.mock.patch.object(supervisor, "oom_kills", lambda: 4):
+            for index in (1, 2, 3):
+                self.assertEqual(self.compile(*self.case(index)), (1, False))
+                self.assertFalse(supervisor.EXIT_STATE.killed_by_signal)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("tool_killed(", inspect.getsource(supervisor.compile_student))
 
     def test_success_is_replayed_by_copying_the_artifact(self):
         for as_dir, products in ((False, {"": b"\x7fELF binaire"}),
@@ -4733,8 +4764,12 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertFalse(issue.passed)
         self.assertEqual("interrompu", issue.cause)
         self.assertTrue(supervisor.grading_incomplete([issue]))
-        # L'inventaire javap expiré porte le même préfixe.
-        self.assertIn("TOOL_ABORTED +", inspect.getsource(supervisor.run_java_rpc))
+        # L'inventaire javap expiré ou tué : son message (javap_aborted_message) commence par le
+        # préfixe TOOL_ABORTED, donc le cas est interrompu et non noté 0.
+        javap = supervisor.javap_aborted_message("Solution")
+        self.assertTrue(supervisor.platform_aborted(javap))
+        self.assertIn("javap", javap)
+        self.assertIn("Solution", javap)
 
     def test_expired_reserved_name_probe_interrupts_instead_of_refusing(self):
         # Une sonde EXPIRÉE ne dit rien du nom : elle était comptée comme un refus (« nom
@@ -4776,10 +4811,14 @@ class PlatformInterruptionTest(unittest.TestCase):
     def test_killed_javap_is_interrupted_not_graded(self):
         # javap TUÉ par un signal (code < 0) : seul `expired` était testé, et le cas tombait sur
         # « Aucune méthode statique ni objet exploitable » — un 0 qui accuse la réponse.
+        # Le message rendu est javap_aborted_message (préfixe TOOL_ABORTED, vérifié par
+        # test_tool_aborted_exception_interrupts_the_case), juste après la condition.
         source = inspect.getsource(supervisor.run_java_rpc)
         inventory = source[source.index('["javap"'):]
-        message = inventory.index("l'inventaire des méthodes")
-        self.assertLess(inventory.index("expired or (code is not None and code < 0)"), message)
+        condition = inventory.index("expired or (code is not None and code < 0)")
+        message = inventory.index("return None, javap_aborted_message(klass)")
+        self.assertLess(condition, message)
+        self.assertEqual("", inventory[condition:message].split(":", 1)[1].strip())
         self.assertLess(message, inventory.index("Aucune méthode statique ni objet exploitable"))
 
     def test_java_rpc_server_compile_abort_is_interrupted(self):
@@ -4790,6 +4829,73 @@ class PlatformInterruptionTest(unittest.TestCase):
         abort = server.index("TOOL_ABORTED")
         self.assertLess(server.index("expired or (code is not None and code < 0)"), abort)
         self.assertLess(abort, server.index('"Erreur interne du noteur (serveur RPC)"'))
+
+    # Stderr RÉELS, relevés dans les images (travailleur tué par SIGKILL, puis par l'OOM d'un
+    # conteneur à 150 Mo) : le pilote survit et sort en 1.
+    GCC_KILLED = "gcc: fatal error: Killed signal terminated program cc1\ncompilation terminated.\n"
+    GXX_KILLED = "g++: fatal error: Killed signal terminated program cc1plus\ncompilation terminated.\n"
+    AS_KILLED = "gcc: fatal error: Killed signal terminated program as\ncompilation terminated.\n"
+    GO_KILLED = "runtime: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed\n"
+
+    def test_tool_killed_reads_the_driver_signature(self):
+        for stderr in (self.GCC_KILLED, self.GXX_KILLED, self.AS_KILLED, self.GO_KILLED,
+                       "# moodit_noteur\nmoodit_noteur: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed\n",
+                       "collect2: fatal error: ld terminated with signal 9 [Killed]\ncompilation terminated.\n"):
+            with self.subTest(stderr=stderr):
+                self.assertTrue(supervisor.tool_killed(1, stderr))
+        self.assertTrue(supervisor.tool_killed(-9, ""))
+        for stderr in ("noteur.c:3:1: error: expected ';' before '}' token\n",
+                       "./noteur.go:4:2: undefined: Aire\n",
+                       # La signature au milieu d'une ligne n'est pas celle du pilote.
+                       "x.c:1:2: error: #error gcc: fatal error: Killed signal terminated program cc1\n",
+                       "Killed signal terminated program cc1\n", ""):
+            with self.subTest(stderr=stderr):
+                self.assertFalse(supervisor.tool_killed(1, stderr))
+
+    def test_killed_worker_aborts_the_grader_build(self):
+        # Noteur C/C++/Go : sortie 1 et stderr du pilote — c'était « Le harnais ne compile pas »,
+        # un 0 définitif, et le script de rejeu en faisait un BLOQUANT (--unpublish).
+        for stderr in (self.GCC_KILLED, self.GXX_KILLED, self.GO_KILLED):
+            with self.subTest(stderr=stderr):
+                detail = supervisor.harness_build_failure(False, 1, "contre le code soumis", stderr)
+                self.assertTrue(detail.startswith(supervisor.HARNESS_BUILD_ABORTED))
+                self.assertTrue(supervisor.platform_aborted(detail))
+        # Le stderr ENTIER est lu : la signature vient en dernier, après d'éventuels
+        # avertissements ; le message, lui, reste tronqué.
+        long_stderr = "noteur.c:1:1: warning: x\n" * 200 + self.GCC_KILLED
+        self.assertTrue(supervisor.harness_build_failure(
+            False, 1, "contre le code soumis", long_stderr).startswith(supervisor.HARNESS_BUILD_ABORTED))
+        error = supervisor.harness_build_failure(False, 1, "contre le code soumis",
+                                                 "noteur.c:3:1: error: y\n" * 200)
+        self.assertTrue(error.startswith(supervisor.HARNESS_BUILD_ERROR))
+        self.assertLessEqual(len(error), 1_600)
+
+    def test_killed_probe_worker_interrupts_instead_of_refusing(self):
+        # cc1 tué sous la sonde : g++ sort en 1, que la sonde lisait « le nom ne compile pas ».
+        def run(stderr):
+            def fake(cmd, cwd, env, timeout_s, out_path, err_path, *rest, **kwargs):
+                with open(err_path, "w", encoding="utf-8", newline="") as f:
+                    f.write(stderr)
+                return 1, False
+            return fake
+        with unittest.mock.patch.object(supervisor, "run_proc", run(self.GXX_KILLED)):
+            with self.assertRaises(supervisor.ToolAborted):
+                supervisor.c_reserved_names(["valeur"], "g++", "-std=c++20", self.directory, {})
+        with unittest.mock.patch.object(supervisor, "run_proc",
+                                        run("sonde.cpp:5:5: error: 'int valeur' redeclared\n")):
+            self.assertEqual(["valeur"], supervisor.c_reserved_names(
+                ["valeur"], "g++", "-std=c++20", self.directory, {}))
+
+    def test_oom_kill_counter(self):
+        path = os.path.join(self.directory, "memory.events")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("low 0\nhigh 0\nmax 28\noom 1\noom_kill 3\noom_group_kill 0\n")
+        self.assertEqual(3, supervisor.oom_kills(path))
+        self.assertIsNone(supervisor.oom_kills(os.path.join(self.directory, "absent")))
+        self.assertTrue(supervisor.oom_killed_during(0, 1))
+        self.assertFalse(supervisor.oom_killed_during(1, 1))
+        self.assertFalse(supervisor.oom_killed_during(None, 1))
+        self.assertFalse(supervisor.oom_killed_during(1, None))
 
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes

@@ -88,8 +88,8 @@ public class QuizService {
 
     /**
      * Au moins 1, vérifié au démarrage : 0 ne DÉSACTIVE pas le plafond, il le rend toujours
-     * atteint — toute tentative en échec, panne de la sandbox comprise, serait gardée « à revoir »
-     * au lieu d'être resoumise par l'étudiant (revue #246).
+     * atteint — toute tentative en échec SANS VERDICT, et toute panne sur un quiz sans reprise,
+     * serait gardée « à revoir » au lieu d'être resoumise par l'étudiant (revue #246).
      */
     @Value("${app.quiz.grading.max-no-verdict-failures:3}")
     void setMaxNoVerdictFailures(int maxNoVerdictFailures) {

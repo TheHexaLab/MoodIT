@@ -623,6 +623,13 @@ class ExecutionServiceTest {
             assertThat(results.get(0).detail()).contains("caractère de contrôle ou invisible")
                     .doesNotContain(String.valueOf(control));
         }
+        // Nom à la fois TROP LONG et porteur d'un caractère invisible : le diagnostic du caractère
+        // passe AVANT celui de la longueur, qui citerait le préfixe, caractère compris.
+        String longAndControl = "A" + control + "B".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES);
+        List<TestResult> both = routed.evaluate(oneTest("Java",
+                "public class " + longAndControl + " { static int f() { return 1; } }", "return true;"));
+        assertThat(both.get(0).detail()).contains("caractère de contrôle ou invisible")
+                .doesNotContain("trop long").doesNotContain(String.valueOf(control));
         List<TestResult> nul = routed.evaluate(oneTest("Java",
                 "public class A" + (char) 0 + "B { static int f() { return 1; } }", "return true;"));
         assertThat(nul.get(0).passed()).isFalse();

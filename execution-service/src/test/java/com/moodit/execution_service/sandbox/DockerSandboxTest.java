@@ -733,8 +733,8 @@ class DockerSandboxTest {
                 // Plancher oom_score_adj relevé : le code soumis ne peut plus redescendre son
                 // 1000 au niveau du superviseur (cf. mark_oom_victim, supervisor.py).
                 com.github.dockerjava.api.model.Capability.SYS_RESOURCE);
-        // Superviseur (PID 1) jamais tué par l'OOM : sinon conteneur mort sans JSON, 502 et
-        // tentative rejouable. Doublé par un cas d'intégration (RunnerSandboxIntegrationTest).
+        // Superviseur (PID 1) jamais tué par l'OOM : sinon conteneur mort sans JSON, 502 « sans
+        // verdict » (compté et plafonné par core, cf. S4). Doublé par un cas d'intégration (RunnerSandboxIntegrationTest).
         assertThat(hostConfig.getOomScoreAdj()).isEqualTo(-1000);
         // SYS_PTRACE n'est PLUS accordée : elle servait à tracer le code soumis pour détecter une
         // lecture du harnais, et le harnais n'entre plus dans rien qu'il puisse atteindre. Un

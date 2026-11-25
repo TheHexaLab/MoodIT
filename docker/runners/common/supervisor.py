@@ -852,17 +852,46 @@ STUDENT_ARTIFACT_CAP = 64 * 1024 * 1024
 # DockerSandbox.BOX_INODES côté execution-service (une classe Java par fichier ; une solution
 # honnête en a quelques-unes).
 STUDENT_ARTIFACT_MAX_FILES = 256
-# Un échec NON CONCLUANT (délai dépassé, compilateur tué par signal) peut venir de l'hôte — une
-# machine chargée, le cache de Go encore froid à la première compilation — et non des entrées :
-# il n'est rejoué qu'une fois constaté DEUX fois. Un échec du compilateur l'est dès la première.
+# Un échec NON CONCLUANT (délai dépassé, compilateur tué — par un signal, ou son travailleur cc1
+# ou compile tué par l'OOM du conteneur sous un pilote qui sort en 1, cf. compile_student) peut
+# venir de l'hôte — une machine chargée, le cache de Go encore froid à la première compilation —
+# et non des entrées : il n'est rejoué qu'une fois constaté DEUX fois. Un échec du compilateur
+# l'est dès la première.
 INCONCLUSIVE_REPLAY_AFTER = 2
+
+
+# Événements mémoire du cgroup du CONTENEUR (cgroup v2, espace de noms privé, le défaut de
+# Docker) : `oom_kill` y compte les processus tués par l'OOM du conteneur. Absent ou illisible
+# (autre configuration) : aucune détection de plus, le comportement d'avant.
+CGROUP_MEMORY_EVENTS = "/sys/fs/cgroup/memory.events"
+
+
+def oom_kills(path=CGROUP_MEMORY_EVENTS):
+    """Compteur `oom_kill` du cgroup du conteneur, ou None s'il est illisible. Testée."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 2 and parts[0] == "oom_kill" and parts[1].isdigit():
+                    return int(parts[1])
+    except OSError:
+        return None
+    return None
+
+
+def oom_killed_during(before, after):
+    """L'OOM du conteneur a-t-il tué un processus entre deux relevés ? PURE (testée)."""
+    return before is not None and after is not None and after > before
 
 
 class StudentBuild:
     """Résultat d'une compilation étudiante, tel qu'il sera rejoué."""
 
-    def __init__(self, code, expired, out_text, err_text, artifact=None):
+    def __init__(self, code, expired, out_text, err_text, artifact=None, killed=False):
         self.code, self.expired = code, expired
+        # Tuée : par un signal (code < 0), ou son travailleur (cc1, compile…) tué par l'OOM du
+        # conteneur pendant qu'elle tournait, sous un pilote qui sort en 1 (cf. compile_student).
+        self.killed = killed or (code is not None and code < 0)
         self.out_text, self.err_text = out_text, err_text
         self.artifact = artifact          # (chemin dans STUDENT_BUILD_CACHE, dossier ?)
         self.occurrences = 1
@@ -871,7 +900,7 @@ class StudentBuild:
         return self.code == 0 and not self.expired
 
     def inconclusive(self):
-        return self.expired or (self.code is not None and self.code < 0)
+        return self.expired or self.killed
 
     def replayable(self):
         if self.succeeded():
@@ -1070,16 +1099,27 @@ def compile_student(cmd, cwd, env, case_dir, inputs, out_path, err_path, artifac
             replay_output(err_path, known.err_text)
             if known.expired:
                 EXIT_STATE.expired = True
-            if known.code is not None and known.code < 0:
+            if known.killed:
                 EXIT_STATE.killed_by_signal = True
             event("compilation_rejouee" if known.succeeded() else "echec_compilation_rejoue",
                   case=EXIT_STATE.case)
             return known.code, known.expired
+    # Travailleur tué sous un pilote qui survit (gcc → cc1, go build → compile : sortie 1, comme
+    # un vrai diagnostic). Le stderr du compilateur est ici celui du CODE SOUMIS, qui peut en
+    # imprimer la signature (cf. tool_killed) : le seul indice est le compteur d'OOM du cgroup,
+    # qu'il ne fait monter qu'en épuisant VRAIMENT la mémoire — cause non concluante de toute
+    # façon. Seule la compilation tourne pendant ce relevé (le superviseur l'attend).
+    oom_before = oom_kills()
     code, expired = run_proc(cmd, cwd, env, COMPILE_TIMEOUT_S, out_path, err_path,
                              preexec_student_compile)
+    killed = (code is not None and code != 0 and not expired
+              and oom_killed_during(oom_before, oom_kills()))
+    if killed:
+        EXIT_STATE.killed_by_signal = True
     if EXIT_STATE.lost:
         return code, expired
-    build = StudentBuild(code, expired, read_capped(out_path), read_capped(err_path))
+    build = StudentBuild(code, expired, read_capped(out_path), read_capped(err_path),
+                         killed=killed)
     if build.succeeded():
         build.artifact = (known.artifact if known is not None and known.succeeded()
                           else save_artifact(artifact, key))
@@ -1459,8 +1499,9 @@ class CaseOutcome:
         # soumis, et seules à rendre le job « incomplet » (cf. grading_incomplete) :
         #   "erreur"       exception de LOGIQUE du superviseur pendant le cas (sauté) ;
         #   "interrompu"   la plateforme l'a interrompu sans verdict : compilation du noteur ou
-        #                  outil expirés ou tués (cf. platform_aborted) — jamais provocable par
-        #                  le code soumis, qui est refusé en amont par des bornes (cf. plus bas).
+        #                  outil expirés ou tués — par un signal, ou leur travailleur sous un
+        #                  pilote qui sort en 1 (cf. tool_killed, platform_aborted) — jamais
+        #                  provocable par le code soumis, refusé en amont par des bornes.
         # IMPUTABLES (le cas est noté, en échec ; un canari ainsi sauté n'accuse pas) :
         #   "budget"       budget global de la notation épuisé avant le cas (sauté) ;
         #   "espace"       /box saturé avant le cas, par le code soumis (sauté) ;
@@ -1563,19 +1604,52 @@ def grading_incomplete(real_cases):
 HARNESS_BUILD_ERROR = "Le harnais ne compile pas"
 # Compilation du noteur EXPIRÉE ou TUÉE (temps limite, mémoire) : rien ne prouve que le harnais
 # est faux. Préfixe distinct pour que deploy/check-compiled-harnesses.py ne ferme pas un quiz
-# correct sur une machine chargée ; même drapeau harness_build (cause non concluante).
+# correct sur une machine chargée ; même drapeau harness_build (cause non concluante). « Tuée »
+# au sens de tool_killed : par un signal, ou son processus de TRAVAIL tué sous un pilote qui, lui,
+# survit et sort en 1.
 HARNESS_BUILD_ABORTED = "Le harnais n'a pas fini de compiler"
+
+# Signature, en ligne ENTIÈRE, d'un pilote de compilation dont le processus de travail a été tué
+# par un signal (OOM du cgroup ou de l'hôte : les outils sont à oom_score_adj 500, et le plus
+# gros processus est le travailleur, pas le pilote). gcc, g++ et `go build` SURVIVENT et sortent
+# en 1, exactement comme pour un vrai diagnostic : `code < 0` ne les voyait pas. Relevé dans les
+# images (travailleur tué par SIGKILL, puis par l'OOM d'un conteneur à 150 Mo) :
+#   gcc: fatal error: Killed signal terminated program cc1        (aussi g++/cc1plus, gcc/as)
+#   runtime: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed     (go build, sortie 1)
+# et, d'après le format de gcc (éditeur de liens trop rapide pour être tué à la main) :
+#   collect2: fatal error: ld terminated with signal 9 [Killed]
+# rustc, javac (JVM) et mcs (mono) sont eux-mêmes le processus tué : `code < 0` suffit.
+TOOL_KILLED = re.compile(
+    r"^(?:gcc|g\+\+|cc|c\+\+): fatal error: Killed signal terminated program [\w+.-]+$"
+    r"|^collect2: fatal error: [\w+.-]+ terminated with signal 9 \[Killed\]$"
+    r"|^[\w./-]+: /\S+/pkg/tool/\w+/(?:compile|link|asm): signal: killed$", re.M)
+
+
+def tool_killed(code, err_text):
+    """L'outil a-t-il été TUÉ (et non : a-t-il rendu un diagnostic) ? FONCTION PURE (testée).
+
+    Vrai si le code de sortie dit un signal, ou si le stderr porte la signature d'un pilote dont
+    le travailleur a été tué (TOOL_KILLED). À n'employer QUE sur un stderr que le code soumis ne
+    contrôle pas : la sonde des noms réservés (en-têtes et identifiants), le noteur (bouchons
+    générés et harnais du prof). Le compilateur du CODE SOUMIS, lui, imprime ce que le code lui
+    fait imprimer : `#line 1 "x"` puis `#pragma GCC error "\ngcc: fatal error: Killed signal
+    terminated program cc1\ncompilation terminated."` reproduit la signature à la lettre (vérifié
+    dans moodit-runner-c). Pour lui, cf. compile_student (compteur d'OOM du cgroup)."""
+    return (code is not None and code < 0) or bool(TOOL_KILLED.search(err_text or ""))
 
 
 def harness_build_failure(expired, code, against, diagnostic):
     """Message d'échec de compilation du NOTEUR. FONCTION PURE (testée).
 
-    Une compilation expirée ou tuée par signal (code < 0) n'est pas un diagnostic du
-    compilateur : elle reçoit HARNESS_BUILD_ABORTED, jamais HARNESS_BUILD_ERROR."""
-    if expired or (code is not None and code < 0):
+    `diagnostic` : le stderr ENTIER du compilateur du noteur (tête et queue, cf. read_capped) ;
+    le message n'en garde que 1 500 caractères. Une compilation expirée, ou TUÉE (tool_killed :
+    par un signal, ou son travailleur sous gcc/g++/go build) n'est pas un diagnostic du
+    compilateur : elle reçoit HARNESS_BUILD_ABORTED, jamais HARNESS_BUILD_ERROR. Le stderr du
+    noteur ne vient pas du code soumis : la signature ne peut pas y être forgée."""
+    if expired or tool_killed(code, diagnostic):
         return (HARNESS_BUILD_ABORTED + " (temps limite de compilation dépassé ou compilateur "
                 "arrêté) : rejouer la correction.")
-    return HARNESS_BUILD_ERROR + " " + against + " :\n" + diagnostic
+    return HARNESS_BUILD_ERROR + " " + against + " :\n" + (diagnostic or "")[:1500]
 
 
 # Début du message d'un OUTIL de la notation qui n'a pas abouti dans son délai (inventaire javap,
@@ -1591,8 +1665,9 @@ class ToolAborted(Exception):
 def platform_aborted(detail):
     """Le cas a-t-il été INTERROMPU par la plateforme, sans verdict ? FONCTION PURE (testée).
 
-    Compilation du NOTEUR expirée ou tuée (HARNESS_BUILD_ABORTED), outil de la notation expiré
-    (TOOL_ABORTED) : le message vient de NOUS, en tête (un diagnostic du compilateur ne vient
+    Compilation du NOTEUR expirée ou tuée (HARNESS_BUILD_ABORTED ; tuée au sens de tool_killed :
+    par un signal, ou cc1/compile tué sous gcc/go build qui sortent en 1), outil de la notation
+    expiré ou tué (TOOL_ABORTED) : le message vient de NOUS, en tête (un diagnostic du compilateur ne vient
     qu'après « Échec de compilation : »). Ce n'est pas une note : sur le chemin interne, le job
     est « incomplet » (cf. grading_incomplete) et la tentative est à reprendre — un 0 définitif
     ne pouvait être rejoué par personne. Le « Tester » du prof garde le message.
@@ -4474,12 +4549,13 @@ def c_reserved_names(names, compiler, std, case_dir, env):
                                      case_dir, env, remaining,
                                      os.path.join(case_dir, "sonde.out"),
                                      os.path.join(case_dir, "sonde.err"), preexec_compile)
-        # Expirée OU TUÉE par un signal (OOM du cgroup ou de l'hôte : les outils sont à
-        # oom_score_adj 500) : une sonde morte ne dit rien du nom, et un code < 0 lu comme
-        # « ne compile pas » refusait un nom innocent. Non provocable par le code soumis : la
-        # sonde ne porte que les noms que le HARNAIS emploie, dans un fichier d'en-têtes
-        # (0,2 s et 50 Mo mesurés, 1 CPU, 1 Go).
-        if expired or (code is not None and code < 0):
+        # Expirée OU TUÉE (OOM du cgroup ou de l'hôte : les outils sont à oom_score_adj 500)
+        # — par un signal, ou cc1/cc1plus tué sous le pilote gcc/g++, qui sort alors en 1 comme
+        # pour un vrai refus (tool_killed) : une sonde morte ne dit rien du nom, et la lire
+        # comme « ne compile pas » refusait un nom innocent. Non provocable par le code soumis,
+        # et la signature n'y est pas forgeable : la sonde ne porte que des en-têtes et les
+        # identifiants (\w+) que le HARNAIS emploie (0,2 s et 50 Mo mesurés, 1 CPU, 1 Go).
+        if expired or tool_killed(code, read_capped(os.path.join(case_dir, "sonde.err"))):
             raise ToolAborted(
                 TOOL_ABORTED + " : la vérification des noms réservés (compilateur) a dépassé "
                 "%d s ou a été arrêtée (machine de correction chargée). Le code soumis n'est pas "
@@ -6414,6 +6490,14 @@ def run_pair(grader_cmd, student_cmd, cwd, g_env, s_env, timeout_s, g_err_path, 
 JAVA_MAX_CLASSES = STUDENT_ARTIFACT_MAX_FILES
 
 
+def javap_aborted_message(klass):
+    """Message d'un inventaire javap expiré ou tué : commence par TOOL_ABORTED, pour que le cas
+    soit INTERROMPU (cf. platform_aborted) et non noté 0. FONCTION PURE (testée)."""
+    return (TOOL_ABORTED + " : l'inventaire des méthodes de la classe " + klass + " (javap) a "
+            "dépassé " + str(LIST_TIMEOUT_S) + " s ou a été arrêté (machine de correction "
+            "chargée). Le code soumis n'est pas en cause : la correction est à rejouer.")
+
+
 def java_class_count_refusal(count):
     """Message de refus si la compilation du code soumis a produit plus de JAVA_MAX_CLASSES
     classes, sinon None. FONCTION PURE (testée). Ne dépend que du code soumis : canaris et cas
@@ -6507,10 +6591,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     # réponse. Non provocable : au plus JAVA_MAX_CLASSES classes, javap 1,1 s et 59 Mo à 256
     # classes (1 CPU, 1 Go).
     if expired or (code is not None and code < 0):
-        return None, (TOOL_ABORTED + " : l'inventaire des méthodes de la classe " + klass
-                      + " (javap) a dépassé " + str(LIST_TIMEOUT_S) + " s ou a été arrêté "
-                      "(machine de correction chargée). Le code soumis n'est pas en cause : la "
-                      "correction est à rejouer.")
+        return None, javap_aborted_message(klass)
     # Plafond LARGE : une signature par ligne, et la troncature « tête + queue » de read_capped
     # retirait celles du milieu dès 64 Kio — méthodes absentes du bouchon, harnais qui ne
     # compile plus. La taille reste bornée par les classes que javac vient d'accepter.
@@ -6590,7 +6671,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
                             preexec_compile)
     if expired or code != 0:
         return None, harness_build_failure(expired, code, "contre la signature du code soumis",
-                                           read_capped(os.path.join(case_dir, "nc.err"))[:1500])
+                                           read_capped(os.path.join(case_dir, "nc.err")))
 
     # 4. Le serveur de l'étudiant, compilé AVEC ses classes.
     with open(os.path.join(student_src, "MooditServer.java"), "w", encoding="utf-8") as f:
@@ -6722,11 +6803,12 @@ def run_csharp_rpc(case_dir, env, timeout_s, case_index):
         else:
             code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
-            detail = (read_capped(os.path.join(case_dir, "cc.err"))
-                      or read_capped(os.path.join(case_dir, "cc.out")))[:1500]
+            stderr_text = (read_capped(os.path.join(case_dir, "cc.err"))
+                           or read_capped(os.path.join(case_dir, "cc.out")))
             if label == "harnais":
-                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
-            return None, "Échec de compilation :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis",
+                                                   stderr_text)
+            return None, "Échec de compilation :\n" + stderr_text[:1500]
     set_owner_mode(student_copy, STUDENT_UID, STUDENT_GID, 0o600)   # dans SON chantier
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin,
@@ -6782,10 +6864,11 @@ def run_rust_rpc(case_dir, env, timeout_s, case_index):
         else:
             code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
-            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            stderr_text = read_capped(os.path.join(case_dir, "cc.err"))
             if label == "harnais":
-                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
-            return None, "Échec de compilation :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis",
+                                                   stderr_text)
+            return None, "Échec de compilation :\n" + stderr_text[:1500]
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin)
 
@@ -7048,10 +7131,11 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         else:
             code, expired = run_proc(cmd, cwd_c, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
-            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            stderr_text = read_capped(os.path.join(case_dir, "cc.err"))
             if label == "harnais":
-                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
-            return None, "Échec de compilation :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis",
+                                                   stderr_text)
+            return None, "Échec de compilation :\n" + stderr_text[:1500]
         if label == "code soumis":
             # Symboles de la libc redéfinis par le code soumis, lus sur le BINAIRE (cf.
             # c_binary_linked_symbols). nm tourne sous l'UID étudiant, comme la compilation.
@@ -7151,10 +7235,11 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
         else:
             code, expired = run_proc(cmd, directory, env_c, COMPILE_TIMEOUT_S, *outputs, preexec_c)
         if expired or code != 0:
-            detail = read_capped(os.path.join(case_dir, "cc.err"))[:1500]
+            stderr_text = read_capped(os.path.join(case_dir, "cc.err"))
             if label == "harnais":
-                return None, harness_build_failure(expired, code, "contre le code soumis", detail)
-            return None, "Échec de compilation :\n" + detail
+                return None, harness_build_failure(expired, code, "contre le code soumis",
+                                                   stderr_text)
+            return None, "Échec de compilation :\n" + stderr_text[:1500]
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src_dir, grader_bin, student_mod, student_bin)

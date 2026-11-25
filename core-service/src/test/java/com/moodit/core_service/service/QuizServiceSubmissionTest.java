@@ -876,7 +876,12 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         @Test
         @DisplayName("Liste : nom de l'étudiant, date en UTC, nombre d'échecs sans verdict")
         void listsAttemptsToReview() {
-            Attempt undated = attempt(82, quiz, user(5, "bob@test.ca"), 1, QuizService.REVIEW);
+            // Un autre étudiant, au prénom ET au nom distincts : chaque ligne porte le nom de
+            // l'auteur de SA tentative, pas celui d'un autre.
+            User bob = user(5, "bob@test.ca");
+            bob.setFirstName("Bob");
+            bob.setLastName("Martin");
+            Attempt undated = attempt(82, quiz, bob, 1, QuizService.REVIEW);
             when(attemptRepository.findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(4, QuizService.REVIEW))
                     .thenReturn(List.of(review, undated));
             GradingFailure failure = new GradingFailure();
@@ -886,7 +891,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
             assertThat(service.getAttemptsToReview(4)).containsExactly(
                     new ReviewAttemptDTO(81, 2, "Éva Test", Instant.parse("2026-09-02T08:30:00Z"), 3),
-                    new ReviewAttemptDTO(82, 1, "Éva Test", null, 0));
+                    new ReviewAttemptDTO(82, 1, "Bob Martin", null, 0));
         }
 
         @Test

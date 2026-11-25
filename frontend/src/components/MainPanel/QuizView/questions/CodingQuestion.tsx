@@ -20,8 +20,8 @@ const NO_STANDALONE_RUN = new Set(['sql', 'html', 'jsx', 'tsx']);
  * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
  * gouttière, coloration syntaxique, auto-indentation…), pré-rempli avec `start_code`.
  * La vraie exécution des harnais est SERVEUR ; en révision, l'éditeur passe en lecture
- * seule et `result.tests` liste le verdict par cas (✓/✗) ou `null` si non évalué
- * (mode mock, le code ne tourne pas dans le navigateur).
+ * seule et `result.tests` liste le verdict par cas (✓/✗), ou vaut `null` faute de verdict
+ * (question sans harnais, ou aucun verdict enregistré pour les harnais actuels).
  */
 export function CodingQuestion({
   question,
@@ -81,9 +81,10 @@ function TestResults({
   if (tests == null) {
     // Pas de verdicts : placeholder. Un résultat n'est lu qu'une fois la tentative corrigée
     // (`done`), donc jamais pendant la correction asynchrone. Causes réelles : question sans
-    // harnais, ou sans verdict enregistré pour ses harnais ACTUELS (harnais modifiés après la
-    // correction ; core répond alors « en cours », CodeGrading.pending), et le mode maquette, où
-    // le grader local ne sait pas exécuter le code (« non évalué », grading.ts).
+    // harnais, ou aucun verdict enregistré pour ses harnais ACTUELS — harnais modifiés après la
+    // correction, ou question ajoutée après la tentative (core répond « en cours »,
+    // CodeGrading.pending). La maquette (grading.ts) rend un verdict par harnais : seule une
+    // question sans harnais y donne `null`.
     return (
       <p className={styles.testNote}>
         <Spinner tone="current" size={14} /> {labels.evaluating}

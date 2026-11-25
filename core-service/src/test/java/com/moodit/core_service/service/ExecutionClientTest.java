@@ -129,16 +129,23 @@ class ExecutionClientTest {
     @Test
     @DisplayName("Même avec des réglages minuscules, le budget couvre le mur du runner")
     void readTimeout_runnerWallFloor() {
-        // Depuis le runner (#116), chaque unité exec peut légitimement durer jusqu'à son mur
-        // (75 s) : des réglages trop bas ne doivent plus pouvoir produire un budget qui
-        // abandonne une correction en cours (#216). Un stub plus lent que ce plancher n'est
-        // donc pas réaliste ici ; le chemin « délai de lecture dépassé → null, sans nouvel
-        // essai » est couvert par evaluate_errorAfterConnect_noRetry, qui surcharge
+        // Depuis le runner (#116), le conteneur peut légitimement durer jusqu'à son mur réel :
+        // des réglages trop bas (1 ms de base, d'unité et d'attente de file) ne doivent pas
+        // pouvoir produire un budget qui abandonne une correction en cours (#216). Les
+        // planchers ci-dessous ne dépendent d'aucun réglage ; le calcul exact, terme à terme,
+        // est épinglé par readTimeout_includesQuestionTimeLimit. Un stub plus lent que ces
+        // planchers n'est pas réaliste ici ; le chemin « délai de lecture dépassé → null, sans
+        // nouvel essai » est couvert par evaluate_errorAfterConnect_noRetry, qui surcharge
         // readTimeoutMs pour un budget de 300 ms face à un stub qui répond en 1,5 s.
         ExecutionClient client = client("http://localhost:1", 1, 1, 1);
-        assertThat(client.readTimeoutMs("Python", 1, null)).isGreaterThanOrEqualTo(75_000);
+        // Interprété, une unité : mur du mode exec (temps limite par défaut 10 s + 75 s de
+        // WALL_OVERHEAD_MS) + 35 s de cycle de vie du conteneur, hors mur côté serveur.
+        assertThat(client.readTimeoutMs("Python", 1, null))
+                .isGreaterThanOrEqualTo(10_000 + 75_000 + 35_000);
+        // Java, 3 cas à trois compilations chacun : 30 s + 3 × (10 + 10 + 3 × 90 + 5) = 915 s,
+        // donc le mur du serveur PLAFONNÉ à 15 min, + 35 s de cycle de vie du conteneur.
         assertThat(client.readTimeoutMs("Java", 4, null))
-                .isGreaterThanOrEqualTo(30_000 + 3 * 100_000);
+                .isGreaterThanOrEqualTo(15 * 60_000 + 35_000);
     }
 
     @Test

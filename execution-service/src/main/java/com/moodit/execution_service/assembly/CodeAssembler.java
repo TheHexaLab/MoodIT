@@ -799,8 +799,8 @@ public class CodeAssembler {
      * {@code grader.sh} se vide puis s'efface avant tout appel.
      *
      * <p><b>Portée de la garantie.</b> Le cadrage par identifiant ferme la forge par la sortie, et
-     * le code soumis ne reçoit pas l'identifiant. Il subsiste un <b>résiduel assumé</b>, de même
-     * nature que celui du harnais au format framework : le mode « exec » du runner exécute noteur
+     * le code soumis ne reçoit pas l'identifiant. Il subsiste un <b>résiduel assumé</b> (cf.
+     * ISOLATION.md, « Résiduel connu ») : le mode « exec » du runner exécute noteur
      * et code soumis <b>sous le même UID</b> (contrairement au chemin des harnais booléens
      * compilés, qui sépare les UID), donc un étudiant déterminé peut encore inspecter les
      * processus voisins selon la politique {@code ptrace} de l'hôte. Pour un examen noté, la

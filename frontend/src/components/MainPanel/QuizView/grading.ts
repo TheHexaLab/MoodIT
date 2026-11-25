@@ -2,7 +2,8 @@
  * Grader de PRÉVISUALISATION (mode mock, sans backend). Reproduit côté client la
  * correction des 5 types « à réponses » à partir des données embarquées dans le
  * quiz (vérité `isCorrect` / `correctOrder` / `groupName`). Le type Code n'est
- * PAS exécutable dans le navigateur : il est marqué « non évalué » (`tests: null`).
+ * PAS exécutable dans le navigateur : il reçoit un verdict SIMULÉ par harnais (cf. `gradeCoding`),
+ * et `tests: null` seulement s'il n'a aucun harnais.
  *
  * ⚠️ En production, c'est le backend qui corrige (voir `SubmitQuizHandler`). Ce
  * module n'existe que pour faire vivre la démo locale.

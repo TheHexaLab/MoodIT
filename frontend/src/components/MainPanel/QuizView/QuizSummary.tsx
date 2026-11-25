@@ -119,11 +119,11 @@ export function QuizSummary({
 }: QuizSummaryProps): React.ReactElement {
   const t = { ...defaultQuizSummaryLabels, ...labels };
   const questions = quiz.questions ?? [];
-  // Une question Code sans verdict (tests null) : question sans harnais, harnais modifiés depuis
-  // la correction (aucun verdict enregistré pour les actuels, CodeGrading.pending côté core), ou
-  // mode maquette (« non évalué », grading.ts) — jamais une correction en cours : le résumé ne
-  // s'ouvre qu'une fois la tentative corrigée. On affiche « en attente », PAS un échec, et le
-  // score global reste « en validation ».
+  // Une question Code sans verdict (tests null) : question sans harnais, ou aucun verdict
+  // enregistré pour ses harnais actuels — harnais modifiés depuis la correction, ou question
+  // ajoutée après la tentative (CodeGrading.pending côté core). Jamais une correction en cours :
+  // le résumé ne s'ouvre qu'une fois la tentative corrigée. On affiche « en attente », PAS un
+  // échec, et le score global reste « en validation ».
   const isPending = (questionId: number): boolean =>
     result.questions.find((q) => q.questionId === questionId)?.tests == null;
   const anyPending = questions.some((q) => q.qType === 'coding' && isPending(q.id));

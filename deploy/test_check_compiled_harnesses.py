@@ -44,6 +44,22 @@ class ClassifyTest(unittest.TestCase):
                   "  symbol:   method somme(int[])\n  location: class Solution")
         self.assertEqual(chk.BLOCKING, chk.classify(detail, False, start))
 
+    def test_compilateur_tue_sous_son_pilote_a_verifier(self):
+        # gcc, g++ et go build SURVIVENT à la mort de leur travailleur (OOM) et sortent en 1 :
+        # le superviseur en faisait « Le harnais ne compile pas », que ce script classait
+        # BLOQUANT — et --unpublish fermait un quiz juste. Stderr RÉELS, relevés dans les images.
+        start = "int f(int x) { return x; }"
+        for stderr in ("gcc: fatal error: Killed signal terminated program cc1\ncompilation terminated.",
+                       "g++: fatal error: Killed signal terminated program cc1plus\ncompilation terminated.",
+                       "moodit_noteur: /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed"):
+            with self.subTest(stderr=stderr):
+                detail = "Le harnais ne compile pas contre le code soumis :\n" + stderr
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
+        # Un vrai diagnostic reste BLOQUANT.
+        self.assertEqual(chk.BLOCKING, chk.classify(
+            "Le harnais ne compile pas contre le code soumis :\nnoteur.c:3:1: error: expected ';'",
+            False, start))
+
     def test_compilation_du_harnais_expiree_a_verifier(self):
         # Compilation du noteur expirée ou tuée sur une machine chargée : pas un diagnostic,
         # jamais un quiz fermé par --unpublish. Ce test garde le RÉSULTAT, pas la branche des
@@ -442,6 +458,7 @@ class SupervisorDriftTest(unittest.TestCase):
         for name in ("HARNESS_BUILD_ERROR", "HARNESS_BUILD_ABORTED", "TOOL_ABORTED"):
             with self.subTest(name=name):
                 self.assertEqual(getattr(self.supervisor, name), getattr(chk, name))
+        self.assertEqual(self.supervisor.TOOL_KILLED.pattern, chk.TOOL_KILLED.pattern)
 
     def test_preuves_d_execution_ecrites_par_le_superviseur(self):
         # Chaque préfixe de HARNESS_RAN ouvre un littéral du superviseur (message ou gabarit de

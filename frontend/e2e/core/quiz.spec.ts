@@ -320,15 +320,15 @@ test("API : une remise en ordre qui n'est pas une permutation est refusée sans 
           data: { quizId, answers: [{ questionId: q.id, orderedItemIds: order }] },
         });
 
-      for (const [cas, order] of [
+      for (const [label, order] of [
         ['élément en trop', [...ids, 999_999]],
         ['élément manquant', ids.slice(0, 2)],
         ['doublon', [ids[0], ids[0], ids[1]]],
         ['id null', [ids[0], null, ids[2]]],
       ] as const) {
         const res = await submit([...order]);
-        expect(res.status(), cas).toBe(400);
-        expect(await res.text(), cas).toBe(
+        expect(res.status(), label).toBe(400);
+        expect(await res.text(), label).toBe(
           "Question 1 : l'ordre soumis doit contenir chaque élément exactement une fois."
         );
       }

@@ -1,5 +1,6 @@
 package com.moodit.core_service.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
@@ -10,8 +11,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.task.TaskRejectedException;
@@ -80,15 +83,39 @@ class QuizGradingListenerTest {
 
   @Test
   void startup_resumesEachPendingOnItsPool() {
+    // Chaque executor note les tentatives corrigées PENDANT qu'il exécute la tâche : on vérifie
+    // ainsi quelle tentative part sur quel pool, pas seulement que chacun a servi une fois.
+    List<Integer> onCodePool = new ArrayList<>();
+    List<Integer> onQuickPool = new ArrayList<>();
+    AtomicReference<List<Integer>> runningOn = new AtomicReference<>();
+    recordOn(codeExecutor, onCodePool, runningOn);
+    recordOn(quickExecutor, onQuickPool, runningOn);
+    doAnswer(inv -> runningOn.get().add(inv.getArgument(0)))
+        .when(quizService)
+        .gradeAttempt(any());
     when(quizService.pendingGradings())
         .thenReturn(List.of(new AttemptSubmittedEvent(11, true), new AttemptSubmittedEvent(12, false)));
 
     listener.resumePendingGradings();
 
-    verify(codeExecutor).execute(any());
-    verify(quickExecutor).execute(any());
-    verify(quizService).gradeAttempt(11);
-    verify(quizService).gradeAttempt(12);
+    assertThat(onCodePool).containsExactly(11);
+    assertThat(onQuickPool).containsExactly(12);
+  }
+
+  /** Fait exécuter immédiatement les tâches de {@code executor} en les rattachant à {@code ids}. */
+  private static void recordOn(
+      Executor executor, List<Integer> ids, AtomicReference<List<Integer>> runningOn) {
+    doAnswer(inv -> {
+          runningOn.set(ids);
+          try {
+            inv.<Runnable>getArgument(0).run();
+          } finally {
+            runningOn.set(null);
+          }
+          return null;
+        })
+        .when(executor)
+        .execute(any());
   }
 
   @Test
