@@ -35,8 +35,9 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
      * Dernière tentative de l'utilisateur sur ce quiz (plus grand {@code attempt_no}), quel que
      * soit son statut. Après un conflit d'insertion, c'est celle de l'écriture concurrente — déjà
      * corrigée peut-être — SEULEMENT si son numéro atteint celui que la soumission refusée a tenté
-     * d'insérer (QuizService#submitQuiz) : plus ancienne, la concurrente a disparu entre-temps, et
-     * l'id est omis du 409 « en_cours ».
+     * d'insérer (QuizService#submitQuiz) : plus ancienne, ce n'est pas elle — la concurrente a
+     * disparu entre-temps, ou c'était une relance d'une ancienne tentative, finie avant la
+     * relecture — et l'id est omis du 409 « en_cours ».
      */
     Optional<Attempt> findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(Integer quizId, Integer userId);
 

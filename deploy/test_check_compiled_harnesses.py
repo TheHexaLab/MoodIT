@@ -271,7 +271,7 @@ class ClassifyTest(unittest.TestCase):
             sent["body"] = request.data
             return Response()
 
-        with mock.patch.object(chk.urllib.request, "urlopen", urlopen):
+        with mock.patch.object(chk.OPENER, "open", urlopen):
             chk.evaluate("http://x", "t", question)
         body = __import__("json").loads(sent["body"].decode("utf-8"))
         self.assertEqual("def sum(xs):\n    pass\n", body["startCode"])
@@ -675,7 +675,7 @@ class ReadTimeoutTest(unittest.TestCase):
             return Response()
 
         question = {"language": "Java", "start_code": "class S {}", "cases": []}
-        with mock.patch.object(chk.urllib.request, "urlopen", urlopen), \
+        with mock.patch.object(chk.OPENER, "open", urlopen), \
                 mock.patch.dict(chk.os.environ, {"EXEC_INTERPRETED_BUDGET_MS": "1800000"}):
             chk.evaluate("http://x", "t", question)
             expected = chk.read_timeout_s(chk.os.environ)
@@ -821,9 +821,148 @@ class GraderRetryTest(unittest.TestCase):
         self.assertEqual(["UPDATE Quiz SET is_published = false WHERE id IN (2);"],
                          [sql for sql in calls if sql.startswith("UPDATE")])
 
+    def test_429_after_server_queue_wait_is_still_retried(self):
+        # Revue #246 : l'appel interne attend jusqu'à 120 s une place côté serveur AVANT de
+        # répondre 429 ; une échéance posée avant cet appel était déjà épuisée — aucun essai.
+        def busy_after_queue_wait(*args, **kwargs):
+            self.now += 120
+            raise http_error(429, headers={"Retry-After": "5"})
+        outcomes = iter([busy_after_queue_wait, lambda *a, **k: self.VERDICT])
+        with mock.patch.object(chk, "evaluate",
+                               side_effect=lambda *a, **k: next(outcomes)(*a, **k)) as evaluate:
+            status, lines = chk.check_question("http://x", "t", self.QUESTION)
+        self.assertEqual((chk.OK, [], 2), (status, lines, evaluate.call_count))
+        self.assertEqual([5], self.waits)
+
+    def test_budget_message_counts_from_first_failure(self):
+        def busy_after_queue_wait(*args, **kwargs):
+            self.now += 120
+            raise http_error(429)
+        with mock.patch.object(chk, "evaluate", side_effect=busy_after_queue_wait):
+            status, lines = chk.check_question("http://x", "t", self.QUESTION)
+        self.assertEqual(chk.UNAVAILABLE, status)
+        self.assertIn("toujours après 120 s de nouveaux essais", lines[0])
+        # Au moins un nouvel essai, attentes comprises dans le budget.
+        self.assertTrue(self.waits)
+        self.assertLessEqual(sum(self.waits), 120)
+
+    def test_static_proof_kept_when_grader_unavailable(self):
+        # Revue #246 : NOTEUR INDISPONIBLE était rendu AVANT les contrôles statiques, et un quiz
+        # au harnais déjà prouvé en cause restait ouvert.
+        harness = "try { S.f(-1); return false; } catch (IllegalArgumentException e) { return true; }"
+        question = dict(self.QUESTION, cases=[{"id": 1, "name": "c", "harnessCode": harness,
+                                               "weight": 1}])
+        for code in (401, 429):
+            calls = []
+
+            def fake_psql(container, sql):
+                calls.append(sql)
+                return chk.json.dumps([question]) if "json_agg" in sql else ""
+            with self.subTest(code=code), \
+                    mock.patch.object(chk, "psql", side_effect=fake_psql), \
+                    mock.patch.object(chk, "container_env", return_value=[]), \
+                    mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                    mock.patch.object(chk, "internal_token", return_value="t"), \
+                    mock.patch.object(chk, "evaluate",
+                                      side_effect=always(lambda code=code: http_error(code))), \
+                    mock.patch.object(chk.sys, "argv", ["check", "--unpublish"]):
+                status, lines = chk.check_question("http://x", "t", question)
+                self.assertEqual(chk.TO_CHECK, status)
+                self.assertIn("teste une exception", lines[0])
+                self.assertIn("relancer le script", lines[-1])
+                # Contrôle incomplet (sortie 3), mais le quiz prouvé en cause est fermé.
+                self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
+                self.assertEqual(["UPDATE Quiz SET is_published = false WHERE id IN (1);"],
+                                 [sql for sql in calls if sql.startswith("UPDATE")])
+
+    def test_unreachable_grader_skips_following_questions(self):
+        # Revue #246 : service arrêté → 2 min de nouveaux essais PAR question avant la sortie 3.
+        import urllib.error
+        questions = [dict(self.QUESTION, question_id=i, quiz_id=i) for i in (1, 2, 3)]
+        refused = always(lambda: urllib.error.URLError(ConnectionRefusedError(111, "refusée")))
+        with mock.patch.object(chk, "psql",
+                               side_effect=lambda c, sql: chk.json.dumps(questions)
+                               if "json_agg" in sql else ""), \
+                mock.patch.object(chk, "container_env", return_value=[]), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk, "evaluate", side_effect=refused) as evaluate, \
+                mock.patch.object(chk.sys, "argv", ["check", "--unpublish"]):
+            self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
+        # Une seule série de nouveaux essais (2 min) pour les trois questions.
+        self.assertLessEqual(sum(self.waits), 120)
+        self.assertEqual(len(self.waits) + 1, evaluate.call_count)
+        # Une réponse du service (429) ne le marque pas injoignable : la suite est tentée.
+        grader = {"unreachable": False, "incomplete": 0}
+        with mock.patch.object(chk, "evaluate", side_effect=always(lambda: http_error(429))):
+            chk.check_question("http://x", "t", self.QUESTION, grader=grader)
+        self.assertEqual({"unreachable": False, "incomplete": 1}, grader)
+
+    def test_connect_timeout_is_treated_like_refusal(self):
+        # Revue #246 : un hôte qui ignore les paquets bloquait près d'une demi-heure (le délai de
+        # lecture servait aussi à la connexion). La connexion expire en CONNECT_TIMEOUT_S, et
+        # compte comme un refus : nouveaux essais, puis service injoignable.
+        timeouts = []
+
+        def blackhole(address, timeout=None, source_address=None, **kwargs):
+            timeouts.append(timeout)
+            raise TimeoutError("timed out")
+        grader = {"unreachable": False, "incomplete": 0}
+        with mock.patch("socket.create_connection", side_effect=blackhole):
+            status, lines = chk.check_question("http://192.0.2.1:8085", "t", self.QUESTION,
+                                               timeout_s=1715, grader=grader)
+        self.assertEqual(chk.UNAVAILABLE, status)
+        self.assertIn("injoignable", lines[0])
+        self.assertTrue(grader["unreachable"])
+        self.assertTrue(self.waits)
+        self.assertEqual({chk.CONNECT_TIMEOUT_S}, set(timeouts))
+
     def test_worst_puts_proofs_before_unavailability(self):
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.UNAVAILABLE, chk.TO_CHECK]))
         self.assertEqual(chk.UNAVAILABLE, chk.worst([chk.OK, chk.UNAVAILABLE]))
+
+
+class SplitTimeoutTest(unittest.TestCase):
+    """Délai de connexion court, délai de lecture long : une correction longue n'est pas coupée
+    par le délai de connexion, et le délai de lecture reste appliqué. Vrai serveur local."""
+
+    def serve(self, delay_s):
+        import http.server
+        import threading
+
+        class SlowHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                threading.Event().wait(delay_s)   # correction qui prend du temps
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Length", "2")
+                    self.end_headers()
+                    self.wfile.write(b"[]")
+                except OSError:
+                    pass   # client parti (délai de lecture dépassé)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://127.0.0.1:%d" % server.server_port
+
+    QUESTION = {"language": "Java", "start_code": "class S {}", "cases": []}
+
+    def test_long_read_not_cut_by_connect_timeout(self):
+        url = self.serve(0.6)
+        with mock.patch.object(chk, "CONNECT_TIMEOUT_S", 0.2):
+            self.assertEqual([], chk.evaluate(url, "t", self.QUESTION, timeout_s=5))
+
+    def test_read_timeout_still_applies(self):
+        url = self.serve(0.6)
+        with mock.patch.object(chk, "CONNECT_TIMEOUT_S", 5):
+            with self.assertRaises(TimeoutError):
+                chk.evaluate(url, "t", self.QUESTION, timeout_s=0.2)
 
 
 class CaseNameTest(unittest.TestCase):
@@ -851,7 +990,7 @@ class CaseNameTest(unittest.TestCase):
             sent["body"] = request.data
             return Response()
 
-        with mock.patch.object(chk.urllib.request, "urlopen", urlopen):
+        with mock.patch.object(chk.OPENER, "open", urlopen):
             chk.evaluate("http://x", "t", question)
         body = __import__("json").loads(sent["body"].decode("utf-8"))
         self.assertEqual(["cas 1", "cas 2", "cas 3", "garde"],

@@ -305,8 +305,9 @@ export interface QuizAttemptApi {
   dismissSubmitError: () => void;
   /**
    * Attente de la correction d'une soumission (après le 202, après un 409 « en cours », ou au
-   * remontage si une soumission était en vol) : verdict poussé ou sondage de l'historique, jusqu'à
-   * RECONCILE_CEILING_MS. Pilote le spinner plein quiz et son texte ; aucun nouvel envoi pendant.
+   * remontage si une soumission était en vol) : verdict poussé, sondage de l'historique et, l'id
+   * connu, statut de la tentative (`onFetchAttemptStatus`), jusqu'à RECONCILE_CEILING_MS. Pilote
+   * le spinner plein quiz et son texte ; aucun nouvel envoi pendant.
    */
   reconciling: boolean;
 
@@ -443,7 +444,11 @@ export function useQuizAttempt({
    * Attend le résultat de la correction ASYNCHRONE d'une tentative (aussi utilisé pour réconcilier
    * une correction interrompue par un refresh, et après un renvoi refusé en 409). Résolu par le
    * push WebSocket (`outcomeRef`, prioritaire) ou, à défaut, par le sondage de l'historique
-   * jusqu'à ce qu'une NOUVELLE tentative apparaisse. Pas d'échec à une échéance courte (cf.
+   * jusqu'à ce que la tentative attendue y apparaisse (cf. landedAttempt). L'id connu et la
+   * tentative absente de l'historique, son STATUT est lu à chaque sondage, et une dernière fois
+   * avant de conclure au plafond (`onFetchAttemptStatus`) : `gone` (supprimée, verdict d'échec
+   * manqué) → échec « vérification impossible » ; `done`/`review` → ouverture de la tentative ;
+   * `pending` ou statut illisible → l'attente continue. Pas d'échec à une échéance courte (cf.
    * RECONCILE_CEILING_MS) ; un sondage en échec (réseau) n'interrompt pas l'attente.
    */
   const reconcilePending = useCallback(

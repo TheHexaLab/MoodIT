@@ -537,20 +537,26 @@ def canary_verdict(cases, outcomes):
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
       3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
          signal) n'accuse que si AUCUN autre canari n'est confirmé de façon CONCLUANTE (il a
-         tourné jusqu'au bout et rendu son attendu). Le canari n'appelle aucune fonction
-         soumise et son noteur tourne sous un autre UID : sur un hôte chargé, il expire
-         (limite d'une seconde possible) ou meurt de l'OOM du cgroup pendant qu'un cas réel
-         passe, et la soumission honnête était accusée. Le code soumis ne distinguant pas le
-         canari « pass » du canari « fail », un gel VOLONTAIRE les gèle tous les deux — et un
-         canari « fail » gelé ne confirme rien : la détection du gel sélectif (les deux
-         canaris gelés, un cas réel vert) est conservée ;
+         tourné jusqu'au bout et rendu son attendu) ET que l'autre a TOURNÉ. Le canari
+         n'appelle aucune fonction soumise et son noteur tourne sous un autre UID : sur un
+         hôte chargé, il expire (limite d'une seconde possible) ou meurt de l'OOM du cgroup
+         pendant qu'un cas réel passe, et la soumission honnête était accusée. Le code soumis
+         ne distinguant pas le canari « pass » du canari « fail », un gel VOLONTAIRE les gèle
+         tous les deux — et un canari « fail » gelé ne confirme rien : la détection du gel
+         sélectif (les deux canaris gelés, un cas réel vert) est conservée. Si l'autre n'a
+         pas été JUGÉ (sauté faute de budget ou d'espace, compilation non concluante, cas
+         interrompu), le verdict est « indetermines » : un hôte chargé où un canari lent expire
+         et fait sauter le second en est la cause honnête (cf. canary_reserve_seconds), et un
+         faussaire n'y gagne rien — un canari « fail » sauté donne DÉJÀ « indetermines » quand
+         le canari « pass » réussit, ce qu'un forgeage obtient sans rien geler ;
       4. sinon tout est confirmé → « ok », ou « indetermines » si un canari n'a rien vérifié
          (non imputable, ou non compilé pour une cause non concluante) : on n'accuse pas, mais
          on ne prétend pas non plus avoir tout vérifié.
 
     Cette règle unique remplace quatre conditions accumulées, chacune ayant révélé l'angle
-    mort de la suivante. Elle est vérifiée par table de vérité exhaustive (2 canaris × 7 états
-    × 0 à 2 cas réels verts ou rouges : CanaryTruthTableTest)."""
+    mort de la suivante. Elle est vérifiée par un ORACLE explicite (verdict attendu pour chacune des
+    8 × 8 paires d'états des deux canaris, sans puis avec cas réel vert), sur 0 à 2 cas réels
+    verts ou rouges : CanaryTruthTableTest."""
     canary_cases = [c for c in cases if c.get("canary")]
     if not canary_cases:
         return "aucun"
@@ -575,7 +581,12 @@ def canary_verdict(cases, outcomes):
     # Confirmé DE FAÇON CONCLUANTE : un canari « fail » lui-même expiré ou tué a bien « échoué »,
     # mais il ne prouve rien — c'est exactement ce que produit un gel des deux canaris.
     solid = [c for c in confirmed if not inconclusive(outcomes[c["index"]])]
-    if not solid:
+    # Le gel sélectif ne se voit que si les DEUX canaris ont tourné (et aucun ne confirme de
+    # façon concluante). Si l'autre n'a pas été JUGÉ — sauté (budget, espace), compilation non
+    # concluante, cas interrompu —, un canari expiré ou tué sur un hôte chargé est exactement
+    # ce que produit une soumission honnête : pas d'accusation (cf. canary_reserve_seconds).
+    all_ran = all(outcomes[c["index"]].ran for c in canary_cases)
+    if not solid and all_ran:
         # Aucune confirmation concluante : le gel peut être voulu, la règle 1 s'applique.
         accusable += doubtful
 
@@ -3814,7 +3825,25 @@ CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^
 
 
 RAW_STRING_RUST = re.compile(r'r(#*)"')
-RAW_STRING_CPP = re.compile(r'R"\(')
+# Chaîne brute C++ : préfixe d'encodage facultatif (`u8`, `u`, `U`, `L`), `R"`, un délimiteur de
+# 0 à 16 caractères (ni parenthèse, ni barre oblique inverse, ni blanc, ni guillemet) puis `(`.
+# Elle se termine au PREMIER `)délimiteur"`. Cf. cpp_raw_string_end.
+RAW_STRING_CPP = re.compile(r'(?:u8|[uUL])?R"([^()\\\s"]{0,16})\(')
+
+
+def cpp_raw_string_end(src_text, i):
+    """Fin (exclue) de la chaîne brute C++ qui commence en `i`, ou None s'il n'y en a pas.
+    FONCTION PURE (testée). Elle ne commence pas au milieu d'un identifiant (`xR"(` est un
+    identifiant suivi d'une chaîne ordinaire) ; non terminée, elle va jusqu'à la fin du texte.
+    Une seule recherche du terminateur : linéaire."""
+    if i > 0 and (src_text[i - 1].isalnum() or src_text[i - 1] == "_"):
+        return None
+    raw = RAW_STRING_CPP.match(src_text, i)
+    if not raw:
+        return None
+    closed = ")" + raw.group(1) + '"'
+    finish = src_text.find(closed, raw.end())
+    return len(src_text) if finish < 0 else finish + len(closed)
 
 
 def code_depths(source):
@@ -3874,18 +3903,19 @@ def code_depths(source):
         # précédente découpait src_text[i:] à CHAQUE caractère, soit une copie du reste du
         # fichier par position — quadratique, 6 s pour 100 000 caractères de code soumis (12 s
         # sur une entrée hostile), refaites à chaque cas de la question.
-        raw = (RAW_STRING_RUST.match(src_text, i) if c == "r"
-               else RAW_STRING_CPP.match(src_text, i) if c == "R" else None)
-        if raw:
-            if c == "r":
+        raw = RAW_STRING_RUST.match(src_text, i) if c == "r" else None
+        cpp_end = cpp_raw_string_end(src_text, i) if c in "RuUL" else None
+        if raw or cpp_end is not None:
+            if raw:
                 hashes = raw.group(1)
                 closed = '"' + hashes
                 begin = i + 1 + len(hashes) + 1
+                finish = src_text.find(closed, begin)
+                finish = n if finish < 0 else finish + len(closed)
             else:
-                closed = ')"'
-                begin = i + 3
-            finish = src_text.find(closed, begin)
-            finish = n if finish < 0 else finish + len(closed)
+                # `R"(…)"`, `R"délim(…)délim"`, préfixes `u8R`, `uR`, `UR`, `LR` : un
+                # délimiteur non vide était ignoré, et la chaîne finissait au premier `)"`.
+                finish = cpp_end
             for j in range(i, finish):
                 depths[j] = level
             i = finish
@@ -4649,9 +4679,13 @@ def implementation_reserved_message(names, cpp=False, classes=()):
             if cpp else "qui commence par « __ » ou par « _ » suivi d'une majuscule")
     listed = ", ".join("%s « %s »" % ("la classe" if n in classes else "la fonction", n)
                        for n in names)
-    return ("Identifiant réservé au compilateur : %s. En %s, un nom %s est réservé à "
-            "l'implémentation, et le harnais l'emploie ; renommez-%s."
-            % (listed, "C++" if cpp else "C", rule, "le" if len(names) == 1 else "les"))
+    if len(names) == 1:
+        return ("Identifiant réservé au compilateur : %s. En %s, un nom %s est réservé à "
+                "l'implémentation, et le harnais l'emploie ; renommez-le."
+                % (listed, "C++" if cpp else "C", rule))
+    return ("Identifiants réservés au compilateur : %s. En %s, un nom %s est réservé à "
+            "l'implémentation, et le harnais les emploie ; renommez-les."
+            % (listed, "C++" if cpp else "C", rule))
 
 
 def c_reserved_names(names, compiler, std, case_dir, env):
@@ -4724,11 +4758,15 @@ def reserved_name_message(names, origin, classes=()):
     names = list(names)
     kinds = {"classe" if n in classes else "fonction" for n in names}
     kind = kinds.pop() if len(kinds) == 1 else None
-    return ("%s : %s %s déjà fourni%s au harnais par %s. Le harnais ne pourrait pas distinguer "
-            "votre %s de celle-ci ; renommez-la."
-            % ("Nom de %s réservé" % kind if kind else "Noms réservés",
-               ", ".join("« %s »" % n for n in names), "est" if len(names) == 1 else "sont",
-               "" if len(names) == 1 else "s", origin, kind or "fonction ou classe"))
+    listed = ", ".join("« %s »" % n for n in names)
+    if len(names) == 1:
+        return ("Nom de %s réservé : %s est déjà fourni au harnais par %s. Le harnais ne "
+                "pourrait pas distinguer votre %s de celle-ci ; renommez-la."
+                % (kind, listed, origin, kind))
+    title = "Noms de %ss réservés" % kind if kind else "Noms réservés"
+    ours = "vos %ss" % kind if kind else "vos fonctions et classes"
+    return ("%s : %s sont déjà fournis au harnais par %s. Le harnais ne pourrait pas distinguer "
+            "%s de celles-ci ; renommez-les." % (title, listed, origin, ours))
 
 
 # Noteur C++ : une exception du HARNAIS (le code du prof) le terminait par std::terminate,
@@ -6360,6 +6398,15 @@ def blank_code(src_text, backticks=False, rust=False):
             if i < n:
                 res.append(" ")
                 i += 1
+        elif not rust and c in "RuUL" and cpp_raw_string_end(src_text, i) is not None:
+            # Chaîne BRUTE C++ (`R"(…)"`, `R"délim(…)délim"`, préfixes `u8R`, `uR`, `UR`, `LR`) :
+            # un guillemet qu'elle contient (`R"(")"`) ouvrait une chaîne ordinaire jamais
+            # fermée, la suite était blanchie, et les fonctions suivantes disparaissaient de
+            # l'extraction — une réponse juste notée 0 au mauvais motif.
+            k = cpp_raw_string_end(src_text, i)
+            for x in src_text[i:k]:
+                res.append(x if x == chr(10) else " ")
+            i = k
         elif not rust and c == chr(39) and _digit_separator(src_text, i, token):
             # Séparateur de chiffres C++14 (`1'000`) : pas un littéral. Le prendre pour une
             # ouverture blanchissait la suite jusqu'à la prochaine apostrophe, et les fonctions

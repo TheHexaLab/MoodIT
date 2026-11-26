@@ -138,7 +138,9 @@ public class ExecutionService {
 
     /**
      * Ligne que le superviseur insère à la place du milieu d'une sortie trop longue
-     * ({@code read_capped} / {@code copy_capped} de {@code supervisor.py}).
+     * ({@code read_capped}, {@code drain_pipe} et {@code bound_json} de {@code supervisor.py} :
+     * changer ce libellé là-bas impose de le changer ici, sans quoi un dump SQL tronqué n'est plus
+     * refusé).
      */
     static final String SUPERVISOR_TRUNCATION_MARKER = "(sortie tronquée au milieu";
 

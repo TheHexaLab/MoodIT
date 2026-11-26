@@ -661,7 +661,7 @@ class RpcGradingIntegrationTest {
     }
 
     @Test
-    void c_submitted_function_named_like_a_compiler_builtin_is_refused() {
+    void c_compiler_builtin_name_is_refused_only_when_the_harness_names_it() {
         // Revue #246 : `HUGE_VAL` se développe en `__builtin_huge_val ()`. Une fonction soumise
         // de ce nom était renommée par #define dans le noteur et détournait la constante du
         // harnais. Le noteur ne renomme plus que les fonctions que le HARNAIS écrit (texte
@@ -671,8 +671,10 @@ class RpcGradingIntegrationTest {
         // fonction d'aide `aide__calc` non nommée était refusée avec un motif faux). L'ancienne
         // variante de ce test (`#define __builtin_huge_val() 42.0` PUIS la fonction) ne
         // compilait pas seule : « Échec de compilation », juste, mais qui ne prouvait rien.
+        // La fonction forgée rend 42.0, comme `divise` : si elle détournait HUGE_VAL dans le
+        // noteur, le harnais rendrait VRAI — c'est ce que le « faux » exigé ci-dessous exclut.
         String forged = """
-                double __builtin_huge_val(void) { return 0; }
+                double __builtin_huge_val(void) { return 42.0; }
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
@@ -691,11 +693,14 @@ class RpcGradingIntegrationTest {
         }
         // Cachée sous `#if 0`, elle n'existe pas dans le code compilé : les signatures sont lues
         // sur le code aux directives traitées, aucun bouchon de ce nom n'entre dans le noteur, et
-        // c'est le harnais intact qui juge la réponse fausse (42 n'est pas HUGE_VAL).
+        // c'est le harnais intact qui juge la réponse fausse (42 n'est pas HUGE_VAL). Lue sur le
+        // texte brut, la signature cachée ferait entrer un bouchon `__builtin_huge_val` dans le
+        // noteur : HUGE_VAL y deviendrait un appel au code soumis, qui rend 42.0 (par la macro
+        // comme par la fonction cachée), et le harnais rendrait VRAI.
         String hidden = """
                 #define __builtin_huge_val() 42.0
                 #if 0
-                double __builtin_huge_val(void) { return 0; }
+                double __builtin_huge_val(void) { return 42.0; }
                 #endif
                 double divise(double a, double b) { return 42.0; }
                 """;

@@ -344,16 +344,37 @@ test("API : une remise en ordre qui n'est pas une permutation est refusée sans 
 
       // Aucune tentative enregistrée : la soumission valide (permutation, même fausse) passe.
       expect((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).toHaveLength(0);
-      expect((await submit([ids[2], ids[0], ids[1]])).status()).toBe(202);
+      const accepted = await submit([ids[2], ids[0], ids[1]]);
+      expect(accepted.status()).toBe(202);
+      const { attemptId } = (await accepted.json()) as { attemptId: number };
+      // Statut de la tentative (route réelle, à travers gateway et permissions) : en correction ou
+      // déjà corrigée — la correction d'une remise en ordre est rapide.
+      const status = (id: number, as = student) => as.get(`/api/quizzes/${quizId}/attempts/${id}/status`);
+      const early = await status(attemptId);
+      expect(early.status()).toBe(200);
+      expect(['pending', 'done']).toContain(((await early.json()) as { status: string }).status);
       // Et la tentative unique s'applique toujours ensuite. Une fois la correction TERMINÉE :
       // pendant qu'elle tourne, le refus serait « correction en cours » (JSON, cause en_cours),
       // pas la règle de tentative unique.
       await expect
         .poll(async () => ((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).length)
         .toBe(1);
+      const done = await status(attemptId);
+      expect(done.status()).toBe(200);
+      expect(((await done.json()) as { status: string }).status).toBe('done');
       const again = await submit([...ids]);
       expect(again.status()).toBe(409);
       expect(await again.text()).toBe(ALREADY_SUBMITTED);
+
+      // Statut d'une tentative d'un AUTRE étudiant, ou inexistante : 404 (aucune fuite).
+      expect((await status(2147483647)).status()).toBe(404);
+      const { storageState: otherState } = await createEnrolledUser(baseURL!);
+      const other = await request.newContext({ baseURL, storageState: otherState });
+      try {
+        expect((await status(attemptId, other)).status()).toBe(404);
+      } finally {
+        await other.dispose();
+      }
     } finally {
       await student.dispose();
     }

@@ -224,13 +224,22 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > du code de départ, noteur qui refuse le format ou ne rend aucun verdict (502 `sans_verdict`),
 > détail non reconnu : rejouer à la main avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
-> fermé). Un noteur **saturé ou injoignable** (429, 502 « indisponible », connexion refusée) est
-> retenté comme le fait core — attente doublée de 1 s à 10 s, `Retry-After` suivi, 2 min au
-> total ; s'il ne répond toujours pas, ou si sa réponse est coupée, son délai dépassé ou le jeton
-> refusé, la question sort **NOTEUR INDISPONIBLE** : rien n'est su d'elle, son quiz n'est
-> **jamais** fermé pour ce motif (même avec `--unpublish`), et le script sort en **3** — contrôle
-> incomplet : vérifier execution-service (`docker logs moodit_execution`, jeton interne) puis
-> relancer. Il sort en 1 tant qu'un quiz **publié** porte un BLOQUANT ou un À VÉRIFIER : le
+> fermé). Un noteur **saturé ou injoignable** est retenté : connexion impossible (le seul cas
+> que core retente aussi), mais également 429 et 502 « indisponible », deux réponses où rien n'a
+> tourné — attente doublée de 1 s à 10 s, `Retry-After` suivi, 2 min au total comptées depuis
+> le premier échec (un 429 n'arrive qu'après l'attente d'une place côté serveur, jusqu'à 2 min).
+> S'il ne répond toujours pas, ou si sa réponse est coupée, son délai dépassé ou le jeton
+> refusé, la question reçoit **NOTEUR INDISPONIBLE** : son quiz n'est **jamais** fermé pour ce
+> seul motif (même avec `--unpublish`) — un contrôle statique qui la met déjà en cause (harnais
+> qui teste une exception…) la garde À VÉRIFIER, et son quiz est fermé. Une connexion qui ne
+> s'établit pas en 10 s compte comme impossible (le long délai d'attente ne vaut que pour la
+> réponse : une mauvaise IP ne bloque plus le script une demi-heure). Après une connexion
+> impossible, les questions suivantes ne sont plus tentées (un service arrêté coûterait 2 min
+> par question). Le script sort alors en **3** — contrôle incomplet : vérifier execution-service
+> puis relancer (à l'étape 1, le terminal de `./gradlew bootRun` et l'`INTERNAL_TOKEN` passé à
+> la main, et relancer veut dire rejouer TOUT le bloc, dont la base jetable est supprimée à la
+> sortie ; à l'étape 2, `docker logs moodit_execution` et le jeton du conteneur). Il sort en 1
+> tant qu'un quiz **publié** porte un BLOQUANT ou un À VÉRIFIER : le
 > déploiement n'est pas terminé avant une sortie en 0. Pour chaque quiz publié en cause, deux
 > issues : le **corriger**, ou le **fermer** (le dépublier dans l'éditeur) jusqu'à ce que son
 > enseignant le corrige. Une question À VÉRIFIER se corrige en la rejouant à la main avec une
@@ -377,11 +386,14 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 >
 > Une sortie en **3** (noteur indisponible pour au moins une question) n'est pas un résultat :
 > les quiz prouvés en cause sont déjà fermés, les autres restent tels quels ; une fois
-> execution-service rétabli, relancer la même commande jusqu'à une sortie en 0 ou 1.
+> execution-service rétabli, relancer la même commande jusqu'à une sortie en 0 ou 1. **Noter
+> les quiz fermés à CHAQUE exécution** (ligne « Quiz fermés ») : une fois dépubliés, ils ne sont
+> plus listés comme publiés aux exécutions suivantes.
 >
 > Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et
 > la fermeture, et recevoir 0 sans faute de leur part. Lister ces tentatives (`<ids>` : les quiz
-> que le script vient de fermer ; `<bascule>` : l'heure notée, en UTC comme `submitted_at`) :
+> fermés par TOUTES les exécutions de cette étape, cumulés ; `<bascule>` : l'heure notée, en UTC
+> comme `submitted_at`) :
 >
 > ```bash
 > docker exec moodit_postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \

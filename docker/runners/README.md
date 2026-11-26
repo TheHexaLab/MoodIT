@@ -327,7 +327,11 @@ de `DockerSandbox`, sous l'UID étudiant, avec ET sans tentative d'abaissement d
   non concluant seulement pour son rejeu et pour les canaris (cf. « Compilation du code soumis
   faite une fois par job »). `canaries` vaut `aucun` seulement pour
   un job sans canaris : `DockerEvaluator` le refuse, chaque job en portant deux. Des canaris incohérents l'emportent : la notation n'est alors
-  jamais « incomplète ».
+  jamais « incomplète ». `incoherents` (cas verts mis à zéro) exige un cas réel vert ET un
+  canari démenti de façon concluante, ou les DEUX canaris gelés (expirés ou tués) ; un canari
+  expiré ou tué alors que l'autre n'a pas été jugé (sauté, compilation non concluante,
+  interrompu) donne `indetermines` — hôte chargé, pas falsification (`canary_verdict`, oracle
+  de `CanaryTruthTableTest`).
 
 ## Dispositions par langage
 

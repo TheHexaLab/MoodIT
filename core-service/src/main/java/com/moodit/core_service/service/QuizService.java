@@ -395,7 +395,9 @@ public class QuizService {
      * d'une soumission de l'étudiant sur ce quiz est déjà en cours (tentative {@code "pending"},
      * index partiel {@code uq_attempt_pending}) — le frontend rejoint alors l'attente de la
      * tentative {@code attemptId} du corps (le pending existant, ou après un conflit d'insertion la
-     * dernière tentative relue ; omis si elle a disparu) ;
+     * dernière tentative relue ; omis si elle a disparu ou si elle est plus ancienne que le numéro
+     * que cette soumission a tenté d'insérer — concurrente supprimée entre-temps, ou relance d'une
+     * ancienne tentative finie avant la relecture : ce n'est pas l'écriture concurrente) ;
      * {@link RegradeInProgressException} ({@code cause = "relance"}) si ce pending est une RELANCE
      * de l'enseignant ({@link Attempt#isRegrade()}) sur un quiz AVEC reprise, dont le verdict
      * n'est pas celui de cette soumission ; sinon {@link AlreadySubmittedException} (corps texte)
@@ -421,9 +423,10 @@ public class QuizService {
             // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
             // La tentative à attendre est celle de l'écriture concurrente : la DERNIÈRE de
             // l'étudiant sur ce quiz, pending ou déjà corrigée, à condition que son numéro soit au
-            // moins celui que cette soumission a tenté d'insérer — l'écriture concurrente, passée
-            // le contrôle préalable en même temps, a compté au moins autant de tentatives. Plus
-            // ancienne, ce n'est PAS elle : la concurrente a été supprimée entre-temps (correction
+            // moins celui que cette soumission a tenté d'insérer — ce numéro vient d'un comptage
+            // fait AVANT la recherche du pending (cf. persistPendingAttempt) : une écriture
+            // concurrente que cette recherche n'a pas vue a été validée après ce comptage, et
+            // porte donc un numéro au moins égal. Plus ancienne, ce n'est PAS elle : la concurrente a été supprimée entre-temps (correction
             // abandonnée), ou c'était une relance d'une ANCIENNE tentative, finie avant la
             // relecture. Son id ferait ouvrir au client le résultat d'une autre tentative comme
             // celui de son envoi : il est omis, et le client retombe sur son repli.
@@ -512,6 +515,15 @@ public class QuizService {
         requireValidOrderings(quiz, byQuestion);
         requireBoundedCode(quiz, byQuestion);
 
+        // ORDRE : compter, PUIS chercher le pending, PUIS la tentative unique. En READ COMMITTED,
+        // chaque SELECT voit les validations faites avant lui. Cherché AVANT le comptage, un
+        // pending concurrent validé entre les deux échappait à la recherche mais entrait dans le
+        // compte : numéro tenté trop grand (avec reprise, le conflit écartait ensuite la tentative
+        // concurrente comme trop ancienne — 409 sans id) ou « déjà soumis » au lieu de « en
+        // cours » (sans reprise). Dans cet ordre, une soumission concurrente validée avant ou
+        // pendant est vue par la recherche ; validée après, elle a le même numéro que celui tenté
+        // ici, et le conflit d'insertion la retrouve (cf. submitQuiz).
+        long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         Optional<Attempt> pending = attemptRepository
                 .findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(quizId, user.getId(), "pending");
         if (pending.isPresent()) {
@@ -519,7 +531,6 @@ public class QuizService {
             throw pendingConflict(quizId, user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()),
                     () -> pendingId);
         }
-        long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
         }

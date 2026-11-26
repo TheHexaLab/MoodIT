@@ -491,7 +491,6 @@ public class CodeAssembler {
         return out.append('"').toString();
     }
 
-    /** Toutes les captures du groupe 1 d'un motif dans un texte (ordre d'apparition, doublons possibles). */
     /** Pour chaque occurrence, le PREMIER groupe capturé (motifs à plusieurs formes). */
     private static List<String> matchAll(Pattern pattern, String text) {
         List<String> out = new ArrayList<>();

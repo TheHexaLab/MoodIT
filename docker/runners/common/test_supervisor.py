@@ -2838,72 +2838,119 @@ class ReservedNamesTest(unittest.TestCase):
         mixed = supervisor.reserved_name_message(["abs", "time"], "x", classes={"time"})
         self.assertTrue(mixed.startswith("Noms réservés : "))
 
+    def test_messages_agree_in_number(self):
+        # Singulier et pluriel ACCORDÉS : « Nom de fonction réservé : « max », « min » sont… votre
+        # fonction… renommez-la » ne se lisait pas.
+        one = supervisor.reserved_name_message(["fabs"], "la bibliothèque standard")
+        self.assertTrue(one.startswith("Nom de fonction réservé : « fabs » est déjà fourni"))
+        self.assertIn("votre fonction de celle-ci ; renommez-la.", one)
+        many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
+        self.assertTrue(many.startswith("Noms de fonctions réservés : « max », « min » sont déjà fournis"))
+        self.assertIn("vos fonctions de celles-ci ; renommez-les.", many)
+        classes = supervisor.reserved_name_message(["remove", "time"], "x", classes={"remove", "time"})
+        self.assertTrue(classes.startswith("Noms de classes réservés : "))
+        self.assertIn("vos classes de celles-ci ; renommez-les.", classes)
+        mixed = supervisor.reserved_name_message(["abs", "time"], "x", classes={"time"})
+        self.assertIn("vos fonctions et classes de celles-ci ; renommez-les.", mixed)
+        single = supervisor.implementation_reserved_message(["__x"])
+        self.assertTrue(single.startswith("Identifiant réservé au compilateur : la fonction « __x »"))
+        self.assertIn("le harnais l'emploie ; renommez-le.", single)
+        plural = supervisor.implementation_reserved_message(["__x", "_Y"], cpp=True, classes={"_Y"})
+        self.assertTrue(plural.startswith(
+            "Identifiants réservés au compilateur : la fonction « __x », la classe « _Y »"))
+        self.assertIn("le harnais les emploie ; renommez-les.", plural)
+
 
 class CanaryTruthTableTest(unittest.TestCase):
-    """Table de vérité EXHAUSTIVE de canary_verdict : 2 canaris × 7 états × 0 à 2 cas réels
-    (verts ou rouges). Invariants des règles de sa docstring."""
+    """ORACLE explicite de canary_verdict : pour chaque paire d'états (canari « pass », canari
+    « fail ») parmi 8, le verdict attendu SANS cas réel vert puis AVEC un cas réel vert, vérifié
+    sur 0 à 2 cas réels verts ou rouges. O = ok, I = incoherents, D = indetermines."""
 
-    # États d'un canari : (passed, ran, timed_out, killed, harness_build, skipped).
+    # États d'un canari : arguments de CaseOutcome.
     STATES = {
-        "réussi": (True, True, False, False, False, False),
-        "échoué": (False, True, False, False, False, False),
-        "compilation échouée": (False, False, False, False, False, False),
-        "compilation non concluante": (False, False, False, False, True, False),
-        "expiré": (False, True, True, False, False, False),
-        "tué": (False, True, False, True, False, False),
-        "sauté": (False, False, False, False, False, True),
+        "réussi": dict(passed=True, ran=True),
+        "échoué": dict(passed=False, ran=True),
+        "compilation échouée": dict(passed=False),
+        "compilation non concluante": dict(passed=False, harness_build=True),
+        "interrompu": dict(passed=False, cause="interrompu"),
+        "expiré": dict(passed=False, ran=True, timed_out=True),
+        "tué": dict(passed=False, ran=True, killed=True),
+        "sauté": dict(passed=False, skipped=True),
     }
+    # Ligne : canari « pass » ; colonne : canari « fail », dans l'ordre de STATES. Chaque
+    # cellule : verdict sans cas réel vert, puis avec. Lecture :
+    #  - règle 1 : la colonne « sans vert » ne contient jamais I ;
+    #  - échec CONCLUANT contraire (« pass » échoué ou non compilé, « fail » réussi ou non
+    #    compilé) + cas vert → I ;
+    #  - règle 4 : O seulement si « pass » réussi et « fail » échoué, expiré ou tué ;
+    #  - règle 3 : « pass » expiré ou tué n'accuse qu'avec un « fail » lui aussi expiré ou tué
+    #    (gel sélectif) — pas si le « fail » a échoué de façon concluante, ni s'il n'a pas été
+    #    jugé (compilation non concluante, interrompu, sauté) : hôte chargé, jamais accusé ;
+    #  - règle 2 et non imputables : compilation non concluante, interrompu, sauté → D.
+    ORACLE = """
+                  réussi échoué compil  compil? interr  expiré  tué     sauté
+    réussi        DI     OO     DI      DD      DD      OO      OO      DD
+    échoué        DI     DI     DI      DI      DI      DI      DI      DI
+    compil        DI     DI     DI      DI      DI      DI      DI      DI
+    compil?       DI     DD     DI      DD      DD      DD      DD      DD
+    interr        DI     DD     DI      DD      DD      DD      DD      DD
+    expiré        DI     DD     DI      DD      DD      DI      DI      DD
+    tué           DI     DD     DI      DD      DD      DI      DI      DD
+    sauté         DI     DD     DI      DD      DD      DD      DD      DD
+    """
+    VERDICTS = {"O": "ok", "I": "incoherents", "D": "indetermines"}
+
+    @classmethod
+    def expected(cls):
+        rows = [line.split() for line in cls.ORACLE.strip().splitlines()[1:]]
+        names = list(cls.STATES)
+        table = {}
+        for p, row in zip(names, rows):
+            for f, cell in zip(names, row[1:]):
+                table[(p, f)] = cell
+        return table
 
     @staticmethod
     def outcome(state):
-        passed, ran, timed_out, killed, harness_build, skipped = state
-        return supervisor.CaseOutcome(passed, None, ran=ran, timed_out=timed_out, skipped=skipped,
-                                      killed=killed, harness_build=harness_build)
+        state = dict(state)
+        return supervisor.CaseOutcome(state.pop("passed"), None, **state)
+
+    def test_oracle_covers_every_pair(self):
+        table = self.expected()
+        self.assertEqual(64, len(table))
+        self.assertTrue(all(len(cell) == 2 and set(cell) <= set(self.VERDICTS)
+                            for cell in table.values()))
+        # Règle 1 lisible dans l'oracle lui-même : aucune accusation sans cas réel vert.
+        self.assertNotIn("I", "".join(cell[0] for cell in table.values()))
 
     def test_exhaustive_truth_table(self):
         import itertools
+        table = self.expected()
         reals = [()] + [(g,) for g in (True, False)] + list(itertools.product((True, False), repeat=2))
         checked = 0
-        for pass_state, fail_state, real in itertools.product(self.STATES, self.STATES, reals):
-            with self.subTest(passe=pass_state, echoue=fail_state, reels=real):
-                supervisor.EVENTS.clear()
-                cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}]
-                outcomes = {0: self.outcome(self.STATES[pass_state]),
-                            1: self.outcome(self.STATES[fail_state])}
-                for k, green in enumerate(real):
-                    cases.append({"index": 2 + k})
-                    outcomes[2 + k] = supervisor.CaseOutcome(green, None, ran=True)
-                verdict = supervisor.canary_verdict(cases, outcomes)
-                real_green = any(real)
-                # Règle 1 : jamais d'accusation sans cas réel VERT.
-                if not real_green:
-                    self.assertNotEqual("incoherents", verdict)
-                # Confirmation de chaque canari (il a tourné et rendu son attendu).
-                pass_ok = pass_state == "réussi"
-                fail_ok = fail_state in ("échoué", "expiré", "tué")
-                fail_solid = fail_state == "échoué"
-                # Règle 4 : « ok » si et seulement si les deux sont confirmés.
-                self.assertEqual(verdict == "ok", pass_ok and fail_ok)
-                if "sauté" in (pass_state, fail_state):
-                    self.assertNotEqual("ok", verdict)
-                # Règle 2 : une compilation non concluante n'accuse jamais.
-                if (pass_state == "compilation non concluante" and fail_ok) or \
-                        (fail_state == "compilation non concluante" and pass_ok):
-                    self.assertNotEqual("incoherents", verdict)
-                # Règle 3 : un canari qui a tourné mais fini sur une cause non concluante
-                # n'accuse pas quand l'AUTRE est confirmé de façon concluante.
-                if pass_state in ("expiré", "tué") and fail_solid:
-                    self.assertNotEqual("incoherents", verdict)
-                # Détection conservée : cause CONCLUANTE contraire + cas réel vert → accusation.
-                conclusive_miss = (pass_state in ("échoué", "compilation échouée")
-                                   or fail_state in ("réussi", "compilation échouée"))
-                if real_green and conclusive_miss:
-                    self.assertEqual("incoherents", verdict)
-                # Gel des deux (aucune confirmation concluante) + cas réel vert → accusation.
-                if real_green and pass_state in ("expiré", "tué") and fail_state in ("expiré", "tué"):
-                    self.assertEqual("incoherents", verdict)
-                checked += 1
-        self.assertEqual(7 * 7 * 7, checked)
+        for (pass_state, fail_state), cell in table.items():
+            for real in reals:
+                with self.subTest(passe=pass_state, echoue=fail_state, reels=real):
+                    supervisor.EVENTS.clear()
+                    cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}]
+                    outcomes = {0: self.outcome(self.STATES[pass_state]),
+                                1: self.outcome(self.STATES[fail_state])}
+                    for k, green in enumerate(real):
+                        cases.append({"index": 2 + k})
+                        outcomes[2 + k] = supervisor.CaseOutcome(green, None, ran=True)
+                    verdict = supervisor.canary_verdict(cases, outcomes)
+                    self.assertEqual(self.VERDICTS[cell[1 if any(real) else 0]], verdict)
+                    checked += 1
+        self.assertEqual(8 * 8 * 7, checked)
+
+    def test_slow_pass_canary_with_skipped_fail_is_not_an_accusation(self):
+        # Hôte chargé : un cas réel vert, le canari « pass » expire, le « fail » saute faute de
+        # budget. canary_reserve_seconds promet « indetermines », jamais une accusation.
+        cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}, {"index": 2}]
+        outcomes = {0: supervisor.CaseOutcome(False, None, ran=True, timed_out=True),
+                    1: supervisor.CaseOutcome(False, None, skipped=True, cause="budget"),
+                    2: supervisor.CaseOutcome(True, None, ran=True)}
+        self.assertEqual("indetermines", supervisor.canary_verdict(cases, outcomes))
 
 
 class Review246Test(unittest.TestCase):
@@ -4253,6 +4300,54 @@ class OomAndLockIsolationTest(unittest.TestCase):
                     os._exit(status)
             _, status = os.waitpid(pid, 0)
             self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+
+    def test_cpp_raw_strings_are_blanked_to_their_true_end(self):
+        # `R"(")"` : le guillemet de la chaîne brute ouvrait une chaîne ordinaire jamais fermée,
+        # la suite était blanchie et `doubler` disparaissait (réponse juste notée 0).
+        sources = {
+            "vide": 'std::string g() { return R"(")"; }\n',
+            "délimiteur nommé": 'const char *g() { return R"x(a)" "b" } c)x"; }\n',
+            "guillemets impairs": 'const char *g() { return R"(" "" ")"; }\n',
+            "u8R": 'const char *g() { return (const char *) u8R"(")"; }\n',
+            "LR": 'const wchar_t *g() { return LR"(")"; }\n',
+            "uR": 'const char16_t *g() { return uR"d(")d"; }\n',
+            "UR": 'const char32_t *g() { return UR"(")"; }\n',
+        }
+        tail = "int doubler(int n) { return 2 * n; }\n"
+        for label, head in sources.items():
+            with self.subTest(label=label):
+                extraction = supervisor.blank_code(head + tail)
+                self.assertEqual([("int", "doubler", ["int"])],
+                                 supervisor.c_signatures(extraction, cpp=True))
+                # Une ligne par ligne, et l'intérieur de la chaîne blanchi.
+                self.assertEqual((head + tail).count("\n"), extraction.count("\n"))
+                depths = supervisor.code_depths(head + tail)
+                self.assertEqual(0, depths[-1])
+        # Pas une chaîne brute au milieu d'un identifiant (`xR"(…)"` : identifiant puis chaîne).
+        self.assertIsNone(supervisor.cpp_raw_string_end('xR"(a)"', 1))
+        self.assertEqual(len('R"(a)"'), supervisor.cpp_raw_string_end('R"(a)" + 1', 0))
+        self.assertEqual(len('R"ab(x)" )ab"'), supervisor.cpp_raw_string_end('R"ab(x)" )ab";', 0))
+        # Non terminée : jusqu'à la fin du texte (blanchie, lignes gardées).
+        unterminated = 'R"(abc\ndef'
+        self.assertEqual(len(unterminated), supervisor.cpp_raw_string_end(unterminated, 0))
+        # Les accolades DANS la chaîne brute ne comptent pas (délimiteur nommé).
+        src = 'void f() { auto s = R"x({ } })x"; }\nint g() { return 1; }\n'
+        depths = supervisor.code_depths(src)
+        self.assertEqual(0, depths[src.index("int g")])
+        # g++ les accepte (machine qui a g++ : le conteneur runner).
+        if shutil.which("g++"):
+            work = tempfile.mkdtemp()
+            try:
+                for label, head in sources.items():
+                    with self.subTest(gpp=label):
+                        path = os.path.join(work, "s.cpp")
+                        with open(path, "w", encoding="utf-8") as f:
+                            f.write("#include <string>\n" + head + tail)
+                        built = subprocess.run(["g++", "-std=c++20", "-fsyntax-only", path],
+                                               capture_output=True, text=True, timeout=120)
+                        self.assertEqual(0, built.returncode, built.stderr[-500:])
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
 
     def test_code_depths_is_linear(self):
         # Chaque `r` tentait une chaîne brute sur une COPIE du reste du texte : quadratique, 6 s

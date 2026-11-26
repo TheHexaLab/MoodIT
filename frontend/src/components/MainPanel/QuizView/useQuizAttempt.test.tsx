@@ -962,23 +962,28 @@ describe('réconciliation via polling de secours', () => {
   it.each([
     // Tentative supprimée (correction en échec), verdict manqué : échec sans attendre le plafond.
     ['gone → « vérification impossible », brouillon gardé, marqueur effacé', 'gone'],
-    // Déjà corrigée (historique en retard) : la tentative s'ouvre.
+    // Déjà corrigée, historique encore en retard : le statut seul fait ouvrir la tentative.
     ['done → tentative ouverte', 'done'],
+    // Gardée à revoir : message « à revoir », sans lecture de corrigé.
+    ['review → message « à revoir »', 'review'],
     // Encore en correction : l'attente continue.
     ['pending → l’attente continue', 'pending'],
   ] as const)('statut de la tentative attendue pendant l’attente (%s)', async (_case, status) => {
     vi.useFakeTimers();
     let history: AttemptSummary[] = [];
     const onFetchAttemptStatus = vi.fn(async () => {
-      if (status === 'done') history = [summary(9)];
+      // « review » : l'historique la montre dès que son statut est lu (l'ouverture le relit, pour
+      // le message « à revoir »). « done » : il reste en retard — seul le statut peut conclure.
+      if (status === 'review') history = [{ ...summary(9), earned: null, status: 'review' }];
       return status;
     });
+    const onFetchAttemptResult = vi.fn(async (_q: number, id: number) => makeResult(id));
     const { result } = renderHook(() =>
       useQuizAttempt({
         initialQuiz,
         onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
         onFetchAttempts: vi.fn(async () => history),
-        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onFetchAttemptResult,
         onFetchAttemptStatus,
         onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
         codeVerificationUnavailableMessage: 'CODE_KO',
@@ -987,20 +992,62 @@ describe('réconciliation via polling de secours', () => {
     await vi.waitFor(() => expect(result.current.loading).toBe(false));
     act(() => { result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
     act(() => { void result.current.submit(); });
+    // UN sondage (1,5 s) : la conclusion doit venir du statut lu à ce sondage, pas d'un suivant.
+    // Contrôles immédiats (pas de vi.waitFor, qui avancerait l'horloge jusqu'aux sondages suivants).
     await act(async () => { await vi.advanceTimersByTimeAsync(1_600); });
     expect(onFetchAttemptStatus).toHaveBeenCalledWith(QUIZ_ID, 9);
     if (status === 'gone') {
-      await vi.waitFor(() => expect(result.current.submitError).toBe('CODE_KO'));
+      expect(result.current.submitError).toBe('CODE_KO');
       expect(result.current.reconciling).toBe(false);
       expect(result.current.phase).toBe('taking');
       expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
       expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).not.toBeNull();
     } else if (status === 'done') {
-      await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(9));
+      expect(result.current.result?.attemptId).toBe(9);
+      expect(result.current.phase).toBe('summary');
+    } else if (status === 'review') {
+      expect(result.current.awaitingReview).toBe(true);
+      expect(result.current.currentAttemptId).toBe(9);
+      expect(result.current.phase).toBe('summary');
+      expect(onFetchAttemptResult).not.toHaveBeenCalled();
     } else {
       expect(result.current.reconciling).toBe(true);
       expect(result.current.submitError).toBeNull();
     }
+    vi.useRealTimers();
+  });
+
+  it('lecture du statut en ÉCHEC (réseau) pendant l’attente : l’attente continue, puis le verdict conclut', async () => {
+    // Pas de « résultat indisponible » pendant une correction en cours : le statut illisible ne
+    // dit rien de la tentative.
+    vi.useFakeTimers();
+    let outcome: AttemptOutcome | null = null;
+    const onFetchAttemptStatus = vi.fn(async (): Promise<'pending'> => {
+      throw new Error('réseau');
+    });
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onFetchAttemptStatus,
+        onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+        attemptOutcome: outcome,
+        resultUnavailableMessage: 'RESULT_KO',
+      })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { void result.current.submit(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_600); });
+    expect(onFetchAttemptStatus).toHaveBeenCalled();
+    expect(result.current.reconciling).toBe(true);
+    expect(result.current.submitError).toBeNull();
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!).attemptId).toBe(9);
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(result.current.result?.attemptId).toBe(9);
     vi.useRealTimers();
   });
 

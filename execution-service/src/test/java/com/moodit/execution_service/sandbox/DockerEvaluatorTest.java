@@ -315,15 +315,20 @@ class DockerEvaluatorTest {
         // ailleurs, les noms de fichiers sont fixes, et un nom « réservé » ou très long n'y
         // gêne rien. Le refuser hors de Java rendrait 0 à une réponse juste.
         List<TestCaseInput> cases = List.of(new TestCaseInput("a", "return true;", 1));
-        assertThat(DockerEvaluator.reservedNameRejection("C#", "public class MooditCalcul { }", cases))
-                .isNull();
-        assertThat(DockerEvaluator.reservedNameRejection("C++", "class MooditPile {}", cases))
-                .isNull();
         String longName = "A".repeat(201);
-        assertThat(DockerEvaluator.reservedNameRejection("C++", "class " + longName + " {}", cases))
-                .isNull();
-        assertThat(DockerEvaluator.reservedNameRejection("Go",
-                "package main\ntype " + longName + " struct{}", cases)).isNull();
+        // Chaque code DÉCLARE un nom que la règle Java refuserait (javaTypeName le lit, vérifié
+        // ci-dessous) : sans la restriction à Java, chacun serait refusé. Le Go en forme Java
+        // (`class …`) ne compile pas, mais ce refus amont ne lit que le texte.
+        Map<String, String> codes = new java.util.LinkedHashMap<>();
+        codes.put("C#", "public class MooditCalcul { }");
+        codes.put("C++", "class MooditPile {}");
+        codes.put("C++ ", "class " + longName + " {}");
+        codes.put("Go", "package main\n\nclass " + longName + " {}\n");
+        codes.forEach((language, code) -> {
+            assertThat(HarnessProjects.javaTypeName(code)).as("nom lu : " + language).isNotNull();
+            assertThat(DockerEvaluator.reservedNameRejection(language.strip(), code, cases))
+                    .as(language).isNull();
+        });
         // Témoin : la même règle s'applique bien en Java.
         assertThat(DockerEvaluator.reservedNameRejection("Java", "public class MooditCalcul { }", cases))
                 .singleElement().satisfies(r -> assertThat(r.detail()).contains("réservé"));

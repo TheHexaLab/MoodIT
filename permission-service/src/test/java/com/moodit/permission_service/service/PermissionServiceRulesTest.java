@@ -774,7 +774,7 @@ class PermissionServiceRulesTest {
 
     // Tentatives « a revoir » (#116, S4) : gestion du quiz, jamais l'etudiant abonne.
     @Test
-    void tentativesARevoir_enseignantDuCours_autorise() {
+    void reviewAttempts_courseTeacher_allowed() {
       loggedIn(user(5));
       when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
       when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(true);
@@ -783,7 +783,7 @@ class PermissionServiceRulesTest {
     }
 
     @Test
-    void tentativesARevoir_etudiantAbonne_refuse() {
+    void reviewAttempts_subscribedStudent_refused() {
       loggedIn(user(5));
       when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
       when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
@@ -938,9 +938,11 @@ class PermissionServiceRulesTest {
     @Test
     void attemptStatus_writeMethod_refused() {
       // Lecture seule : aucune règle d'écriture sur ce chemin (403 par défaut au gateway), refusé
-      // avant même de charger l'utilisateur.
+      // avant même de charger l'utilisateur — comme verbeNonDeclare_defaultDeny. Sans cette
+      // vérification, une règle POST ajoutée passerait inaperçue : l'utilisateur, non connecté
+      // ici, serait refusé de toute façon.
       assertThat(allowed("/api/quizzes/12/attempts/3/status", "POST", null)).isFalse();
-      verifyNoInteractions(membershipService);
+      verifyNoInteractions(userRepository, membershipService);
     }
 
     @Test

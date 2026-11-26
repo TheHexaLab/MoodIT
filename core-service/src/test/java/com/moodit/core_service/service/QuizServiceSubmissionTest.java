@@ -137,6 +137,9 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void pendingAttempt_noRetry_inProgress() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            // Le pending compte parmi les tentatives : un comptage de 1 lèverait « déjà soumis »
+            // si la tentative unique était appliquée AVANT la recherche du pending.
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(1L);
             when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
                     .thenReturn(Optional.of(pendingAttempt()));
             // Pending ordinaire : la correction d'une soumission de l'étudiant, pas une relance.
@@ -151,9 +154,9 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .hasMessage("Une correction de ce quiz est déjà en cours.")
                     .extracting(e -> ((GradingInProgressException) e).getAttemptId())
                     .isEqualTo(55);
-            // L'ordre est épinglé : le comptage des tentatives (qui lèverait « déjà soumis ») n'a
-            // même pas lieu.
-            verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
+            // L'ordre des DÉCISIONS est épinglé : le comptage a lieu (avant la recherche, cf.
+            // concurrentPendingCommittedBetweenReads_inProgressWithItsId), mais la tentative
+            // unique n'est appliquée qu'après le pending.
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
@@ -165,6 +168,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(1L);
             when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
                     .thenReturn(Optional.of(pendingAttempt()));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
@@ -176,7 +180,6 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .isInstanceOf(RegradeInProgressException.class)
                     .hasMessage("Votre tentative précédente est en cours de recorrection par votre"
                             + " enseignant. Réessayez plus tard.");
-            verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
         }
@@ -196,6 +199,42 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .isInstanceOf(AlreadySubmittedException.class);
             verify(attemptRepository, never()).saveAndFlush(any());
             verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        /**
+         * Soumission concurrente (n° 3, id 60) VALIDÉE ENTRE les deux lectures du contrôle
+         * préalable : la première ne la voit pas, la seconde la voit (READ COMMITTED), quel que
+         * soit l'ordre des requêtes.
+         */
+        private void concurrentPendingCommittedBetweenTheTwoReads() {
+            java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3))
+                    .thenAnswer(inv -> reads.getAndIncrement() == 0 ? 2L : 3L);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenAnswer(inv -> reads.getAndIncrement() == 0 ? Optional.empty()
+                            : Optional.of(attempt(60, quiz, eva, 3, "pending")));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(false);
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "reprise = {0}")
+        @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+        @DisplayName("Pending concurrent validé entre le comptage et la recherche → « en cours » avec SON id, jamais « déjà soumis » ni sans id")
+        void concurrentPendingCommittedBetweenReads_inProgressWithItsId(boolean allowRetry) {
+            // Compter AVANT de chercher le pending : la recherche voit alors la soumission validée
+            // entre les deux. Dans l'ordre inverse, elle lui échappait mais entrait dans le
+            // compte — sans reprise « déjà soumis », avec reprise un n° 4 tenté puis un conflit
+            // qui écartait la n° 3 comme trop ancienne (409 sans id).
+            quiz.setAllowRetry(allowRetry);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            concurrentPendingCommittedBetweenTheTwoReads();
+
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(GradingInProgressException.class)
+                    .extracting(e -> ((GradingInProgressException) e).getAttemptId())
+                    .isEqualTo(60);
+            verify(attemptRepository, never()).saveAndFlush(any());
         }
 
         @Test
@@ -429,16 +468,17 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         /**
-         * Conflit d'insertion sur un quiz AVEC reprise et deux tentatives antérieures (la
-         * soumission tente le n° 3) ; la relecture de la dernière tentative rend {@code reread}.
+         * Conflit d'insertion sur un quiz AVEC reprise et {@code prior} tentatives antérieures
+         * (la soumission tente le n° prior + 1) ; la relecture de la dernière tentative rend
+         * {@code reread}.
          */
-        private Throwable conflictWithLatestAttempt(Attempt reread, String constraint) {
+        private Throwable conflictWithLatestAttempt(long prior, Attempt reread, String constraint) {
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
                     .thenReturn(Optional.empty());
-            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(2L);
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(prior);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException(constraint));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
@@ -454,7 +494,7 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             // La concurrente (n° 3) a vu sa correction abandonnée et a été supprimée : la dernière
             // tentative relue est la n° 2, déjà corrigée. Son id ferait ouvrir au client ce
             // résultat comme celui de son envoi.
-            Throwable thrown = conflictWithLatestAttempt(attempt(41, quiz, eva, 2, "done"),
+            Throwable thrown = conflictWithLatestAttempt(2, attempt(41, quiz, eva, 2, "done"),
                     "uq_quiz_user_attempt_no");
 
             assertThat(thrown).isInstanceOf(GradingInProgressException.class);
@@ -462,12 +502,13 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Insert concurrent avec une relance d'une ANCIENNE tentative, finie avant la relecture → pas d'id")
+        @DisplayName("Insert concurrent avec la relance de l'UNIQUE tentative, finie avant la relecture : l'écriture concurrente elle-même est écartée (pas d'id)")
         void constraintViolation_regradeFinishedBeforeReread_noId() {
-            // La relance de la n° 1 a fait échouer l'insert (uq_attempt_pending) puis s'est
-            // terminée : plus de pending de relance, et la dernière tentative (n° 2) précède le
-            // n° 3 tenté — ce n'est pas l'écriture concurrente.
-            Throwable thrown = conflictWithLatestAttempt(attempt(42, quiz, eva, 2, "done"),
+            // Différent du cas précédent : ici, la dernière tentative relue EST l'écriture
+            // concurrente — la relance de la n° 1, qui a fait échouer l'insert du n° 2
+            // (uq_attempt_pending) puis s'est terminée (plus de marqueur de relance). Son verdict
+            // est celui d'une ancienne tentative, pas de cet envoi : écartée quand même.
+            Throwable thrown = conflictWithLatestAttempt(1, attempt(42, quiz, eva, 1, "done"),
                     "uq_attempt_pending");
 
             assertThat(thrown).isInstanceOf(GradingInProgressException.class);
