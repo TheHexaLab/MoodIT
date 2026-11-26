@@ -466,7 +466,8 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > Une fois l'ancienne version démarrée, relancer la même liste (une correction coupée par
 > l'arrêt reste `pending`) puis, avec l'accord des enseignants concernés, rendre leur tentative
 > aux étudiants. **Seule la DERNIÈRE tentative d'un couple (quiz, étudiant) peut être
-> supprimée** : core numérote la suivante `attempt_no = nombre de tentatives + 1`, sous
+> supprimée** : l'ancien core (avant #116) numérote la suivante `attempt_no = nombre de
+> tentatives + 1` (le nouveau prend le plus grand numéro + 1, que le trou ne gêne pas), sous
 > `UNIQUE(quiz_id, user_id, attempt_no)` ; supprimer la tentative k quand k+1 existe (quiz avec
 > reprise : k « à revoir », k+1 corrigée) laisserait un trou, et chaque nouvelle soumission de
 > l'étudiant reprendrait le numéro k+1 déjà pris — 409 permanent. Une tentative plus ancienne

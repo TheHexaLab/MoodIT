@@ -424,17 +424,19 @@ public class QuizService {
             // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
             // La tentative à attendre est celle de l'écriture concurrente : la DERNIÈRE de
             // l'étudiant sur ce quiz, pending ou déjà corrigée, à condition que son numéro soit au
-            // moins celui que cette soumission a tenté d'insérer — ce numéro vient d'un comptage
-            // fait AVANT la recherche du pending (cf. persistPendingAttempt) : une écriture
-            // concurrente que cette recherche n'a pas vue a été validée après ce comptage, et
-            // porte donc un numéro au moins égal. Plus ancienne, ce n'est PAS elle : la concurrente a été supprimée entre-temps (correction
-            // abandonnée), ou c'était une relance d'une ANCIENNE tentative, finie avant la
-            // relecture. Son id ferait ouvrir au client le résultat d'une autre tentative comme
-            // celui de son envoi : il est omis, et le client retombe sur son repli.
+            // moins celui que cette soumission a tenté d'insérer. Ce numéro est le plus grand + 1
+            // de l'instantané unique du contrôle préalable (cf. persistPendingAttempt) : une
+            // écriture concurrente absente de cet instantané a été validée APRÈS lui, et porte
+            // donc un numéro au moins égal. Plus ancienne, ce n'est PAS elle : la concurrente a
+            // été supprimée entre-temps (correction abandonnée), ou c'était une relance d'une
+            // ANCIENNE tentative, finie avant la relecture. Son id ferait ouvrir au client le
+            // résultat d'une autre tentative comme celui de son envoi : il est omis, et le client
+            // retombe sur son repli.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
             readTx.setReadOnly(true);
             throw readTx.execute(status -> pendingConflict(
-                    attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, e.userId, "pending", true),
+                    attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(
+                            quizId, e.userId, "pending", true),
                     e.allowRetry,
                     () -> attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(quizId, e.userId)
                             .filter(a -> a.getAttemptNo() >= e.attemptNo)   // attempt_no NOT NULL
@@ -496,7 +498,8 @@ public class QuizService {
      * une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
      * contrôle de tentative unique : sur un quiz sans reprise, elle compte aussi parmi les
      * tentatives et donnerait sinon le 409 « déjà soumis » à tort. Le numéro de la nouvelle
-     * tentative est le plus grand + 1 (une tentative supprimée laisse un trou, sans collision). Le 409 suit
+     * tentative est le plus grand + 1 : un trou déjà en base ne provoque pas de collision. Le
+     * 409 suit
      * {@link #pendingConflict} : {@link GradingInProgressException} pour sa propre correction ;
      * pour une relance de l'enseignant, {@link RegradeInProgressException} avec reprise,
      * {@link AlreadySubmittedException} sans reprise.
@@ -541,11 +544,13 @@ public class QuizService {
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
-        // Numéro = plus grand + 1, et non comptage + 1 : une tentative supprimée (correction
-        // échouée) au milieu laisse un TROU, et compter redonnait alors un numéro déjà pris —
-        // collision sur UNIQUE(quiz,user,attempt_no) à CHAQUE soumission suivante, que le
-        // conflit lisait comme une correction concurrente en cours : l'étudiant ne pouvait plus
-        // soumettre. Un trou dans la numérotation est sans effet (l'affichage montre « #n »).
+        // Numéro = plus grand + 1, et non comptage + 1 : ROBUSTESSE face aux trous déjà en base.
+        // Le code actuel n'en crée pas (le pending supprimé après un échec est toujours la
+        // tentative de plus grand numéro, et une relance n'est jamais supprimée), mais l'ancien
+        // contrôle à deux lectures a pu en laisser. Sur un trou, compter redonnait un numéro
+        // déjà pris — collision sur UNIQUE(quiz,user,attempt_no) à CHAQUE soumission suivante,
+        // lue comme une correction concurrente en cours : l'étudiant ne pouvait plus soumettre.
+        // Un trou dans la numérotation est sans effet (l'affichage montre « #n »).
         attempt.setAttemptNo(snapshot.maxAttemptNo() + 1);
         attempt.setStatus("pending");
         Attempt saved;

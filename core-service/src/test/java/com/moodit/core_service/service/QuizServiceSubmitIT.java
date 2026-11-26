@@ -56,9 +56,17 @@ import org.springframework.test.context.transaction.TestTransaction;
  *   6. deux soumissions de suite → la 2e est refusée « correction en cours »
  *      ({@code GradingInProgressException}), avec ou sans reprise, et non « déjà soumis » ;
  *      pendant une relance de l'enseignant, elle est refusée « relance »
- *      ({@code RegradeInProgressException}) avec reprise, « déjà soumis » sans reprise.
+ *      ({@code RegradeInProgressException}) avec reprise, « déjà soumis » sans reprise ;
+ *      après une relance ÉCHOUÉE (tentative « à revoir » qui garde son marqueur de relance), la
+ *      2e soumission pendant la correction de la 1re est « en cours », pas « relance » : seul un
+ *      PENDING marqué relance est une relance en cours.
+ *   7. trou de numérotation déjà en base (tentatives 1 et 3) → la soumission suivante prend
+ *      le n° 4 (plus grand + 1), sans collision sur UNIQUE(quiz,user,attempt_no).
+ * Les scénarios 6 et 7 lisent la VRAIE requête d'agrégats du contrôle préalable
+ * ({@code AttemptRepository#snapshotForSubmission}), mockée dans les tests unitaires.
  * Les scénarios 1, 3 et 4 committent leurs données (chaque correction tourne dans ses propres
- * transactions, comme en prod) ; {@link #purgeCommitted} les efface.
+ * transactions, comme en prod) ; {@link #purgeCommitted} les efface. Les autres restent dans la
+ * transaction du test, annulée à la fin.
  * {@link ExecutionClient} est mocké (pas de sandbox dans un test).
  */
 @DataJpaTest
@@ -366,10 +374,11 @@ class QuizServiceSubmitIT {
   void secondSubmissionWhileGrading_withRetry_isInProgress() {
     em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
     // Une tentative déjà corrigée avant (la reprise laisse passer le comptage) : le pending
-    // est la n° 2. Pas un cas discriminant entre « pending » et « dernière tentative » : dans
-    // le modèle, le pending d'une soumission est toujours la dernière (seule une relance, qui
-    // répond « relance », est un pending plus ancien) ; ce filtre est épinglé par les tests
-    // unitaires de QuizServiceSubmissionTest.
+    // est la n° 2. Les conditions « pending » de la requête d'agrégats (snapshotForSubmission,
+    // mockée dans les tests unitaires) sont épinglées ICI, sur la vraie base : celle de l'id par
+    // attemptNumberingGap_nextSubmissionTakesMaxPlusOne (sans elle, des tentatives corrigées
+    // passeraient pour un pending), celle de la relance par
+    // failedRegradeThenOwnPending_isInProgressNotRegrade.
     persistAttempt(em.find(Quiz.class, quizId), em.getEntityManager()
         .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
         .setParameter("email", USER_EMAIL).getSingleResult(), 1, "done");
@@ -386,11 +395,43 @@ class QuizServiceSubmitIT {
   }
 
   @Test
+  @DisplayName("Relance ÉCHOUÉE (à revoir, marqueur gardé) puis sa propre soumission en cours : la suivante est « en cours » avec l'id du pending, pas « relance »")
+  void failedRegradeThenOwnPending_isInProgressNotRegrade() {
+    // failGrading remet une relance échouée en « review » SANS effacer son marqueur. Une
+    // tentative « review » marquée n'est pas une relance EN COURS : l'agrégat de relance ne
+    // compte que les PENDING marqués. Sans cette condition, la correction de la propre
+    // soumission de l'étudiant passerait pour une relance (« réessayez plus tard ») et le
+    // client n'attendrait pas son verdict.
+    em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
+    Attempt failedRegrade = new Attempt();
+    failedRegrade.setQuiz(em.find(Quiz.class, quizId));
+    failedRegrade.setUser(em.getEntityManager()
+        .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
+        .setParameter("email", USER_EMAIL).getSingleResult());
+    failedRegrade.setAttemptNo(1);
+    failedRegrade.setStatus(QuizService.REVIEW);
+    failedRegrade.setRegrade(true);
+    failedRegrade.setSubmittedAt(LocalDateTime.now());
+    em.persist(failedRegrade);
+    em.flush();
+    em.clear();
+    Integer pendingId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
+        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class)
+        .extracting(e -> ((com.moodit.core_service.exception.GradingInProgressException) e).getAttemptId())
+        .isEqualTo(pendingId);
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(2L);
+  }
+
+  @Test
   @DisplayName("Trou de numérotation (tentatives 1 et 3) : la soumission suivante prend le n° 4, sans collision")
   void attemptNumberingGap_nextSubmissionTakesMaxPlusOne() {
-    // Une tentative supprimée (correction échouée) laisse un trou : numéroter sur le comptage
-    // (2 + 1 = 3) heurtait UNIQUE(quiz,user,attempt_no) à chaque soumission suivante. Lu ici par
-    // la VRAIE requête d'agrégats du contrôle préalable (comptage, plus grand n°, pending).
+    // Trou déjà en base (laissé par l'ancien contrôle à deux lectures) : numéroter sur le
+    // comptage (2 + 1 = 3) heurtait UNIQUE(quiz,user,attempt_no) à chaque soumission suivante.
+    // Lu ici par la VRAIE requête d'agrégats du contrôle préalable (comptage, plus grand n°,
+    // pending).
     em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
     Quiz quiz = em.find(Quiz.class, quizId);
     User user = em.getEntityManager()

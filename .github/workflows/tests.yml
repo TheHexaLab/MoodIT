@@ -462,7 +462,7 @@ jobs:
   # Les tests unitaires ne vérifient que la STRUCTURE des programmes assemblés (chaînes). Ce job
   # exécute le VRAI code (assemblage + verdict) contre les images runner réelles — le filet qui prouve
   # que l'isolation RPC des langages interprétés ferme le résiduel (une réponse fausse qui tente
-  # d'extraire le nonce ÉCHOUE). Plus lourd (installe les runtimes) → job séparé.
+  # d'extraire le nonce ÉCHOUE). Plus lourd (construit les 10 images runner) → job séparé.
   integration:
     name: execution-service — intégration (runner Docker réel)
     runs-on: ubuntu-latest

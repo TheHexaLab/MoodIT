@@ -409,12 +409,13 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         }
 
         @Test
-        @DisplayName("Numérotation avec un TROU (tentatives 1 et 3, la 2 supprimée) : prochaine = 4, sans collision")
+        @DisplayName("Numérotation avec un TROU déjà en base (tentatives 1 et 3) : prochaine = 4, sans collision")
         void attemptNumbering_gap_nextIsMaxPlusOne() {
-            // Une tentative supprimée (correction échouée) laisse un trou. Numéroter sur le
-            // comptage (2 + 1 = 3) collisionnait avec la n° 3 sur UNIQUE(quiz,user,attempt_no) à
-            // CHAQUE soumission suivante, lue comme une correction concurrente en cours :
-            // l'étudiant ne pouvait plus soumettre. Le numéro suit le plus grand (3 + 1 = 4).
+            // Trou laissé par l'ancien contrôle à deux lectures (le code actuel n'en crée pas).
+            // Numéroter sur le comptage (2 + 1 = 3) collisionnait avec la n° 3 sur
+            // UNIQUE(quiz,user,attempt_no) à CHAQUE soumission suivante, lue comme une correction
+            // concurrente en cours : l'étudiant ne pouvait plus soumettre. Le numéro suit le plus
+            // grand (3 + 1 = 4).
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));

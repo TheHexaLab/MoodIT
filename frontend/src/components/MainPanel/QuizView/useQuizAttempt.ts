@@ -35,11 +35,11 @@ export type QuizPhase = 'taking' | 'summary' | 'review';
  * l'onglet pendant la CORRECTION asynchrone (l'état React est perdu, mais le serveur finit la
  * correction et enregistre la tentative). `attemptId` (présent une fois le 202 reçu) permet
  * d'honorer le verdict WS ciblé (`quiz:attempt-*`) pendant l'attente et de lire le statut de la
- * tentative. `attemptsBefore` (nb de tentatives avant l'envoi) ne sert plus qu'aux marqueurs
+ * tentative. Sans `attemptId` (onglet rechargé ou fermé pendant le POST, 202 jamais lu ; 409
+ * « en_cours » sans id), `knownAttemptIds` = tentatives déjà connues : tout verdict d'une AUTRE
+ * tentative de ce quiz est celui de la correction en cours (une seule à la fois par étudiant et
+ * par quiz). `attemptsBefore` (nb de tentatives avant l'envoi) ne sert plus qu'aux marqueurs
  * d'ANCIEN format, sans id ni tentatives connues (cf. landedAttempt) ; il reste écrit pour eux.
- * Sans lui (renvoi refusé en 409 : correction déjà en cours, id inconnu), `knownAttemptIds` =
- * tentatives déjà connues : tout verdict d'une AUTRE tentative de ce quiz est celui de la
- * correction en cours (une seule à la fois par étudiant et par quiz).
  */
 type PendingSubmission = {
   answers: AttemptAnswers;
@@ -95,6 +95,14 @@ function clearPending(quizId: number): void {
   } catch {
     // ignore
   }
+}
+/**
+ * Le marqueur stocké est-il encore celui de l'envoi daté `submittedAt` ? Le marqueur est partagé
+ * entre onglets (localStorage) : un envoi plus récent d'un autre onglet ne doit être ni écrasé ni
+ * effacé par les suites de celui-ci (202 reçu, 409, échec du POST).
+ */
+function ownsMarker(quizId: number, submittedAt: number): boolean {
+  return readPending(quizId)?.submittedAt === submittedAt;
 }
 
 /**
@@ -254,9 +262,10 @@ interface UseQuizAttemptParams {
    */
   codeVerificationUnavailableMessage?: string;
   /**
-   * Message affiché quand la correction d'une soumission n'est pas encore confirmée au plafond
-   * d'attente (RECONCILE_CEILING_MS — pas une borne de la correction, qui peut tourner encore) :
-   * réponses restaurées. N'affirme pas un échec : « Réessayer » relit d'abord l'historique (et
+   * Message affiché quand la correction d'une soumission n'est pas encore confirmée à la fin de
+   * l'attente bloquante (RECONCILE_CEILING_MS, ou RECONCILE_FAST_MS pour un marqueur sans id
+   * relu au remontage — pas une borne de la correction, qui peut tourner encore) : réponses
+   * restaurées. N'affirme pas un échec : « Réessayer » relit d'abord l'historique (et
    * ouvre la tentative si elle y est), sinon renvoie — un 409 « en_cours » relance l'attente.
    * (La lecture du résultat en échec après un verdict a son propre message : resultUnavailable.)
    * Label, surchargeable.
@@ -307,8 +316,9 @@ export interface QuizAttemptApi {
   /**
    * Attente de la correction d'une soumission (après le 202, après un 409 « en cours », ou au
    * remontage si une soumission était en vol) : verdict poussé, sondage de l'historique et, l'id
-   * connu, statut de la tentative (`onFetchAttemptStatus`), jusqu'à RECONCILE_CEILING_MS. Pilote
-   * le spinner plein quiz et son texte ; aucun nouvel envoi pendant.
+   * connu, statut de la tentative (`onFetchAttemptStatus`), jusqu'à RECONCILE_CEILING_MS — ou
+   * RECONCILE_FAST_MS seulement pour un marqueur SANS id relu au remontage (statut illisible).
+   * Pilote le spinner plein quiz et son texte ; aucun nouvel envoi pendant.
    */
   reconciling: boolean;
 
@@ -653,8 +663,11 @@ export function useQuizAttempt({
         // Marqueur EXPIRÉ (gardé au plafond, ou rétabli après un renvoi en échec) : ses réponses
         // sont celles de l'envoi d'origine ; un brouillon non vierge, plus récent (réponses
         // retouchées depuis), l'emporte. Marqueur encore en cours : ses réponses sont les bonnes.
+        // Idem pour un marqueur SANS id : son attente est bornée (cf. plus bas), l'étudiant a pu
+        // retoucher ses réponses depuis ; tant qu'il ne l'a pas fait, le brouillon est identique
+        // aux réponses du marqueur (celles de l'envoi).
         const expired = (pending.submittedAt ?? 0) + RECONCILE_CEILING_MS <= Date.now();
-        const newerDraft = expired ? readDraft(initialQuiz.id) : null;
+        const newerDraft = expired || pending.attemptId == null ? readDraft(initialQuiz.id) : null;
         setAnswers(
           mergeAnswers(
             fetched,
@@ -990,14 +1003,13 @@ export function useQuizAttempt({
         // (`quiz:attempt-*`) — le polling de l'historique n'est qu'un filet (cf. reconcilePending).
         const accepted = await onSubmitQuiz(toSubmission(quiz, answers));
         // On connaît l'id : on peut honorer le verdict WS ciblé et lire le statut de la tentative.
-        // Écrit AVANT le test de montage : vue démontée pendant le POST (changement de canal),
-        // le marqueur sans id ne permettait au retour ni l'un ni l'autre. Seulement si le
+        // Écrit AVANT le test de montage : vue démontée pendant le POST (changement de canal), le
+        // marqueur garde ainsi son id au retour. Seuls un rechargement ou une fermeture de
+        // l'onglet pendant le POST (202 jamais lu) laissent un marqueur sans id. Seulement si le
         // marqueur stocké est toujours le nôtre (même `submittedAt`) : un envoi plus récent d'un
         // autre onglet ne doit pas être écrasé.
         const pending = { answers, attemptsBefore, attemptId: accepted.attemptId, submittedAt };
-        if (readPending(initialQuiz.id)?.submittedAt === submittedAt) {
-          writePending(initialQuiz.id, pending);
-        }
+        if (ownsMarker(initialQuiz.id, submittedAt)) writePending(initialQuiz.id, pending);
         if (!mountedRef.current) return;
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
@@ -1050,7 +1062,9 @@ export function useQuizAttempt({
             submittedAt: Date.now(),
           };
         }
-        writePending(initialQuiz.id, pending);
+        // Marqueur d'un envoi plus récent (autre onglet) : laissé tel quel ; l'attente de cet onglet
+        // garde son propre `pending` en mémoire.
+        if (ownsMarker(initialQuiz.id, submittedAt)) writePending(initialQuiz.id, pending);
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
         return;
@@ -1059,7 +1073,8 @@ export function useQuizAttempt({
       // « Réessayer » d'une soumission restée sans conclusion : elle reste attendue — marqueur
       // et lateRef rétablis, sinon un rechargement rouvrait la passation et un renvoi suivant
       // pouvait créer une seconde tentative.
-      if (usingServer) {
+      // Marqueur d'un envoi plus récent (autre onglet) : ni rétabli par-dessus, ni effacé.
+      if (usingServer && ownsMarker(initialQuiz.id, submittedAt)) {
         // Réponses COURANTES (retouchées depuis l'envoi d'origine) : au remontage, le marqueur ne
         // doit pas les écraser par les anciennes.
         if (late) writePending(initialQuiz.id, { ...late.pending, answers });

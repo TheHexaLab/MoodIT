@@ -601,7 +601,7 @@ class ExecutionIntegrationTest {
     }
 
     @Test
-    void unresolvable_symbol_reports_its_own_error_not_the_fallback_s() {
+    void unresolvable_symbol_reports_its_own_error_not_the_exports_fallback_one() {
         // `cache` est en colonne 0, donc mandaté, mais déclaré dans un bloc : le serveur ne peut
         // pas le résoudre. Le repli sur `exports` ne doit pas changer l'erreur rendue : en module
         // ES (`export` en JavaScript) `exports` n'existe pas, et son ReferenceError remplaçait

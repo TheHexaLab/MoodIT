@@ -194,7 +194,9 @@ class ClassifyTest(unittest.TestCase):
                        "Aucun fichier de code soumis",
                        "Retirez la ligne « package … ; » en tête du fichier : la notation, comme le "
                        "bouton « Exécuter », attend la classe dans le paquet par défaut.",
-                       "Nom de classe réservé : class Math déjà fourni au harnais",
+                       "Nom de classe réservé : « Math » est déjà fourni au harnais par "
+                       "java.lang. Le harnais ne pourrait pas distinguer votre classe de "
+                       "celle-ci ; renommez-la.",
                        "Notation incomplète (cas sans verdict)",
                        "Échec de compilation :\nMain.java:1: error",
                        "⚠ Incohérence détectée pendant la notation (falsification probable). ",
@@ -467,6 +469,33 @@ class SupervisorDriftTest(unittest.TestCase):
         for prefix in chk.HARNESS_RAN:
             with self.subTest(prefix=prefix):
                 self.assertIn('"' + prefix, self.supervisor_source)
+
+    def test_reserved_name_refusals_need_check(self):
+        # Refus de noms réservés des compilés, générés par le superviseur lui-même (un libellé
+        # recopié ici avait déjà divergé) : le harnais n'a pas tourné, rien ne prouve qu'il est
+        # faux — À VÉRIFIER, jamais BLOQUANT ni OK.
+        sup = self.supervisor
+        messages = {
+            "java (1)": sup.java_shadowed_message(["Math"]),
+            "java (2)": sup.java_shadowed_message(["Math", "String"]),
+            "c nm (1)": sup.c_linked_symbols_message(["printf"]),
+            "c nm (2)": sup.c_linked_symbols_message(["printf", "stdout"]),
+            "go prédéclaré (1)": sup.go_predeclared_message(["len"]),
+            "go prédéclaré (2)": sup.go_predeclared_message(["len", "string"]),
+            "go paquet (1)": sup.go_package_message(["fmt"]),
+            "go paquet (2)": sup.go_package_message(["fmt", "strings"]),
+            "réservé C (1)": sup.implementation_reserved_message(["__f"]),
+            "réservé C (2)": sup.implementation_reserved_message(["__f", "_G"]),
+            "réservé C++ (1)": sup.implementation_reserved_message(["_Rect"], cpp=True,
+                                                                   classes={"_Rect"}),
+            "réservé C++ (2)": sup.implementation_reserved_message(["a__b", "_G"], cpp=True),
+        }
+        start = "int f(int x) { return x; }"
+        for label, detail in messages.items():
+            with self.subTest(message=label):
+                self.assertTrue(detail)
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
+                self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
 
     def test_accepted_types_written_by_supervisor(self):
         self.assertIn("(" + chk.NO_TRANSPORTABLE_SIGNATURE + " : ", self.supervisor_source)

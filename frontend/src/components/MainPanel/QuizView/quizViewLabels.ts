@@ -39,9 +39,10 @@ export interface QuizViewLabels {
    *  n'a pas été enregistrée, l'étudiant peut renvoyer. */
   codeVerificationUnavailable: string;
   /**
-   * Message quand la correction d'une soumission n'est pas encore confirmée au plafond d'attente
-   * (45 min : pas une borne de la correction, qui peut durer jusqu'à ≈ 40 min PAR question Code
-   * au pire) : réponses restaurées. N'affirme pas un échec : « Réessayer » pendant une correction
+   * Message quand la correction d'une soumission n'est pas encore confirmée à la fin de l'attente
+   * bloquante (45 min ; 2 min pour un envoi dont l'onglet a été rechargé pendant le POST — pas une
+   * borne de la correction, qui peut durer jusqu'à ≈ 40 min PAR question Code au pire) : réponses
+   * restaurées. N'affirme pas un échec : « Réessayer » pendant une correction
    * encore en cours reçoit un 409 « en_cours » et reprend l'attente, sans perte.
    */
   submissionNotConfirmed: string;

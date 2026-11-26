@@ -33,8 +33,10 @@ import java.util.regex.Pattern;
  * canaris gelés pendant qu'un cas réel passe) : un canari contredit, ou les deux gelés, avec un
  * cas réel vert donnent le verdict {@code incoherents} (falsification probable, cas verts mis à
  * zéro par {@code DockerEvaluator}) ; un canari seul expiré ou tué par signal, l'autre confirmé,
- * n'accuse pas. Un canari non jugé (sauté, compilation non concluante, cas
- * interrompu) laisse le verdict {@code indetermines} : jamais une accusation. Règles exactes :
+ * n'accuse pas. Un canari non jugé (sauté, avant ou après avoir tourné, compilation non
+ * concluante, cas interrompu) n'accuse jamais lui-même : un canari expiré ou tué dont l'autre n'a
+ * pas été jugé donne {@code indetermines} ; un canari CONTREDIT de façon concluante accuse quel
+ * que soit l'état de l'autre. Règles exactes :
  * {@code canary_verdict}, supervisor.py.
  *
  * <p>Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.

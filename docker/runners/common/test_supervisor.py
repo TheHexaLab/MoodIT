@@ -2890,6 +2890,24 @@ class ReservedNamesTest(unittest.TestCase):
         package = supervisor.go_package_message(["strings"])
         self.assertTrue(package.startswith("Nom réservé : « strings » est déjà fourni au harnais "
                                            "par un paquet Go importé pour le harnais."), package)
+        # Et les run_*_rpc passent bien par ces fonctions d'aide (et plus par l'ancien appel
+        # direct, au texte « fonction » adressé au harnais).
+        go_source = inspect.getsource(supervisor.run_go_rpc)
+        self.assertIn("go_predeclared_message(reserved)", go_source)
+        self.assertIn("go_package_message(packages)", go_source)
+        self.assertNotIn("reserved_name_message(", go_source)
+        c_source = inspect.getsource(supervisor.run_c_rpc)
+        self.assertIn("c_linked_symbols_message(linked)", c_source)
+        self.assertNotIn("reserved_name_message(\n                    linked", c_source)
+        self.assertNotIn("reserved_name_message(linked", c_source)
+        self.assertNotIn("dont le programme de correction se sert", c_source)
+        # (L'autre appel de run_c_rpc, la sonde des noms de l'en-tête, reste direct : fonctions
+        # et classes du harnais, destinataire le harnais.)
+        self.assertEqual(1, c_source.count("reserved_name_message("))
+        java_source = inspect.getsource(supervisor.run_java_rpc)
+        self.assertIn("java_shadowed_message(shadowed)", java_source)
+        self.assertNotIn("reserved_name_message(", java_source)
+        self.assertNotIn("Nom de classe réservé", java_source)
         # Java (classes de java.lang employées par le harnais) : même accord.
         java_one = supervisor.java_shadowed_message(["Math"])
         self.assertEqual("Nom de classe réservé : « Math » est déjà fourni au harnais par "

@@ -787,7 +787,7 @@ describe('réconciliation via polling de secours', () => {
   });
 
   it('marqueur « en vol » écrit AVANT le POST : il porte les tentatives déjà connues', async () => {
-    // Vue démontée pendant le POST (changement de canal) : le marqueur reste sans id de
+    // Onglet rechargé ou fermé pendant le POST (202 jamais lu) : le marqueur reste sans id de
     // tentative ; sans la liste des tentatives connues, n'importe quel verdict le concluait.
     const { result, unmount } = renderHook(() =>
       useQuizAttempt({
@@ -1072,10 +1072,14 @@ describe('réconciliation via polling de secours', () => {
 
   it.each([
     // Vue démontée pendant le POST : l'id du 202 est quand même écrit (statut lisible au retour).
-    ['marqueur toujours le nôtre → id écrit', false, 9],
-    // Un autre onglet a écrit un envoi plus récent pendant ce POST : il n'est pas écrasé.
-    ['marqueur d’un envoi plus récent (autre onglet) → laissé tel quel', true, 77],
-  ])('202 reçu vue démontée : %s', async (_case, otherTab, expectedId) => {
+    ['marqueur toujours le nôtre → id écrit', null],
+    // Un autre onglet a écrit un envoi plus récent pendant ce POST : il n'est pas écrasé — qu'il
+    // ait déjà son id ou non (une garde sur l'id ne suffirait pas).
+    ['marqueur d’un envoi plus récent avec id (autre onglet) → laissé tel quel',
+      { answers: {}, attemptsBefore: 0, attemptId: 77, submittedAt: Date.now() + 1 }],
+    ['marqueur d’un envoi plus récent SANS id (autre onglet) → laissé tel quel',
+      { answers: {}, attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() + 1 }],
+  ])('202 reçu vue démontée : %s', async (_case, otherMarker) => {
     let resolvePost!: (v: { attemptId: number }) => void;
     const { result, unmount } = renderHook(() =>
       useQuizAttempt({
@@ -1088,23 +1092,73 @@ describe('réconciliation via polling de secours', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     act(() => { void result.current.submit(); });
     unmount();
-    if (otherTab) {
-      localStorage.setItem(
-        `moodit:quiz-pending-submission:${QUIZ_ID}`,
-        JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 77, submittedAt: Date.now() + 1 })
-      );
+    if (otherMarker) {
+      localStorage.setItem(`moodit:quiz-pending-submission:${QUIZ_ID}`, JSON.stringify(otherMarker));
     }
     await act(async () => { resolvePost({ attemptId: 9 }); });
     const marker = JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!);
-    expect(marker.attemptId).toBe(expectedId);
+    if (otherMarker) expect(marker).toEqual(otherMarker);
+    else expect(marker.attemptId).toBe(9);
+  });
+
+  it.each([
+    // 409 « en_cours » : le marqueur de cet envoi n'est pas réécrit par-dessus celui de B.
+    ['409 « en_cours »', () => new SubmissionInProgressError()],
+    // POST en échec (réseau) : le marqueur n'est pas effacé sous l'envoi de B.
+    ['POST en échec (réseau)', () => new Error('réseau')],
+  ])('deux onglets, %s pour A pendant que B a écrit un envoi plus récent : marqueur de B intact', async (_case, failure) => {
+    const markerB = { answers: {}, attemptsBefore: 0, attemptId: 77, submittedAt: Date.now() + 1 };
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz: vi.fn(async () => {
+          // B envoie pendant le POST de A.
+          localStorage.setItem(`moodit:quiz-pending-submission:${QUIZ_ID}`, JSON.stringify(markerB));
+          throw failure();
+        }),
+        submitErrorMessage: 'POST_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!)).toEqual(markerB);
+  });
+
+  it('remontage avec un marqueur SANS id (non expiré) : un brouillon retouché l’emporte sur ses réponses', async () => {
+    // Après l'attente bornée de ce marqueur, l'étudiant a retouché ses réponses ; au remontage,
+    // elles ne doivent pas être remplacées par celles de l'envoi (« Réessayer » les renverrait).
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({
+        answers: { 101: { kind: 'choice', answerIds: [2] } },
+        attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() - 5 * 60_000,
+      })
+    );
+    localStorage.setItem(
+      `moodit:quiz-draft:${QUIZ_ID}`,
+      JSON.stringify({ answers: { 101: { kind: 'choice', answerIds: [1] } }, touched: [101], currentIndex: 0 })
+    );
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+      })
+    );
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    expect(result.current.answers[101]).toEqual({ kind: 'choice', answerIds: [1] });
   });
 
   it('marqueur SANS id relu au remontage (rechargement pendant le POST) : attente bornée, puis « non confirmée »', async () => {
     // Son statut ne peut pas être lu : sans borne, une tentative supprimée gardait le voile 45 min.
     vi.useFakeTimers();
+    // Envoi d'il y a 5 min : la borne (2 min) part du REMONTAGE, pas de l'envoi.
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
-      JSON.stringify({ answers: {}, attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() })
+      JSON.stringify({ answers: {}, attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() - 5 * 60_000 })
     );
     const { result } = renderHook(() =>
       useQuizAttempt({
@@ -1120,12 +1174,14 @@ describe('réconciliation via polling de secours', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
     expect(result.current.submitError).toBe('NOT_CONFIRMED');
     expect(result.current.reconciling).toBe(false);
+    // Marqueur gardé (plafond de 45 min non atteint) : un remontage réessaiera de conclure.
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).not.toBeNull();
     vi.useRealTimers();
   });
 
   it('verdict de la NOUVELLE tentative reçu vue fermée (échec) : consommé au retour', async () => {
-    // Changement de canal pendant le POST (marqueur sans id), la correction échoue pendant
-    // l'absence : le Dashboard garde ce verdict et le représente au montage. C'est le sien
+    // Onglet rechargé pendant le POST (marqueur sans id, 202 jamais lu), la correction échoue
+    // pendant l'absence : le Dashboard garde ce verdict et le représente au montage. C'est le sien
     // (tentative absente des connues) → « vérification impossible », pas 45 min d'attente.
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
@@ -1149,7 +1205,8 @@ describe('réconciliation via polling de secours', () => {
 
   it('dernier verdict vu à l’envoi : inscrit au marqueur, il ne conclut pas l’attente au retour', async () => {
     // Échec d'une tentative précédente (#12, supprimée : absente de l'historique), toujours
-    // présenté par le Dashboard. Envoi, puis changement de canal pendant le POST, puis retour.
+    // présenté par le Dashboard. Envoi, changement de canal pendant le POST et retour AVANT le
+    // 202 (marqueur encore sans id).
     const stale: AttemptOutcome = { quizId: QUIZ_ID, attemptId: 12, ok: false };
     const params = {
       initialQuiz,
@@ -1280,7 +1337,7 @@ describe('réconciliation via polling de secours', () => {
   });
 
   it('« Réessayer » après le plafond, id inconnu : la tentative est reconnue par les tentatives connues', async () => {
-    // Marqueur d'un envoi dont la vue n'a jamais reçu l'id (démontée pendant le POST), expiré.
+    // Marqueur d'un envoi dont le 202 n'a jamais été lu (onglet rechargé pendant le POST), expiré.
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
       // 12 = dernier verdict vu à l'envoi (tentative supprimée, absente de l'historique) : le

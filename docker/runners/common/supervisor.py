@@ -487,8 +487,9 @@ def canary_reserve_seconds(budget_s, timeout_s):
     bornée au TIERS du budget : les canaris passent en priorité sur les cas réels, et les deux
     tiers restants suffisent toujours à en démarrer. LIMITE ASSUMÉE : cette part peut rester
     inférieure au pire cas des deux canaris (2 × (timeout + compilation)) — un premier canari
-    très lent peut donc déborder et faire sauter le second. Le verdict devient alors
-    « indetermines » (jamais une accusation), au prix d'un contrôle anti-falsification
+    très lent peut donc déborder et faire sauter le second. Le canari sauté n'accuse
+    jamais lui-même : le verdict devient « indetermines », sauf si le premier a été démenti
+    de façon concluante (canary_verdict), au prix d'un contrôle anti-falsification
     affaibli ce coup-là : c'est un épuisement de budget, pas une porte ouverte — il faudrait
     d'abord savoir forger le jeton (résiduel déjà assumé, cf. docker/runners/README.md)."""
     if budget_s <= 0:
@@ -537,7 +538,7 @@ def canary_verdict(cases, outcomes):
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
       3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
          signal) n'accuse que si AUCUN autre canari n'est confirmé de façon CONCLUANTE (il a
-         tourné jusqu'au bout et rendu son attendu) ET que l'autre a TOURNÉ. Le canari
+         tourné jusqu'au bout et rendu son attendu) ET que l'autre a été JUGÉ (il a tourné et n'a pas été sauté). Le canari
          n'appelle aucune fonction soumise et son noteur tourne sous un autre UID : sur un
          hôte chargé, il expire (limite d'une seconde possible) ou meurt de l'OOM du cgroup
          pendant qu'un cas réel passe, et la soumission honnête était accusée. Le code soumis
@@ -545,7 +546,8 @@ def canary_verdict(cases, outcomes):
          tous les deux — et un canari « fail » gelé ne confirme rien : la détection du gel
          sélectif (les deux canaris gelés, un cas réel vert) est conservée. Si l'autre n'a
          pas été JUGÉ (sauté faute de budget ou d'espace, avant ou après avoir tourné — sortie
-         perdue —, compilation non concluante, cas interrompu), le verdict est « indetermines » : un hôte chargé où un canari lent expire
+         perdue —, compilation non concluante, cas interrompu), le verdict est
+         « indetermines » : un hôte chargé où un canari lent expire
          et fait sauter le second en est la cause honnête (cf. canary_reserve_seconds), et un
          faussaire n'y gagne rien — un canari « fail » sauté donne DÉJÀ « indetermines » quand
          le canari « pass » réussit, ce qu'un forgeage obtient sans rien geler ;

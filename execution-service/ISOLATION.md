@@ -103,8 +103,10 @@ dans les deux sens et attrapent un forgeage AVEUGLE, qui finit par rendre vert l
 échouer, ou un gel sélectif (les deux canaris gelés pendant qu'un cas réel passe) : un canari
 contredit, ou les deux gelés, avec un cas réel vert donnent le verdict `incoherents` —
 falsification probable, cas verts mis à zéro (« Incohérence détectée ») ; un canari seul expiré ou
-tué par signal, l'autre confirmé, n'accuse pas. Un canari non jugé (sauté, compilation
-non concluante, cas interrompu) laisse le verdict `indetermines` : jamais une accusation. Règles
+tué par signal, l'autre confirmé, n'accuse pas. Un canari non jugé (sauté, avant ou après avoir
+tourné, compilation non concluante, cas interrompu) n'accuse jamais lui-même : un canari expiré ou
+tué dont l'autre n'a pas été jugé donne `indetermines` ; un canari contredit de façon concluante
+accuse quel que soit l'état de l'autre. Règles
 exactes : `canary_verdict` (`supervisor.py`).
 
 Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
