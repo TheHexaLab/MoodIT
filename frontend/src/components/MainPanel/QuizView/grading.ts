@@ -2,7 +2,8 @@
  * Grader de PRÉVISUALISATION (mode mock, sans backend). Reproduit côté client la
  * correction des 5 types « à réponses » à partir des données embarquées dans le
  * quiz (vérité `isCorrect` / `correctOrder` / `groupName`). Le type Code n'est
- * PAS exécutable dans le navigateur : il est marqué « non évalué » (`tests: null`).
+ * PAS exécutable dans le navigateur : il reçoit un verdict SIMULÉ par harnais (cf. `gradeCoding`),
+ * et `tests: null` seulement s'il n'a aucun harnais.
  *
  * ⚠️ En production, c'est le backend qui corrige (voir `SubmitQuizHandler`). Ce
  * module n'existe que pour faire vivre la démo locale.
@@ -98,9 +99,9 @@ function gradeCoding(question: Question, answer: QuestionAnswer | undefined): Qu
   // Le code ne s'exécute PAS dans le navigateur : la vraie évaluation des harnais
   // est faite côté serveur (onSubmitQuiz). Ici (mode mock) on simule un verdict
   // DÉTERMINISTE par harnais, uniquement pour faire vivre la révision (voir quels
-  // Test_Case passent/échouent). Heuristique ALIGNÉE sur `dashboardApi.evaluateCode`
-  // (chemin « Tester ») pour que la correction Code soit identique des deux côtés :
-  // tenté = code non vide ; alors un harnais sur deux passe (résultat partiel illustratif).
+  // Test_Case passent/échouent). Heuristique PROPRE à la maquette (« Tester » de l'éditeur,
+  // `dashboardApi.evaluateCode`, appelle le vrai service d'exécution) : tenté = code non
+  // vide ; alors un harnais sur deux passe (résultat partiel illustratif).
   const tests = question.testCases ?? [];
   const code = answer?.kind === 'coding' ? answer.code : '';
   const attempted = code.trim().length > 0;
@@ -120,7 +121,7 @@ function gradeCoding(question: Question, answer: QuestionAnswer | undefined): Qu
     max: question.totalScore,
     // Code soumis conservé pour l'afficher en révision (comme la vérité serveur).
     submittedCode: code,
-    // Pas de harnais défini → on garde `null` (note « évalué côté serveur »).
+    // Pas de harnais défini → `null` : la révision affiche « Non évalué ».
     tests: tests.length > 0 ? results : null,
   };
 }

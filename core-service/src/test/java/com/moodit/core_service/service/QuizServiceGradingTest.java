@@ -637,6 +637,20 @@ class QuizServiceGradingTest extends QuizServiceTestSupport {
                 .isInstanceOf(UserNotFoundException.class);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest(name = "statut {0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"pending", "review"})
+    @DisplayName("Tentative pas encore corrigée (pending) ou à revoir → 404 : le corrigé n'est livré qu'avec la note")
+    void ungradedAttempt_404(String status) {
+        Question q = question(91, SINGLE, 2.0, 0);
+        answer(q, 1, "ok", true);
+        Attempt attempt = attempt(ATTEMPT_ID, quiz(1, course(1), q), eva, 1, status);
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+        when(attemptRepository.findByIdAndUser_Id(ATTEMPT_ID, 3)).thenReturn(Optional.of(attempt));
+
+        assertThatThrownBy(() -> service.getAttemptResult(ATTEMPT_ID, EMAIL))
+                .isInstanceOf(AttemptNotFoundException.class);
+    }
+
     @Test
     @DisplayName("Tentative d'un autre utilisateur (ou inexistante) → AttemptNotFoundException")
     void tentativeDunAutre_404() {

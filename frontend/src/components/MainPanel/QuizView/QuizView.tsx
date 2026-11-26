@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizView.module.css';
 import { type CourseChannel } from '../../CourseChannelList/CourseChannelList';
 import { type Course } from '../../CourseMenu/CourseMenu';
@@ -11,6 +11,7 @@ import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
   type AttemptOutcome,
   type FetchAttemptResultHandler,
+  type FetchAttemptStatusHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type RunCodeHandler,
@@ -20,7 +21,7 @@ import {
 import { useQuizAttempt } from './useQuizAttempt';
 import { QuestionCard } from './QuestionCard';
 import { QuestionRenderer } from './questions/QuestionRenderer';
-import { QuizSummary } from './QuizSummary';
+import { AttemptBar, QuizSummary } from './QuizSummary';
 import { Spinner } from '../../Spinner/Spinner';
 import { ErrorPopup } from '../../ErrorPopup/ErrorPopup';
 import { defaultQuizViewLabels, type QuizViewLabelsBundle } from './quizViewLabels';
@@ -42,6 +43,8 @@ interface QuizViewProps {
   onFetchAttempts?: FetchAttemptsHandler;
   /** Détail corrigé d'une tentative (API-ready, GET) → révision d'une tentative passée. */
   onFetchAttemptResult?: FetchAttemptResultHandler;
+  /** Statut d'une tentative attendue (API-ready, GET) : détecte une tentative supprimée. */
+  onFetchAttemptStatus?: FetchAttemptStatusHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Verdict PUSH (WebSocket) de la correction async, remonté par le Dashboard (room user). */
@@ -68,6 +71,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchQuiz,
   onFetchAttempts,
   onFetchAttemptResult,
+  onFetchAttemptStatus,
   onSubmitQuiz,
   attemptOutcome,
   onRunCode,
@@ -84,12 +88,18 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchQuiz,
     onFetchAttempts,
     onFetchAttemptResult,
+    onFetchAttemptStatus,
     onSubmitQuiz,
     attemptOutcome,
     loadErrorMessage: t.loadError,
     submitErrorMessage: t.submitError,
+    submitRejectedMessage: t.submitRejected,
+    submitTooLargeMessage: t.submitTooLarge,
+    submitRegradingMessage: t.submitRegrading,
+    submitAlreadySubmittedMessage: t.submitAlreadySubmitted,
     codeVerificationUnavailableMessage: t.codeVerificationUnavailable,
     submissionNotConfirmedMessage: t.submissionNotConfirmed,
+    resultUnavailableMessage: t.resultUnavailable,
   });
   const { quiz, phase, currentIndex, answers, result } = attempt;
 
@@ -142,11 +152,64 @@ const QuizView: React.FC<QuizViewProps> = ({
   // Spinner PLEIN QUIZ : chargement initial, envoi en cours, ou réconciliation post-refresh.
   const busy = attempt.loading || attempt.submitting || attempt.reconciling;
 
+  // Changement de tentative par la barre : la puce activée est rendue au même id dans la barre
+  // suivante (cf. AttemptBar, props `focusId` / `onFocused`), sinon le focus retombait sur <body>.
+  const [chipFocus, setChipFocus] = useState<number | null>(null);
+  const clearChipFocus = () => setChipFocus(null);
+  const selectAttempt = (attemptId: number) => {
+    setChipFocus(attemptId);
+    attempt.selectAttempt(attemptId);
+  };
+  // Lecture de la tentative en échec : l'écran d'erreur n'a pas de barre pour solder la demande, et
+  // « Réessayer » rouvre la DERNIÈRE tentative — la puce demandée y aurait pris le focus.
+  if (attempt.loadError && chipFocus != null) setChipFocus(null);
+  const awaitingReviewShown = attempt.phase === 'summary' && attempt.awaitingReview;
+
+  // Relance de l'enseignant aboutie sur la tentative AFFICHÉE (même id, message d'attente →
+  // résumé) : la barre du message d'attente est démontée, celle du résumé montée. Sans rien de
+  // plus, le focus clavier tombait sur <body> et la note n'était pas annoncée. Suivi du passage
+  // par état dérivé, ajusté pendant le rendu (pas d'effet) ; un autre changement efface l'annonce.
+  const view = { awaiting: awaitingReviewShown, id: attempt.currentAttemptId, phase: attempt.phase };
+  const [prevView, setPrevView] = useState(view);
+  const [reviewGradedNotice, setReviewGradedNotice] = useState(false);
+  // Pendant un chargement, la vue d'AVANT est retenue telle quelle : `reload` quitte le message
+  // d'attente avant d'avoir choisi la tentative à afficher. Comparer à cet état intermédiaire
+  // annonçait une tentative toujours à revoir (#9 affichée, #10 dernière) ; le retenir comme
+  // nouvelle référence perdait l'annonce et le focus quand le repli du hook (lecture du résultat
+  // échouée → `reload`) rouvrait bien la tentative corrigée. On compare à la vue finale.
+  const viewChanged =
+    prevView.awaiting !== view.awaiting || prevView.id !== view.id || prevView.phase !== view.phase;
+  // Un chargement efface toutefois l'annonce précédente (autre tentative, rechargement…).
+  if (attempt.loading && reviewGradedNotice) setReviewGradedNotice(false);
+  if (!attempt.loading && viewChanged) {
+    // Rechargement en échec après avoir quitté le message d'attente : l'écran montre l'erreur de
+    // chargement, pas une note.
+    const graded = prevView.awaiting && !view.awaiting && view.phase === 'summary'
+      && view.id != null && view.id === prevView.id && !attempt.loadError;
+    setPrevView(view);
+    setReviewGradedNotice(graded);
+    if (graded) setChipFocus(view.id);
+  }
+
   return (
     <div className={styles.view}>
+      {/* Région annoncée TOUJOURS montée : un role=status inséré avec son texte déjà présent
+          n'est pas lu par la plupart des lecteurs d'écran ; seul le texte change ici. */}
+      <p className={styles.visuallyHidden} aria-live="polite">
+        {awaitingReviewShown
+          ? `${t.awaitingReviewTitle}. ${t.awaitingReview}`
+          : reviewGradedNotice
+            ? t.reviewGraded
+            : ''}
+      </p>
       {busy && (
-        <div className={styles.busyOverlay} role="status" aria-live="polite" aria-busy="true">
+        // Région annoncée SANS aria-busy : posé ici en permanence, il pouvait différer l'annonce du
+        // texte d'attente jusqu'au démontage de la région. L'occupation est portée par le contenu.
+        <div className={styles.busyOverlay} role="status" aria-live="polite">
           <Spinner size={44} />
+          {/* Attente de la correction : elle peut durer plusieurs minutes, sans un mot jusque-là
+              (le spinner est purement visuel). */}
+          {attempt.reconciling && <p className={styles.busyText}>{t.gradingInProgress}</p>}
         </div>
       )}
 
@@ -154,40 +217,59 @@ const QuizView: React.FC<QuizViewProps> = ({
         <ErrorPopup
           content={attempt.submitError}
           onClose={attempt.dismissSubmitError}
-          onRetry={attempt.submit}
-          labels={{ title: t.errorTitle }}
+          // Refus du serveur : renvoyer les mêmes réponses serait refusé de nouveau.
+          onRetry={attempt.submitRejected ? undefined : attempt.submit}
+          // Un titre par cas : « Soumission impossible » coiffait aussi une attente non conclue
+          // et un résultat illisible, qui ne sont pas des échecs de la soumission. Les messages
+          // viennent de ces mêmes libellés (passés au hook), d'où la comparaison.
+          labels={{
+            title:
+              attempt.submitError === t.submissionNotConfirmed
+                ? t.pendingTitle
+                : attempt.submitError === t.resultUnavailable
+                  ? t.resultUnavailableTitle
+                  : t.errorTitle,
+          }}
         />
       )}
 
-      <header className={styles.header}>
-        <div className={styles.headerTitle}>
-          <span className={styles.bolt}>
-            <ChannelTypeIcon type="quiz" />
-          </span>
-          <span className={styles.titleText}>
-            <span className={styles.title}>{headerTitle}</span>
-          </span>
+      {/* Sous le voile, le contenu reste atteignable au clavier : `inert` le retire du parcours
+          (sinon « Soumettre » restait actionnable pendant l'attente de la correction). */}
+      <div className={styles.content} inert={busy} aria-busy={busy || undefined}>
+        <header className={styles.header}>
+          <div className={styles.headerTitle}>
+            <span className={styles.bolt}>
+              <ChannelTypeIcon type="quiz" />
+            </span>
+            <span className={styles.titleText}>
+              <span className={styles.title}>{headerTitle}</span>
+            </span>
+          </div>
+
+          {phase === 'review' ? (
+            <button type="button" className={styles.backButton} onClick={attempt.backToSummary}>
+              <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
+              {t.backToSummary}
+            </button>
+          ) : (
+            <span className={styles.status}>
+              {attempt.awaitingReview
+                ? t.awaitingReviewStatus
+                : phase === 'summary'
+                  ? t.finished
+                  : t.questionStatus(currentIndex + 1, total)}
+            </span>
+          )}
+        </header>
+
+        <div className={styles.progressTrack}>
+          <div className={styles.progressFill} style={{ width: `${progress * 100}%` }} />
         </div>
 
-        {phase === 'review' ? (
-          <button type="button" className={styles.backButton} onClick={attempt.backToSummary}>
-            <Chevron width={14} height={14} style={{ transform: 'rotate(-90deg)' }} />
-            {t.backToSummary}
-          </button>
-        ) : (
-          <span className={styles.status}>
-            {phase === 'summary' ? t.finished : t.questionStatus(currentIndex + 1, total)}
-          </span>
-        )}
-      </header>
+        {renderBody()}
 
-      <div className={styles.progressTrack}>
-        <div className={styles.progressFill} style={{ width: `${progress * 100}%` }} />
+        {renderFooter()}
       </div>
-
-      {renderBody()}
-
-      {renderFooter()}
     </div>
   );
 
@@ -212,6 +294,28 @@ const QuizView: React.FC<QuizViewProps> = ({
       return <div className={styles.centeredState}>{t.empty}</div>;
     }
 
+    // Tentative à revoir par l'enseignant (#116) : ni note ni corrigé à montrer.
+    if (phase === 'summary' && attempt.awaitingReview) {
+      return (
+        <div className={styles.centeredState}>
+          <div>
+            <p>
+              <strong>{t.awaitingReviewTitle}</strong>
+            </p>
+            <p>{t.awaitingReview}</p>
+          </div>
+          <AttemptBar
+            attempts={attempt.attempts}
+            currentAttemptId={attempt.currentAttemptId}
+            onSelectAttempt={selectAttempt}
+            focusId={chipFocus}
+            onFocused={clearChipFocus}
+            labels={labels?.summary}
+          />
+        </div>
+      );
+    }
+
     if (phase === 'summary' && result) {
       return (
         <div className={styles.body}>
@@ -220,7 +324,9 @@ const QuizView: React.FC<QuizViewProps> = ({
             result={result}
             attempts={attempt.attempts}
             currentAttemptId={attempt.currentAttemptId}
-            onSelectAttempt={attempt.selectAttempt}
+            onSelectAttempt={selectAttempt}
+            focusId={chipFocus}
+            onFocused={clearChipFocus}
             onReview={attempt.reviewQuestion}
             labels={labels?.summary}
           />
@@ -256,15 +362,20 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (attempt.loading || attempt.loadError || total === 0) return null;
 
     if (phase === 'summary') {
+      // Tentative à revoir d'un quiz sans reprise : aucun bouton, donc pas de pied (il était rendu
+      // vide, barre de 4rem avec sa bordure).
+      if (attempt.awaitingReview && !attempt.allowRetry) return null;
       return (
         <footer className={`${styles.footer} ${styles.summaryFooter}`}>
-          <button
-            type="button"
-            className={styles.navButton}
-            onClick={() => attempt.reviewQuestion(0)}
-          >
-            {t.reviewAnswers}
-          </button>
+          {!attempt.awaitingReview && (
+            <button
+              type="button"
+              className={styles.navButton}
+              onClick={() => attempt.reviewQuestion(0)}
+            >
+              {t.reviewAnswers}
+            </button>
+          )}
           {attempt.allowRetry && (
             <button type="button" className={styles.primaryButton} onClick={attempt.retry}>
               {t.retryQuiz}
@@ -341,7 +452,9 @@ const QuizView: React.FC<QuizViewProps> = ({
     if (isLast) {
       // Grisé pendant l'envoi ET si la tentative unique est déjà consommée (miroir du
       // 409 backend : évite le double-clic / rejeu qui serait de toute façon rejeté).
-      const disabled = attempt.submitting || attempt.alreadySubmitted;
+      // `reconciling` : une correction est attendue (jusqu'à 45 min, 2 min pour un envoi dont
+      // l'onglet a été rechargé pendant le POST) — pas de second envoi.
+      const disabled = attempt.submitting || attempt.reconciling || attempt.alreadySubmitted;
       return (
         <button
           type="button"

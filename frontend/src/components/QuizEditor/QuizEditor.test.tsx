@@ -7,6 +7,7 @@ import { defaultQuizFormLabels } from './quizFormLabels';
 import { defaultQuestionFormLabels } from './questionFormLabels';
 import { defaultHarnessLabels } from './harnessLabels';
 import { type Quiz, type QuestionTypeOption } from '../../types/domain';
+import { QuizSaveRejectedError } from './editorTypes';
 import './editorTestSetup';
 
 afterEach(cleanup);
@@ -225,6 +226,40 @@ describe('QuizEditor — persistance méta (un seul appel)', () => {
   });
 });
 
+describe('QuizEditor — refus métier de l’enregistrement', () => {
+  it('affiche le message du serveur, qui nomme la question à corriger', async () => {
+    const message = 'Question 2 : un harnais dépasse 50000 caractères.';
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: {
+        onUpdateQuiz: vi.fn(async () => {
+          throw new QuizSaveRejectedError(message);
+        }),
+      },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByText(formT.save));
+    await screen.findByText(message);
+    expect(screen.queryByText(editorT.saveError)).toBeNull();
+    expect(screen.getByText(editorT.editQuizTitle)).toBeTruthy();
+  });
+
+  it('quiz trop volumineux (413) : message dédié, pas « Réessayez »', async () => {
+    renderEditor({
+      quizzes: [makeQuiz({ id: 1, title: 'Q' })],
+      handlers: {
+        onUpdateQuiz: vi.fn(async () => {
+          throw new QuizSaveRejectedError('', 'tooLarge');
+        }),
+      },
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByText(formT.save));
+    await screen.findByText(editorT.saveTooLarge);
+    expect(screen.queryByText(editorT.saveError)).toBeNull();
+  });
+});
+
 describe('QuizEditor — annulation défait la session', () => {
   it('Annuler en création retire le quiz temporaire et revient à la liste', () => {
     renderEditor({ quizzes: [] });
@@ -309,6 +344,32 @@ describe('QuizEditor — navigation question/harnais', () => {
     // retour à la vue question ; le compteur de harnais reflète 1
     await screen.findByText(editorT.newQuestionTitle);
     expect(screen.getByText(qT.harnessCount(1))).toBeTruthy();
+  });
+
+  it('harnais d\'une question Code Java : « Ajouter » insère le gabarit booléen du langage', async () => {
+    // Branchement réel de defaultHarness (QuizEditor → HarnessBody) : l'ancien gabarit Java
+    // (« lève une exception ») décrivait une forme que le runner refuse.
+    const java = { id: 5, name: 'Java' };
+    renderEditor({
+      languages: [{ id: 1, name: 'Python' }, java],
+      quizzes: [
+        makeQuiz({
+          id: 1,
+          title: 'Q',
+          questions: [
+            { id: 7, qType: 'coding', prompt: 'Écris doubler', totalScore: 1, language: java, testCases: [] },
+          ],
+        } as Partial<Quiz>),
+      ],
+    });
+    fireEvent.click(screen.getByLabelText(listT.editAria('Q')));
+    fireEvent.click(screen.getByLabelText(formT.editQuestionAria));
+    fireEvent.click(screen.getByText(qT.manageHarness));
+    expect(await screen.findByText(editorT.harnessTitle)).toBeTruthy();
+    fireEvent.click(screen.getByText(`+ ${hT.add}`));
+    const code = (screen.getByLabelText(hT.codeAria(1)) as HTMLTextAreaElement).value;
+    expect(code).toMatch(/renvoie true/);
+    expect(code).not.toMatch(/exception/);
   });
 
   it('chevron retour depuis la question revient au formulaire', async () => {
@@ -432,6 +493,39 @@ describe('QuizEditor — fetch de la liste', () => {
     renderEditor({ quizzes: [makeQuiz({ id: 1, title: 'Périmé' })], handlers: { onFetchQuizzes } });
     await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledWith(42));
     expect(await screen.findByText('Depuis le serveur')).toBeTruthy();
+  });
+
+  it('lecture de liste répondue juste après le détail d\'un quiz ouvert : les questions restent', async () => {
+    // Revue #246 : l'effet n'annule la lecture qu'au rendu du formulaire ; une réponse arrivée
+    // entre le détail et ce rendu remplaçait le quiz complet par sa version sans questions.
+    let resolveList!: (q: Quiz[]) => void;
+    const onFetchQuizzes = vi
+      .fn()
+      .mockResolvedValueOnce([makeQuiz()])
+      .mockImplementationOnce(() => new Promise<Quiz[]>((res) => (resolveList = res)))
+      .mockResolvedValue([makeQuiz()]);
+    let resolveFull!: (q: Quiz) => void;
+    const detail = new Promise<Quiz>((res) => (resolveFull = res));
+    const onFetchQuiz = vi.fn(() => detail);
+    const { rerender } = renderEditor({ handlers: { onFetchQuizzes, onFetchQuiz } });
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(1));
+    // Seconde lecture de la liste (passage au cours 43), laissée en vol.
+    rerender(<QuizEditor courseId={43} quizzes={[makeQuiz()]} onClose={vi.fn()}
+      handlers={{ onFetchQuizzes, onFetchQuiz }} />);
+    await waitFor(() => expect(onFetchQuizzes).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByLabelText(listT.editAria('Quiz A')));
+    expect(onFetchQuiz).toHaveBeenCalledTimes(1);
+    // openEdit attend `detail` depuis le clic : cette réaction, enregistrée APRÈS la sienne sur la
+    // même promesse, court juste après sa suite (invalidation, détail inséré, formulaire demandé).
+    // Dans `act`, aucun rendu entre les deux : l'effet n'a pas encore pu annuler la lecture.
+    const listAnswered = detail.then(() => resolveList([makeQuiz()]));
+    await act(async () => {
+      resolveFull(makeQuiz({
+        questions: [{ id: 7, qType: 'true_false', prompt: 'Question gardée', totalScore: 1 }],
+      } as Partial<Quiz>));
+      await listAnswered;
+    });
+    expect(await screen.findByText('Question gardée')).toBeTruthy();
   });
 });
 

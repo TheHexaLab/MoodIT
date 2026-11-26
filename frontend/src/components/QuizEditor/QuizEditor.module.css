@@ -345,6 +345,13 @@
 }
 .addLinkButton:hover { background: var(--brand-teal-surface); }
 .addLinkButton:active { transform: scale(0.96); }
+/* Inactif mais focalisable (aria-disabled, cf. ReviewAttemptsBody) : il doit en avoir l'air. */
+.addLinkButton[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.addLinkButton[aria-disabled="true"]:hover { background: none; }
+.addLinkButton[aria-disabled="true"]:active { transform: none; }
 
 /* ── Listes (quiz / questions / réponses / items / harnais) ── */
 .panelBody .list {
@@ -452,6 +459,9 @@
 @media (hover: hover) and (pointer: fine) {
     .listRow { cursor: grab; }
     .listRow:active { cursor: grabbing; }
+    /* Rangée FIXE (tentatives à revoir) : rien à saisir. */
+    .listRowStatic,
+    .listRowStatic:active { cursor: default; }
 }
 
 /* Poignée de réordonnancement (souris + tactile) : `touch-action: none` empêche le
@@ -622,6 +632,16 @@
 .badgePoints { background: var(--bg-vote-pill); color: var(--text-muted); }
 .badgePublished { background: var(--brand-teal-surface); color: var(--brand-teal); }
 .badgeDraft { background: var(--bg-vote-pill); color: var(--text-muted); }
+/* Tentatives « à revoir » (#116) : pastille CLIQUABLE, ton d'alerte. Jetons de pastille
+   « danger » (contraste AA dans les deux thèmes), pas ceux d'ombre ou de texte d'erreur. */
+.badgeReview {
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+.badgeReview:hover { text-decoration: underline; }
 
 /* Bouton « + Ajouter … » en pointillé. */
 .addButton {
@@ -823,6 +843,13 @@
 }
 
 /* ── Barre d'actions (dans le pied fixe `.panelFooter`) ── */
+/* Empile un éventuel bouton d'ajout (harnais) AU-DESSUS de la barre d'actions, le tout
+   dans le pied fixe → le bouton reste visible hors du corps défilant. */
+.footerStack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
 .footer {
     display: flex;
     align-items: center;

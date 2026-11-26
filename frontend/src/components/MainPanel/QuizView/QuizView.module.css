@@ -270,9 +270,28 @@
     inset: 0;
     z-index: 5; /* au-dessus du contenu, sous l'ErrorPopup (z-index 1200) */
     display: flex;
+    /* Spinner, puis (attente de la correction) un texte : en colonne, centrés. */
+    flex-direction: column;
+    gap: 0.75rem;
     align-items: center;
     justify-content: center;
+    padding: 1rem;
+    box-sizing: border-box;
     background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+}
+
+/* Texte de l'attente de la correction, sous le spinner. */
+.busyText {
+    margin: 0;
+    max-width: 28rem;
+    text-align: center;
+    color: var(--text);
+}
+
+/* Contenu de la vue (en-tête, corps, pied) : enveloppe SANS boîte (la mise en page reste celle
+   de .view), qui porte `inert` tant que le voile plein quiz est affiché. */
+.content {
+    display: contents;
 }
 
 .footer {
@@ -708,4 +727,14 @@
         width: 100%;
         justify-content: center;
     }
+}
+
+/* Texte réservé aux lecteurs d'écran (région annoncée de la tentative à revoir). */
+.visuallyHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }

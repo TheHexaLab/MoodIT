@@ -71,6 +71,16 @@ server {
         proxy_pass http://gateway:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # « Tester » est SYNCHRONE : le defaut nginx de 60 s coupait l'appel en plein vol —
+        # 504 au prof pendant que l'evaluation continuait, puis 429 au nouvel essai
+        # (EXEC_MAX_PER_USER). Le pire cas public n'est PAS le mur compile (240 s + collecte) :
+        # c'est le chemin INTERPRETE, dont le budget de 240 s n'est consulte qu'AVANT chaque
+        # harnais — celui deja parti va au bout, et un SQL de modification compte DEUX unites.
+        # Avec la FILE DE PROD (EXEC_QUEUE_WAIT_MS=15000 dans docker-compose-hetzner.yml, pas
+        # les 5 s par defaut) : 240 + 2 × (15 file + 75 mur + 60 temps limite + ~30 collecte)
+        # = 600 s tout juste, HORS creation/copie/suppression des conteneurs. 600s etait donc
+        # exactement sur la ligne. Marge reelle au-dessus du modele :
+        proxy_read_timeout 720s;
     }
 
     location /auth/ {

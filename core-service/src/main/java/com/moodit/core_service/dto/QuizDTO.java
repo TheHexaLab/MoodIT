@@ -1,5 +1,6 @@
 package com.moodit.core_service.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -13,7 +14,7 @@ import java.time.LocalDateTime;
 @SuperBuilder
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "allowRetry", "questionCount", "createdAt"})
+@JsonPropertyOrder({"id", "title", "position", "isPublished", "isDaily", "allowRetry", "questionCount", "createdAt", "reviewAttemptCount"})
 public class QuizDTO {
     private Integer id;
     private String title;
@@ -25,4 +26,10 @@ public class QuizDTO {
     /** Nombre de questions (vues de liste : sans charger les questions). */
     private Integer questionCount;
     private LocalDateTime createdAt;
+    /**
+     * Tentatives « à revoir » du quiz (#116, S4) : vue ÉDITEUR seulement (absente de la vue
+     * étudiant, où elle vaut null et n'est pas sérialisée).
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer reviewAttemptCount;
 }

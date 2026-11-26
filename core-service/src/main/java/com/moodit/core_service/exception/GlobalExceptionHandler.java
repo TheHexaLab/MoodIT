@@ -1,7 +1,10 @@
 package com.moodit.core_service.exception;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -80,8 +83,51 @@ public class GlobalExceptionHandler {
                 .body(ex.getMessage());
     }
 
-    //Vérification du code impossible (service d'exécution indisponible) : la tentative n'a pas
-    //été enregistrée, l'étudiant peut renvoyer. 503 pour signaler un échec transitoire côté serveur.
+    /**
+     * Soumission pendant qu'une correction du même quiz est encore en cours → 409, avec un corps
+     * JSON {@code {"cause":"en_cours","message":…,"attemptId":…}} : la cause permet au frontend de
+     * distinguer ce cas du 409 « déjà soumis » (corps texte) et de rejoindre l'attente de la
+     * correction — celle de {@code attemptId}, présent seulement quand la tentative en conflit est
+     * connue (sinon le client retombe sur son repli).
+     */
+    @ExceptionHandler(GradingInProgressException.class)
+    public ResponseEntity<Map<String, Object>> handleGradingInProgress(GradingInProgressException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("cause", GradingInProgressException.CAUSE);
+        body.put("message", ex.getMessage());
+        if (ex.getAttemptId() != null) {
+            body.put("attemptId", ex.getAttemptId());
+        }
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body);
+    }
+
+    /**
+     * Soumission pendant que l'enseignant RELANCE la correction d'une tentative de l'étudiant → 409,
+     * corps JSON {@code {"cause":"relance","message":…}} : le frontend ne doit pas attendre ce
+     * verdict comme s'il était celui de la soumission refusée.
+     */
+    @ExceptionHandler(RegradeInProgressException.class)
+    public ResponseEntity<Map<String, String>> handleRegradeInProgress(RegradeInProgressException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("cause", RegradeInProgressException.CAUSE, "message", ex.getMessage()));
+    }
+
+    //Relance de correction refusée : tentative pas « à revoir », ou correction déjà en cours (#116, S4)
+    @ExceptionHandler(AttemptNotReviewableException.class)
+    public ResponseEntity<String> handleAttemptNotReviewable(AttemptNotReviewableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT) //Code 409
+                .body(ex.getMessage());
+    }
+
+    // Vérification du code impossible (service d'exécution indisponible). Filet seulement : la
+    // correction tourne hors de toute requête HTTP (cf. CodeVerificationUnavailableException), et
+    // ce 503 signalerait un échec transitoire côté serveur si l'exception remontait jusqu'ici.
     @ExceptionHandler(CodeVerificationUnavailableException.class)
     public ResponseEntity<String> handleCodeVerificationUnavailable(CodeVerificationUnavailableException ex) {
         return ResponseEntity

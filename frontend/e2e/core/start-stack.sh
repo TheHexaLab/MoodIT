@@ -10,7 +10,7 @@ export POSTGRES_USER=postgres POSTGRES_DB=moodit_db   # interpolation des fichie
 # La CI fournit son propre COMPOSE (avec docker-compose-ci-cache.yml, cache de build gha) : on le
 # garde ; sans lui (en local), la pile e2e de base.
 COMPOSE="${COMPOSE:-docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml}"
-SERVICES="postgres db-migrate mailpit auth-service core-service permission-service mcp-service piston execution-service gateway frontend"
+SERVICES="postgres db-migrate mailpit auth-service core-service permission-service mcp-service execution-service gateway frontend"
 
 [ -f .env.docker ] || touch .env.docker   # requis par `env_file:` ; valeurs imposées par docker-compose-e2e.yml
 
@@ -32,12 +32,21 @@ until [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: appl
   sleep 1
 done
 
-echo "→ Python dans Piston (questions de code)"
-# Seul langage des quiz de code testés ; piston-init (12 langages) serait bien plus long.
-until curl -fsS http://localhost:2000/api/v2/runtimes > /dev/null 2>&1; do sleep 1; done
-curl -fsS http://localhost:2000/api/v2/runtimes | grep -q '"language":"python"' ||
-  curl -fsS -X POST http://localhost:2000/api/v2/packages -H 'Content-Type: application/json' \
-    -d '{"language":"python","version":"3.12.0"}' > /dev/null
+echo "→ Image runner Python (questions de code)"
+# Seul langage des quiz de code testés ; les 10 images (docker/runners/build.sh) seraient bien
+# plus longues à construire. execution-service la lance via le démon Docker de l'hôte.
+# En CI (jeton du runtime Actions exposé par crazy-max/ghaction-github-runtime), cache de build
+# gha comme les images de service (docker-compose-ci-cache.yml) : sans lui, chaque job retéléchargeait
+# numpy, pandas, scipy et sympy depuis PyPI, une dépendance réseau sur le chemin critique.
+# `docker build` garde le builder par défaut (driver docker), pas celui de setup-buildx : l'export
+# de cache gha n'y est accepté que parce que les runners utilisent le stockage d'images
+# containerd (Docker 29). Sans lui, la construction serait refusée d'entrée.
+RUNNER_CACHE=""
+if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+  RUNNER_CACHE="--load --cache-from type=gha,scope=moodit-runner-python --cache-to type=gha,scope=moodit-runner-python,mode=max,ignore-error=true"
+fi
+# shellcheck disable=SC2086 # découpage en mots voulu (options de cache)
+docker build $RUNNER_CACHE -t moodit-runner-python:latest -f docker/runners/python/Dockerfile docker/runners
 
 sh frontend/e2e/core/bootstrap.sh
 

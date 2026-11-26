@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -20,7 +21,9 @@ import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuestionDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
+import com.moodit.core_service.dto.ReviewAttemptDTO;
 import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.AttemptNotReviewableException;
 import com.moodit.core_service.exception.ForbiddenException;
 import com.moodit.core_service.exception.QuizNotFoundException;
 import com.moodit.core_service.service.QuizService;
@@ -37,7 +40,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Contrat HTTP de {@link QuizController} hors soumission (couverte par QuizControllerSubmitTest) :
- * passation, édition, historique, révision d'une tentative, mise à jour et suppression.
+ * passation, édition, historique, révision et statut d'une tentative, mise à jour et suppression, tentatives
+ * « à revoir » (GET /review-attempts) et relance de leur correction (POST …/regrade).
  */
 @WebMvcTest(controllers = QuizController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)
@@ -150,6 +154,26 @@ class QuizControllerTest {
     }
 
     @Test
+    @DisplayName("GET /quizzes/{id}/attempts/{attemptId}/status → 200 {status}, quiz et tentative transmis")
+    void attemptStatus_returnsStatus() throws Exception {
+        when(quizService.getAttemptStatus(4, 70, EMAIL))
+                .thenReturn(new com.moodit.core_service.dto.AttemptStatusDTO("pending"));
+
+        mockMvc.perform(get("/api/quizzes/4/attempts/70/status").header("X-User-Email", EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("pending"));
+    }
+
+    @Test
+    @DisplayName("Statut d'une tentative absente, supprimée, d'un autre étudiant ou d'un autre quiz → 404")
+    void attemptStatus_unknown_404() throws Exception {
+        when(quizService.getAttemptStatus(4, 71, EMAIL)).thenThrow(new AttemptNotFoundException());
+
+        mockMvc.perform(get("/api/quizzes/4/attempts/71/status").header("X-User-Email", EMAIL))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("PUT /quizzes/{id} → 200 avec le quiz mis à jour, corps transmis au service")
     void miseAJour() throws Exception {
         when(quizService.updateQuiz(eq(4), any(QuizDetailDTO.class))).thenReturn(detail(true));
@@ -180,5 +204,50 @@ class QuizControllerTest {
 
         mockMvc.perform(delete("/api/quizzes/99"))
                 .andExpect(status().isNotFound());
+    }
+
+    // ── Tentatives à revoir (#116, S4) ──────────────────────────────────────────
+
+    @Test
+    @DisplayName("GET /quizzes/{id}/review-attempts → tentatives à revoir du quiz")
+    void review_list() throws Exception {
+        when(quizService.getAttemptsToReview(4)).thenReturn(List.of(new ReviewAttemptDTO(
+                81, 2, "Éva Test", Instant.parse("2026-09-02T08:30:00Z"), 3)));
+
+        mockMvc.perform(get("/api/quizzes/4/review-attempts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].attemptId").value(81))
+                .andExpect(jsonPath("$[0].attemptNo").value(2))
+                .andExpect(jsonPath("$[0].studentName").value("Éva Test"))
+                .andExpect(jsonPath("$[0].noVerdictFailures").value(3));
+    }
+
+    @Test
+    @DisplayName("POST /quizzes/{id}/attempts/{attemptId}/regrade → 202, 404 hors du quiz, 409 pas à revoir")
+    void review_regrade() throws Exception {
+        mockMvc.perform(post("/api/quizzes/4/attempts/81/regrade"))
+                .andExpect(status().isAccepted());
+        verify(quizService).regradeAttempt(4, 81);
+
+        doThrow(new AttemptNotFoundException()).when(quizService).regradeAttempt(5, 81);
+        mockMvc.perform(post("/api/quizzes/5/attempts/81/regrade"))
+                .andExpect(status().isNotFound());
+
+        doThrow(new AttemptNotReviewableException()).when(quizService).regradeAttempt(4, 82);
+        mockMvc.perform(post("/api/quizzes/4/attempts/82/regrade"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("Historique : le statut d'une tentative à revoir est sérialisé, sa note est nulle")
+    void history_reviewStatus() throws Exception {
+        when(quizService.getMyAttempts(4, EMAIL)).thenReturn(List.of(
+                AttemptSummaryDTO.builder().id(81).attemptNo(1).earned(null).max(5.0)
+                        .status("review").build()));
+
+        mockMvc.perform(get("/api/quizzes/4/attempts").header("X-User-Email", EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("review"))
+                .andExpect(jsonPath("$[0].earned").doesNotExist());
     }
 }

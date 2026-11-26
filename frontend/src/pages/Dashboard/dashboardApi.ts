@@ -1,9 +1,10 @@
-// Couche « API » du Dashboard, regroupée ici pour un seul point de bascule vers le
-// vrai backend. La plupart des fonctions appellent le vrai backend (apiFetch) ; le
-// Dashboard se contente d'orchestrer l'état autour.
+// Couche « API » du Dashboard, regroupée ici pour un seul point d'accès au backend
+// (apiFetch) ; le Dashboard se contente d'orchestrer l'état autour. fetchLanguages
+// (table Language) et evaluateCode (service d'exécution, conteneurs runner — #116)
+// appellent le VRAI backend.
 //
-// Restent en MOCK (à brancher) : fetchLanguages (liste côté CODE), evaluateCode (service
-// d'exécution), qui utilisent encore les helpers simulate* ci-dessous, et les devoirs (fin du fichier).
+// Les fonctions encore en MOCK importent leurs données de `src/mocks/` : cette liste
+// bouge à chaque branchement, elle n'est donc pas recopiée ici — suivre les imports.
 
 import type { NewCourse } from '../../components/AddCoursePopup/types.ts';
 import type { JoinSelection, NewProgram } from '../../components/AddSubscriptionPopup/types.ts';
@@ -70,15 +71,22 @@ import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
   type AttemptAccepted,
+  type AttemptStatus,
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
   ExecutionBusyError,
   type QuizResult,
   type QuizSubmission,
+  SubmissionInProgressError,
+  SubmissionRejectedError,
   type RunCodeInput,
   type RunResult,
 } from '../../components/MainPanel/QuizView/quizAttempt.ts';
+import {
+  QuizSaveRejectedError,
+  type ReviewAttempt,
+} from '../../components/QuizEditor/editorTypes.ts';
 import { apiFetch } from '../../helpers/api.ts';
 import type { JoinableCourse } from '../../components/JoinCoursesPopup/types.ts';
 import type { Program as AddCourseProgram } from '../../components/AddCoursePopup/types.ts';
@@ -157,6 +165,7 @@ function toQuiz(data: QuizDetailResponse): Quiz {
       orderIndex: q.orderIndex,
       language: q.language,
       startCode: q.startCode,
+      execTimeoutMs: q.execTimeoutMs,
       answers: q.answers?.map((a: AnswerResponse) => ({
         id: a.id,
         content: a.content,
@@ -187,6 +196,7 @@ function toQuizMeta(q: QuizResponse): Quiz {
     isDaily: q.isDaily,
     allowRetry: q.allowRetry,
     questionCount: q.questionCount,
+    reviewAttemptCount: q.reviewAttemptCount,
   };
 }
 
@@ -255,11 +265,39 @@ export async function fetchLanguages(): Promise<Language[]> {
   return await res.json();
 }
 
+/** Cause du 409 de core quand une correction de ce quiz est déjà en cours pour l'étudiant. */
+const SUBMISSION_IN_PROGRESS_CAUSE = 'en_cours';
+/**
+ * Cause du 409 de core quand, sur un quiz AVEC reprise, l'enseignant relance la correction de la
+ * tentative précédente (sans reprise, core répond « déjà soumis », en texte).
+ */
+const SUBMISSION_REGRADING_CAUSE = 'relance';
+/**
+ * Corps EXACT (texte brut) du 409 de core pour une tentative unique déjà consommée
+ * (AlreadySubmittedException). Core émet d'autres 409 en texte (« Contrainte non respectée : … »,
+ * conflit d'écriture) : eux restent des échecs ordinaires, à réessayer.
+ */
+const ALREADY_SUBMITTED_BODY = 'Quiz already submitted';
+
 /**
  * Soumettre une tentative de façon ASYNCHRONE : le backend enregistre la tentative et répond
  * 202 + son id ({@link AttemptAccepted}) ; la correction du code tourne ensuite en tâche de fond.
  * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
- * via {@link fetchAttemptResult}. 409 si déjà soumise ou déjà en cours de correction.
+ * via {@link fetchAttemptResult}. 409 de core, corps JSON `{cause, message}` :
+ * - « en_cours » (correction de ce quiz déjà en cours ; `attemptId` facultatif) →
+ *   `SubmissionInProgressError` portant cet id : la vue rejoint l'attente ;
+ * - « relance » (quiz AVEC reprise : l'enseignant relance la correction de la tentative
+ *   précédente) → `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente
+ *   (l'id relancé est déjà connu, son verdict ne conclurait pas cet envoi) ;
+ * - texte EXACT `Quiz already submitted` (tentative unique déjà consommée — y compris pendant une
+ *   relance, sur un quiz sans reprise) → `SubmissionRejectedError` de raison `alreadySubmitted` :
+ *   refus définitif, la vue rouvre le résumé ;
+ * - tout autre 409 (autre texte, ex. « Contrainte non respectée : … » ; JSON d'une autre cause
+ *   ou non objet ; corps vide) → échec ordinaire, avec « Réessayer ».
+ * 400 (réponse refusée, code trop long) → `SubmissionRejectedError` portant le message de core ;
+ * 413 (corps au-delà de la limite du gateway) → `SubmissionRejectedError` de raison `tooLarge`.
+ * Les raisons `tooLarge`, `regrading` et `alreadySubmitted` prennent leur texte dans les libellés
+ * de la vue.
  */
 export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAccepted> {
   const res = await apiFetch(`/api/quizzes/${submission.quizId}/submissions`, {
@@ -267,6 +305,34 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(submission),
   });
+  if (res.status === 413) throw new SubmissionRejectedError('', 'tooLarge');
+  if (res.status === 409) {
+    // Trois 409 reconnus (cf. JSDoc) : deux en JSON (cause), « déjà soumis » par son texte EXACT.
+    // Tout autre corps ne vaut ni « en cours » (une longue attente pour rien), ni « relance », ni
+    // « déjà soumis » (un conflit de contrainte se réessaie) : échec ordinaire.
+    const body = (await res.text().catch(() => '')).trim();
+    let parsed: { cause?: unknown; attemptId?: unknown } | null;
+    try {
+      parsed = JSON.parse(body) as { cause?: unknown; attemptId?: unknown } | null;
+    } catch {
+      parsed = null;
+    }
+    const cause = parsed?.cause;
+    if (cause === SUBMISSION_IN_PROGRESS_CAUSE) {
+      // Id de la tentative en correction (facultatif) : l'attente la reconnaît alors à coup sûr.
+      const id = parsed?.attemptId;
+      throw new SubmissionInProgressError(typeof id === 'number' ? id : undefined);
+    }
+    if (cause === SUBMISSION_REGRADING_CAUSE) throw new SubmissionRejectedError('', 'regrading');
+    if (body === ALREADY_SUBMITTED_BODY) throw new SubmissionRejectedError('', 'alreadySubmitted');
+    throw new Error('Échec de la soumission du quiz');
+  }
+  if (res.status === 400) {
+    // Refus métier de core : texte brut, en français, qui dit quoi corriger. Un corps JSON est
+    // une erreur générique de Spring (anglais, technique) : message vide, l'écran affiche le sien.
+    const body = (await res.text().catch(() => '')).trim();
+    throw new SubmissionRejectedError(body.startsWith('{') ? '' : body);
+  }
   if (!res.ok) throw new Error('Échec de la soumission du quiz');
   return await res.json();
 }
@@ -281,6 +347,43 @@ export async function fetchQuizAttempts(quizId: number): Promise<AttemptSummary[
   return await res.json();
 }
 
+/**
+ * Tentatives « à revoir » d'un quiz (enseignant, #116) : correction automatique en échec, gardées
+ * par core pour l'enseignant — relance en échec, ou plafond d'échecs sans verdict atteint (règle
+ * complète : REVIEW_REASON, QuizView/quizAttempt.ts).
+ */
+export async function fetchReviewAttempts(quizId: number): Promise<ReviewAttempt[]> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/review-attempts`);
+  if (!res.ok) throw new Error('Échec chargement des tentatives à revoir');
+  return await res.json();
+}
+
+/**
+ * Relance la correction d'une tentative « à revoir » (enseignant, #116) : 202, le résultat part à
+ * l'étudiant par WebSocket comme pour une soumission.
+ */
+export async function regradeAttempt(quizId: number, attemptId: number): Promise<void> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}/regrade`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Échec de la relance de la correction');
+}
+
+/**
+ * Statut d'une tentative de l'étudiant (attente de sa correction) : `pending`, `done`, `review`,
+ * ou `gone` sur un 404 (tentative absente : correction en échec, tentative supprimée).
+ */
+export async function fetchAttemptStatus(quizId: number, attemptId: number): Promise<AttemptStatus> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}/status`);
+  if (res.status === 404) return 'gone';
+  if (!res.ok) throw new Error('Échec lecture du statut de la tentative');
+  const body = (await res.json()) as { status?: unknown };
+  if (body.status === 'pending' || body.status === 'done' || body.status === 'review') {
+    return body.status;
+  }
+  throw new Error('Statut de tentative inconnu');
+}
+
 /** Détail corrigé d'une tentative donnée (révision d'une tentative passée). */
 export async function fetchAttemptResult(quizId: number, attemptId: number): Promise<QuizResult> {
   const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}`);
@@ -289,23 +392,31 @@ export async function fetchAttemptResult(quizId: number, attemptId: number): Pro
 }
 
 /**
- * Évalue une question Code : le service d'exécution assemble `code + harnais`, l'exécute dans
- * le sandbox Piston (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
+ * Évalue une question Code : le service d'exécution exécute `code + harnais` dans un conteneur
+ * runner jetable (isolé, pas de réseau, limité) et renvoie le verdict par harnais. Sert au
  * bouton « Tester » de l'éditeur (sans persistance). 429 (trop d'exécutions) → `ExecutionBusyError`.
  */
 export async function evaluateCode(input: CodeEvaluationInput): Promise<CodingTestResult[]> {
+  // Le service d'exécution exécute code + harnais (compilés : runner de notation dédié) et renvoie
+  // le verdict par harnais. timeoutMs : temps limite choisi par le prof (absent → défaut sandbox).
+  const body = {
+    language: input.language,
+    code: input.code,
+    timeoutMs: input.execTimeoutMs,
+    // Code de départ : execution-service ne refuse pas comme « Nom réservé » un nom qu'il déclare.
+    // Il ne sert qu'en Python/JS/TS/Bash ; Java, C, C++ et Go refusent quel que soit ce code ;
+    // PHP, Rust et C# n'ont pas ce refus.
+    startCode: input.startCode,
+    testCases: input.testCases.map((t) => ({
+      name: t.name,
+      harnessCode: t.harnessCode,
+      weight: t.weight,
+    })),
+  };
   const res = await apiFetch('/exec/evaluate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      language: input.language,
-      code: input.code,
-      testCases: input.testCases.map((t) => ({
-        name: t.name,
-        harnessCode: t.harnessCode,
-        weight: t.weight,
-      })),
-    }),
+    body: JSON.stringify(body),
   });
   if (res.status === 429) throw new ExecutionBusyError();
   if (!res.ok) throw new Error("Échec de l'évaluation du code");
@@ -330,8 +441,24 @@ export async function runCode(input: RunCodeInput): Promise<RunResult> {
 
 // ── Quiz (édition enseignant — écriture) ───────────────────────────────────────
 // Les questions sont éditées EN MÉMOIRE dans l'éditeur et persistées en un seul appel
-// (create/update du quiz), pas une requête par question. Le backend assigne les ids
-// (il ignore les ids temporaires négatifs de l'éditeur, ainsi que les harnais de code).
+// (create/update du quiz), pas une requête par question. Le backend assigne les ids : il
+// réutilise ceux qu'il connaît (mise à jour) et ignore les ids temporaires négatifs de l'éditeur.
+// Les harnais de code partent avec leur question et sont enregistrés (table Test_Case).
+
+/**
+ * Refus métier d'un enregistrement de quiz (400, texte brut en français de core ; 413, corps
+ * trop gros pour le gateway) → `QuizSaveRejectedError` ; `null` sinon. Un corps JSON est une erreur générique de Spring
+ * (anglais, technique) et un corps vide ou illisible ne dit rien : l'éditeur garde alors son
+ * message générique.
+ */
+async function quizSaveRejection(res: Response): Promise<QuizSaveRejectedError | null> {
+  // 413 : le quiz entier dépasse la limite de corps du gateway — « Réessayez » renverrait le
+  // même quiz, refusé à chaque fois.
+  if (res.status === 413) return new QuizSaveRejectedError('', 'tooLarge');
+  if (res.status !== 400) return null;
+  const body = (await res.text().catch(() => '')).trim();
+  return body && !body.startsWith('{') ? new QuizSaveRejectedError(body) : null;
+}
 
 /**
  * Créer un quiz COMPLET (méta + questions) dans un cours ; renvoie le quiz persisté
@@ -343,7 +470,7 @@ export async function createQuiz(courseId: number, quiz: Quiz): Promise<Quiz> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(quiz),
   });
-  if (!res.ok) throw new Error('Échec création du quiz');
+  if (!res.ok) throw (await quizSaveRejection(res)) ?? new Error('Échec création du quiz');
   return toQuiz(await res.json());
 }
 
@@ -357,7 +484,7 @@ export async function updateQuiz(quizId: number, quiz: Quiz): Promise<Quiz> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(quiz),
   });
-  if (!res.ok) throw new Error('Échec modification du quiz');
+  if (!res.ok) throw (await quizSaveRejection(res)) ?? new Error('Échec modification du quiz');
   return toQuiz(await res.json());
 }
 

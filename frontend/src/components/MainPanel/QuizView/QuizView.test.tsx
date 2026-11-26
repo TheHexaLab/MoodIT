@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-libra
 import QuizView from './QuizView';
 import type { Course, CourseChannel, Quiz } from '../../../types/domain';
 import type { AttemptSummary, QuizResult, SubmitQuizHandler } from './quizAttempt';
+import { SubmissionRejectedError } from './quizAttempt';
 
 /**
  * Coquille de la vue quiz (côté étudiant) : en-tête, barre de progression, corps
@@ -48,6 +49,7 @@ interface RenderOpts {
   staleNotice?: boolean;
   onReloadStale?: () => void;
   onSubmitQuiz?: ReturnType<typeof vi.fn>;
+  labels?: React.ComponentProps<typeof QuizView>['labels'];
 }
 
 function renderView(opts: RenderOpts = {}) {
@@ -71,9 +73,37 @@ function renderView(opts: RenderOpts = {}) {
       onSubmitQuiz={onSubmitQuiz as SubmitQuizHandler | undefined}
       staleNotice={opts.staleNotice ?? false}
       onReloadStale={onReloadStale}
+      labels={opts.labels}
     />
   );
   return { ...utils, quiz, onFetchQuiz, onFetchAttempts, onFetchAttemptResult, onReloadStale };
+}
+
+/**
+ * Élément focalisé à l'instant PRÉCIS où `isShown()` devient vrai, relevé par un observateur de
+ * mutation : il passe avant le planificateur de React, donc avant tout effet passif (cf.
+ * AssignmentTeams.test). Un `waitFor` ne distingue pas un effet de mise en page d'un effet
+ * passif : RTL laisse passer un tour de boucle après lui, qui vide les effets passifs. Hors
+ * `act` (qui les viderait aussi) le temps de l'attente.
+ */
+async function focusWhenShown(trigger: () => void, isShown: () => boolean): Promise<Element | null> {
+  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+  const shown = new Promise<Element | null>((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!isShown()) return;
+      observer.disconnect();
+      resolve(document.activeElement);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  trigger();
+  env.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    return await shown;
+  } finally {
+    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+  }
 }
 
 /** Attend la fin du chargement initial (overlay busy disparu, 1re question affichée). */
@@ -173,6 +203,201 @@ describe('QuizView — pied de navigation', () => {
     expect(submit.getAttribute('title')).toContain('déjà soumis');
   });
 
+  it.each([
+    ['refus du serveur → son message, sans « Réessayer »',
+      new SubmissionRejectedError('Question 2 : le code soumis dépasse 100000 caractères.'),
+      'Question 2 : le code soumis dépasse 100000 caractères.', false],
+    ['échec ordinaire → message générique, avec « Réessayer »', new Error('réseau'),
+      'La soumission a échoué. Réessayez.', true],
+  ])('%s', async (_case, error, message, retryOffered) => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw error;
+    });
+    renderView({ onSubmitQuiz });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
+    // Échec de l'envoi : titre par défaut (les attentes non conclues ont le leur).
+    expect(screen.getByText('Soumission impossible')).toBeTruthy();
+    expect(Boolean(screen.queryByRole('button', { name: 'Réessayer' }))).toBe(retryOffered);
+  });
+
+  it('413 du gateway : libellé « trop volumineux » de la vue, sans « Réessayer »', async () => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw new SubmissionRejectedError('', 'tooLarge');
+    });
+    // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+    renderView({ onSubmitQuiz, labels: { view: { submitTooLarge: 'TROP_GROS_VUE' } } });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText('TROP_GROS_VUE')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+  });
+
+  it('409 « relance » : message de recorrection, sans « Réessayer », réponses gardées en passation', async () => {
+    const onSubmitQuiz = vi.fn(async () => {
+      throw new SubmissionRejectedError('', 'regrading');
+    });
+    // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+    renderView({ onSubmitQuiz, labels: { view: { submitRegrading: 'RELANCE_VUE' } } });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('A'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText('RELANCE_VUE')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    expect(screen.getByText('Question trois')).toBeTruthy();
+    expect(screen.queryByText('Correction en cours', { exact: false })).toBeNull();
+    expect(localStorage.getItem('moodit:quiz-draft:55')).not.toBeNull();
+  });
+
+  it('409 « déjà soumis » : message sans « Réessayer », puis le résumé de la tentative consommée', async () => {
+    const graded = {
+      attemptId: 7, earned: 2, max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 7, attemptNo: 1, earned: 2, max: 3, status: 'done' }]);
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz({ allowRetry: false }))}
+        onFetchAttempts={onFetchAttempts}
+        onFetchAttemptResult={vi.fn(async () => graded)}
+        onSubmitQuiz={vi.fn(async () => {
+          throw new SubmissionRejectedError('', 'alreadySubmitted');
+        })}
+        // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+        labels={{ view: { submitAlreadySubmitted: 'DEJA_VUE' } }}
+      />
+    );
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    await waitFor(() => expect(screen.getByText('DEJA_VUE')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+  });
+
+  it('verdict reçu mais résultat illisible : libellé dédié de la vue (tentative enregistrée)', async () => {
+    const graded = {
+      attemptId: 9, earned: 2, max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([
+        { id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+      ]),
+      onFetchAttemptResult: vi.fn().mockRejectedValueOnce(new Error('réseau')).mockResolvedValue(graded),
+      onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+      // Libellé propre à la vue : prouve qu'il est transmis au hook (pas son défaut).
+      labels: { view: { resultUnavailable: 'RESULTAT_VUE' } },
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
+    });
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(screen.getByText('RESULTAT_VUE')).toBeTruthy());
+    // Titre propre au cas (pas « Soumission impossible » : ce n'est pas un échec de l'envoi).
+    expect(screen.getByText('Résultat indisponible')).toBeTruthy();
+    expect(screen.queryByText('Soumission impossible')).toBeNull();
+  });
+
+  it('statut de la tentative attendue transmis au hook : tentative supprimée → « vérification impossible »', async () => {
+    // Marqueur d'un envoi expiré (#9) ; son statut, lu via la vue, dit qu'elle a été supprimée.
+    localStorage.setItem(
+      'moodit:quiz-pending-submission:55',
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    const onFetchAttemptStatus = vi.fn(async () => 'gone' as const);
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz())}
+        onFetchAttempts={vi.fn(async () => [])}
+        onFetchAttemptStatus={onFetchAttemptStatus}
+        onSubmitQuiz={vi.fn(async () => ({ attemptId: 9 }))}
+      />
+    );
+    await waitFor(() =>
+      expect(screen.getByText('La vérification du code est momentanément indisponible', { exact: false })).toBeTruthy()
+    );
+    expect(onFetchAttemptStatus).toHaveBeenCalledWith(55, 9);
+  });
+
+  it('attente non conclue (plafond) : titre « Correction en cours », pas « Soumission impossible »', async () => {
+    // Marqueur d'un envoi expiré : l'attente conclut dès le montage.
+    localStorage.setItem(
+      'moodit:quiz-pending-submission:55',
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    renderView({ onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })) });
+    await waitFor(() =>
+      expect(screen.getByText('La correction prend plus de temps que prévu', { exact: false })).toBeTruthy()
+    );
+    expect(screen.getByText('Correction en cours')).toBeTruthy();
+    expect(screen.queryByText('Soumission impossible')).toBeNull();
+  });
+
+  it('attente de la correction : texte d’état, contenu inerte, « Soumettre » désactivé', async () => {
+    // L'attente peut durer de longues minutes : la région d'état le dit, et rien sous le voile
+    // n'est actionnable (un second envoi lançait une seconde attente).
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 9 }));
+    const { container } = renderView({ onSubmitQuiz });
+    await waitLoaded();
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    const submit = screen.getByText('Soumettre').closest('button') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    const status = await screen.findByRole('status');
+    await waitFor(() =>
+      expect(status.textContent).toContain(
+        'Correction en cours… cela peut prendre plusieurs minutes ; vous pouvez quitter cette page et revenir.'
+      )
+    );
+    expect(container.querySelector('[inert]')?.contains(submit)).toBe(true);
+    expect(submit.disabled).toBe(true);
+    // L'occupation est portée par le contenu, pas par la région annoncée : un aria-busy permanent
+    // sur celle-ci pouvait différer l'annonce du texte d'attente.
+    expect(status.hasAttribute('aria-busy')).toBe(false);
+    expect(container.querySelector('[inert]')?.getAttribute('aria-busy')).toBe('true');
+  });
+
   it('« Soumettre » actif quand la tentative n’est pas consommée', async () => {
     renderView();
     await waitLoaded();
@@ -194,6 +419,336 @@ describe('QuizView — points de progression (dots)', () => {
     // Le 3e point est actif.
     const activeDots = container.querySelectorAll('[data-active]');
     expect(activeDots.length).toBe(1);
+  });
+});
+
+describe('QuizView — tentative à revoir par l’enseignant (#116)', () => {
+  it('message d’attente à la place du résumé, sans « Revoir mes réponses »', async () => {
+    renderView({
+      quiz: makeQuiz({ allowRetry: false }),
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(screen.getByText("En attente de l'enseignant")).toBeTruthy();
+    expect(screen.queryByText('Revoir mes réponses')).toBeNull();
+    expect(screen.queryByText('Refaire le quiz')).toBeNull();
+  });
+
+  it('garde la barre des tentatives sous le message : l’étudiant revient à ses autres tentatives', async () => {
+    const graded: QuizResult = {
+      earned: 2,
+      max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const { onFetchAttemptResult } = renderView({
+      attempts: [
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: null, max: 3, status: 'review' },
+      ],
+      attemptResult: graded,
+    });
+    // La dernière tentative est à revoir : message d'attente, ET la barre des deux tentatives.
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(screen.getByText('#2 · à revoir').getAttribute('aria-pressed')).toBe('true');
+
+    // Vers une tentative CORRIGÉE, au clavier : son corrigé est lu (chargement, barre démontée),
+    // puis le résumé monte une nouvelle barre ; le focus est rendu à la puce du même id.
+    const gradedChip = screen.getByText('#1 · 2/3');
+    gradedChip.focus();
+    fireEvent.click(gradedChip);
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+    expect(onFetchAttemptResult).toHaveBeenCalledWith(55, 8);
+    expect(gradedChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#1 · 2/3');
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
+
+    // Et retour à la tentative à revoir depuis le résumé, au clavier : la puce activée
+    // disparaît avec le résumé, le focus est rendu à la puce du même id dans la nouvelle barre.
+    const reviewChip = screen.getByText('#2 · à revoir');
+    reviewChip.focus();
+    fireEvent.click(reviewChip);
+    expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy();
+    expect(reviewChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#2 · à revoir');
+    // Le message est annoncé par une région toujours montée.
+    expect(document.querySelector('[aria-live="polite"]:not([role])')?.textContent).toContain(
+      'Tentative transmise à votre enseignant'
+    );
+  });
+
+  it('relance aboutie sur la tentative affichée : focus rendu à sa puce, correction annoncée', async () => {
+    // Revue #246 : la barre du message d'attente est démontée au profit de celle du résumé ; le
+    // focus clavier tombait sur <body> et la note n'était pas annoncée.
+    const graded: QuizResult = {
+      attemptId: 9,
+      earned: 2,
+      max: 3,
+      questions: [
+        { questionId: 1, earned: 1, max: 1 },
+        { questionId: 2, earned: 1, max: 1 },
+        { questionId: 3, earned: 0, max: 1 },
+      ],
+    } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: null, max: 3, status: 'review' },
+      ])
+      .mockResolvedValue([
+        { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 9, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+      ]);
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts,
+      onFetchAttemptResult: vi.fn(async () => graded),
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() => expect(screen.getByText('#2 · à revoir')).toBeTruthy());
+    const reviewChip = screen.getByText('#2 · à revoir');
+    reviewChip.focus();
+
+    // Le focus est posé par l'effet de MISE EN PAGE de la nouvelle barre, dans la mise à jour qui
+    // la monte : il est déjà sur la puce quand le résumé apparaît (un effet passif le poserait
+    // après un passage par <body>).
+    const focused = await focusWhenShown(
+      () => rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />),
+      () => screen.queryByText('Quiz hebdo — terminé !') != null
+    );
+    expect(focused?.textContent).toBe('#2 · 2/3');
+    expect(reviewChip.isConnected).toBe(false);
+    expect(document.activeElement?.textContent).toBe('#2 · 2/3');
+    expect(document.querySelector('[aria-live="polite"]:not([role])')?.textContent).toBe(
+      'Votre tentative a été corrigée : son résultat est affiché.'
+    );
+  });
+
+  /** Région annoncée toujours montée (le message d'attente, puis l'annonce de la correction). */
+  const liveRegion = () => document.querySelector('[aria-live="polite"]:not([role])');
+  const GRADED_NOTICE = 'Votre tentative a été corrigée : son résultat est affiché.';
+  const graded9 = {
+    attemptId: 9,
+    earned: 2,
+    max: 3,
+    questions: [
+      { questionId: 1, earned: 1, max: 1 },
+      { questionId: 2, earned: 1, max: 1 },
+      { questionId: 3, earned: 0, max: 1 },
+    ],
+  } as QuizResult;
+  const before = [
+    { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+    { id: 9, attemptNo: 2, earned: null, max: 3, status: 'review' },
+  ] as AttemptSummary[];
+  const after = [
+    { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+    { id: 9, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+  ] as AttemptSummary[];
+
+  it('rechargement depuis une tentative à revoir qui n’est pas la dernière : aucune annonce de correction', async () => {
+    // Revue #246 : `reload` quitte le message d'attente (#9) AVANT d'avoir choisi la tentative à
+    // afficher (#10, la dernière) ; cet état intermédiaire ne doit rien annoncer pour #9.
+    const graded10 = { ...graded9, attemptId: 10 } as QuizResult;
+    let resolveResult!: (r: QuizResult) => void;
+    const onFetchAttemptResult = vi
+      .fn()
+      .mockResolvedValueOnce(graded10)
+      .mockImplementationOnce(() => new Promise<QuizResult>((resolve) => { resolveResult = resolve; }));
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts: vi.fn(async () => [
+        { id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' },
+        { id: 10, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+      ] as AttemptSummary[]),
+      onFetchAttemptResult,
+      onReloadStale: vi.fn(),
+    };
+    const { rerender } = render(<QuizView {...props} staleNotice={false} />);
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+    fireEvent.click(screen.getByText('#1 · à revoir'));
+    expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy();
+
+    rerender(<QuizView {...props} staleNotice={true} />);
+    // État intermédiaire du rechargement : message d'attente quitté, #9 toujours courante.
+    await waitFor(() => expect(screen.getByText('Quiz terminé')).toBeTruthy());
+    expect(liveRegion()?.textContent).toBe('');
+
+    await act(async () => {
+      resolveResult(graded10);
+    });
+    await waitFor(() =>
+      expect(screen.getByText('#2 · 2/3').getAttribute('aria-pressed')).toBe('true')
+    );
+    expect(liveRegion()?.textContent).toBe('');
+  });
+
+  it('relance aboutie mais lecture du résultat échouée → rechargement : correction annoncée, focus rendu à la puce', async () => {
+    // Revue #246 : repli du hook (`reload`). Son état intermédiaire servait de référence, et la
+    // vue finale ne paraissait plus changer : ni annonce, ni focus (resté sur <body>).
+    let resolveReloadResult!: (r: QuizResult) => void;
+    const onFetchAttemptResult = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('503'))
+      .mockImplementationOnce(
+        () => new Promise<QuizResult>((resolve) => { resolveReloadResult = resolve; })
+      )
+      .mockImplementationOnce(() => new Promise<QuizResult>(() => {}));
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts: vi.fn().mockResolvedValueOnce(before).mockResolvedValue(after),
+      onFetchAttemptResult,
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() => expect(screen.getByText('#2 · à revoir')).toBeTruthy());
+    screen.getByText('#2 · à revoir').focus();
+
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    // État intermédiaire du rechargement (message d'attente quitté, corrigé pas encore lu).
+    await waitFor(() => expect(screen.getByText('Quiz terminé')).toBeTruthy());
+    expect(onFetchAttemptResult).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveReloadResult(graded9);
+    });
+    await waitFor(() => expect(screen.getByText('Quiz hebdo — terminé !')).toBeTruthy());
+    expect(liveRegion()?.textContent).toBe(GRADED_NOTICE);
+    expect(document.activeElement?.textContent).toBe('#2 · 2/3');
+
+    // Autre tentative demandée : l'annonce s'efface dès le chargement, sans attendre sa fin.
+    fireEvent.click(screen.getByText('#1 · 2/3'));
+    expect(screen.getByRole('status')).toBeTruthy();
+    expect(liveRegion()?.textContent).toBe('');
+  });
+
+  it('relance aboutie mais rechargement en échec : erreur de chargement, aucune annonce de correction', async () => {
+    const onFetchAttemptResult = vi.fn(async () => {
+      throw new Error('503');
+    });
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts: vi.fn().mockResolvedValueOnce(before).mockResolvedValue(after),
+      onFetchAttemptResult,
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() => expect(screen.getByText('#2 · à revoir')).toBeTruthy());
+
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(screen.getByText('Réessayer')).toBeTruthy());
+    expect(onFetchAttemptResult).toHaveBeenCalledTimes(2);
+    expect(liveRegion()?.textContent).toBe('');
+  });
+
+  it('pied absent sous le message d’attente d’un quiz SANS reprise (aucun bouton à y mettre)', async () => {
+    // Revue #246 : le <footer> était rendu vide, barre de 4rem avec sa bordure.
+    const { container } = renderView({
+      quiz: makeQuiz({ allowRetry: false }),
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    expect(container.querySelector('footer')).toBeNull();
+  });
+
+  it('message d’attente d’un quiz AVEC reprise : le pied ne porte que « Refaire le quiz »', async () => {
+    const { container } = renderView({
+      attempts: [{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }],
+    });
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    const footer = container.querySelector('footer');
+    expect(footer?.textContent).toBe('Refaire le quiz');
+  });
+
+  it('focus demandé pour une puce absente (une seule tentative) : pas rendu plus tard à une autre tentative', async () => {
+    // Revue #246 : relance aboutie de l'unique tentative #9 → focus demandé pour sa puce, sans
+    // barre (une tentative). La demande restait en attente : après « Refaire » et la soumission de
+    // #10, la barre à deux puces focalisait #9, qui n'est pas la tentative affichée.
+    const graded10 = { ...graded9, attemptId: 10 } as QuizResult;
+    const onFetchAttempts = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 9, attemptNo: 1, earned: null, max: 3, status: 'review' }])
+      .mockResolvedValueOnce([{ id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' }])
+      .mockResolvedValue([
+        { id: 9, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+        { id: 10, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+      ]);
+    const props = {
+      course,
+      channel,
+      onFetchQuiz: vi.fn(async () => makeQuiz()),
+      onFetchAttempts,
+      onFetchAttemptResult: vi.fn(async (_q: number, id: number) => (id === 10 ? graded10 : graded9)),
+      onSubmitQuiz: vi.fn(async () => ({ attemptId: 10 })),
+    };
+    const { rerender } = render(<QuizView {...props} attemptOutcome={null} />);
+    await waitFor(() =>
+      expect(screen.getByText('Tentative transmise à votre enseignant')).toBeTruthy()
+    );
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
+    await waitFor(() => expect(liveRegion()?.textContent).toBe(GRADED_NOTICE));
+    expect(screen.queryByText('#1 · 2/3')).toBeNull(); // une seule tentative : pas de barre
+
+    fireEvent.click(screen.getByText('Refaire le quiz'));
+    fireEvent.click(screen.getByText('A'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Suivant'));
+    fireEvent.click(screen.getByText('Soumettre'));
+    // Verdict poussé de #10 (sinon le sondage de l'historique, toutes les 1,5 s, le trouve).
+    rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 10, ok: true }} />);
+    await waitFor(
+      () => expect(screen.getByText('#2 · 2/3').getAttribute('aria-pressed')).toBe('true'),
+      { timeout: 4000 }
+    );
+    expect(document.activeElement?.textContent).not.toBe('#1 · 2/3');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('puce dont la lecture échoue puis « Réessayer » : le focus ne va pas à la puce demandée avant l’échec', async () => {
+    // Revue #246 : l'écran d'erreur n'a pas de barre, la demande restait en attente ; le
+    // rechargement rouvre la DERNIÈRE tentative (#2), et le focus partait sur la puce #1.
+    const done = [
+      { id: 8, attemptNo: 1, earned: 2, max: 3, status: 'done' },
+      { id: 9, attemptNo: 2, earned: 2, max: 3, status: 'done' },
+    ] as AttemptSummary[];
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz())}
+        onFetchAttempts={vi.fn(async () => done)}
+        onFetchAttemptResult={vi.fn(async (_q: number, id: number) => {
+          if (id === 8) throw new Error('503');
+          return graded9;
+        })}
+      />
+    );
+    await waitFor(() => expect(screen.getByText('#2 · 2/3')).toBeTruthy());
+    fireEvent.click(screen.getByText('#1 · 2/3'));
+    fireEvent.click(await screen.findByText('Réessayer'));
+    await waitFor(() =>
+      expect(screen.getByText('#2 · 2/3').getAttribute('aria-pressed')).toBe('true')
+    );
+    expect(document.activeElement?.textContent).not.toBe('#1 · 2/3');
+    expect(document.activeElement).toBe(document.body);
   });
 });
 

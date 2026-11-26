@@ -1,11 +1,16 @@
-// Test d'intégration : valide l'isolation SQL 2 phases DIRECTEMENT contre Piston réel.
-// Rejoue la même logique que ExecutionService.runSqlIsolated (setup -> code etudiant -> .dump ->
-// filtre tables de travail -> verdict encadre par nonce). A lancer DANS le conteneur Piston
-// (localhost:2000). Cf. scripts/README.md. Aucun effet de bord (sandbox jetable).
-const http = require('http');
-const OPT = { host: 'localhost', port: 2000, path: '/api/v2/execute', method: 'POST' };
-const NONCE = 'MOODIT_TEST_NONCE';
-const DS = NONCE + '_DUMP_START', DE = NONCE + '_DUMP_END';
+// Test d'intégration : valide le PRINCIPE de l'isolation SQL 2 phases contre un sqlite3 réel
+// (setup -> code etudiant -> .dump -> filtre tables de travail -> verdict encadre par nonce),
+// avec la même commande que le mode exec du runner (sqlite3 -safe -bail -batch :memory:).
+// Version SIMPLIFIÉE de ExecutionService.runSqlIsolated : sentinelles par SELECT (et non
+// .print), filtre ligne à ligne (et non le découpeur de CodeAssembler, ni le refus d'un dump à
+// paramètre ou tronqué). La référence, qui passe par le vrai code, reste
+// ExecutionIntegrationTest (sql_*). Nécessite node ET sqlite3 dans le PATH.
+// Cf. scripts/README.md. Aucun effet de bord (base en mémoire, jetable).
+const { spawnSync } = require('child_process');
+// Un nonce PAR PHASE, comme runSqlIsolated (#23) : le code soumis tourne en phase 1, rien de ce
+// qu'il y verrait ne doit valoir en phase 2.
+const DUMP_NONCE = 'MOODIT_TEST_DUMP_NONCE', NONCE = 'MOODIT_TEST_NONCE';
+const DS = DUMP_NONCE + '_DUMP_START', DE = DUMP_NONCE + '_DUMP_END';
 const VS = NONCE + '_VERDICT_START', VE = NONCE + '_VERDICT_END';
 
 const SETUP = "CREATE TABLE utilisateurs(nom TEXT, actif INTEGER);\n" +
@@ -14,22 +19,18 @@ const VERDICT = "SELECT (SELECT count(*) FROM utilisateurs WHERE actif = 0) = 3;
 const WORKING_TABLES = ['utilisateurs']; // liste blanche = tables du setup (cf. sqlWorkingTables)
 
 function run(sql) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ language: 'sqlite3', version: '*',
-      files: [{ name: 'main.sql', content: sql }], run_timeout: 3000 });
-    const opt = Object.assign({}, OPT, { headers: { 'content-type': 'application/json',
-      'content-length': Buffer.byteLength(body) } });
-    const req = http.request(opt, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => { try { resolve(JSON.parse(d).run || {}); } catch (e) { reject(e); } });
-    });
-    req.on('error', reject); req.write(body); req.end();
-  });
+  const r = spawnSync('sqlite3', ['-safe', '-bail', '-batch', ':memory:'],
+    { input: sql, encoding: 'utf8', timeout: 3000 });
+  if (r.error) return Promise.reject(r.error);
+  return Promise.resolve({ code: r.status === null ? -1 : r.status,
+    stdout: r.stdout || '', stderr: r.stderr || '' });
 }
+// Comme ExecutionService.linesBetween : une sentinelle de début EN DOUBLE (sortie forgée) = échec.
 function between(out, a, b) {
   const L = (out || '').split('\n'); let s = -1, e = -1;
   for (let i = 0; i < L.length; i++) { const t = L[i].trim();
-    if (s < 0) { if (t === a) s = i; } else if (t === b) { e = i; break; } }
+    if (t === a) { if (s >= 0) return null; s = i; }
+    else if (s >= 0 && e < 0 && t === b) e = i; }
   return (s < 0 || e < 0) ? null : L.slice(s + 1, e);
 }
 function filterDump(lines) {
@@ -68,6 +69,6 @@ async function grade(student) {
     console.log((good ? 'OK      ' : 'MISMATCH') + ' | passed=' + res.ok + ' (attendu ' + c[2] + ') | ' + c[0] +
       (res.why ? ' [' + res.why + ']' : ''));
   }
-  console.log(allGood ? 'TOUS OK : isolation 2 phases validee sur Piston reel.' : 'ECHEC : cas inattendu.');
+  console.log(allGood ? 'TOUS OK : isolation 2 phases validee sur sqlite3 reel.' : 'ECHEC : cas inattendu.');
   process.exit(allGood ? 0 : 1);
 })();

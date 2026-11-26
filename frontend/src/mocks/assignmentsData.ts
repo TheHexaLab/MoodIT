@@ -104,6 +104,12 @@ export function demoAssignments(courseId: number, now: Date): Assignment[] {
       instructions:
         "Implémentez un arbre AVL en Java, avec l'insertion, la suppression et les rotations.\n\nRemettez une archive .zip contenant votre code et un court rapport.",
       dueAt: dueIn(now, 21),
+      // Des remises SANS note sur la seule échéance toujours
+      // future (+21 j) : le test « une remise n'est en retard que si
+      // la date limite est passée » (dashboardApiAssignments.test.ts)
+      // a besoin d'un devoir ouvert AVEC remises quel que soit le
+      // jour et le fuseau du run.
+      submittedCount: 3,
       weight: 20,
       expectedFormats: ['.zip'],
       files: [],

@@ -84,6 +84,39 @@ updates:
         patterns: ["*"]
     labels: [chore]
 
+  # ── Images runner (docker/runners/) : seules à exécuter du code non fiable ────
+  # Correctifs de sécurité de la même version seulement (digest, patch) : la version d'un
+  # langage est celle que voient les étudiants et les gabarits de question, elle se change à la
+  # main (docker/runners/README.md). Le scan Trivy de ces images n'est pas bloquant : sans cette
+  # entrée, rien ne proposait de les rafraîchir. Limite : c (gcc:14), go (golang:1.23) et rust
+  # (rust:1.82) sont sur des tags que l'amont ne reconstruit plus — aucun digest neuf n'arrivera ;
+  # ce sont pourtant elles qui portent presque toutes les CVE CRITICAL. Leur montée de version se
+  # fait à la main : changer le FROM, reconstruire (README des runners, « Construire / tester »)
+  # et rejouer les tests d'intégration, puisque la version vue par les étudiants change.
+  - package-ecosystem: docker
+    directories:
+      - /docker/runners/bash
+      - /docker/runners/c
+      - /docker/runners/csharp
+      - /docker/runners/go
+      - /docker/runners/java
+      - /docker/runners/node
+      - /docker/runners/php
+      - /docker/runners/python
+      - /docker/runners/rust
+      - /docker/runners/sqlite
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker-runners:
+        patterns: ["*"]
+    labels: [chore]
+
   # ── Actions GitHub utilisées par les workflows ────────────────────────────────
   - package-ecosystem: github-actions
     directory: /

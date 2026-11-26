@@ -17,8 +17,12 @@ export interface QuestionLabels {
   testsResult: string;
   /** Note quand le détail des harnais n'est pas disponible. */
   serverNote: string;
-  /** Affiché tant que la correction async du code (exécution sandbox) n'a pas renvoyé les verdicts. */
-  evaluating: string;
+  /**
+   * Question Code sans verdict de test (question sans harnais, harnais remplacés depuis la
+   * correction, question ajoutée après la tentative) : cause permanente, pas une correction en
+   * cours — le résultat n'est lu qu'une fois la tentative corrigée.
+   */
+  notEvaluated: string;
   /** aria-label de l'éditeur de code (nom du langage). */
   codeAria: (language: string) => string;
   /** Libellé du bouton d'exécution (« play ») de l'éditeur de code. */
@@ -35,7 +39,7 @@ export const defaultQuestionLabels: QuestionLabels = {
   testsResult: 'Résultat des tests',
   serverNote:
     "Les harnais de test sont exécutés côté serveur ; le détail n'est pas disponible ici.",
-  evaluating: 'Évaluation du code en cours…',
+  notEvaluated: 'Non évalué : aucun verdict de test n’est disponible pour cette question.',
   codeAria: (language) => `Éditeur de code (${language})`,
   runCode: 'Exécuter',
 };

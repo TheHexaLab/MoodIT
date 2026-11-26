@@ -3,6 +3,7 @@ import { DeleteConfirmationPopup } from '../DeleteConfirmationPopup/DeleteConfir
 import { EditorShell } from './EditorShell';
 import { ErrorPopup } from '../ErrorPopup/ErrorPopup';
 import { QuizListBody } from './QuizListPopup';
+import { ReviewAttemptsBody } from './ReviewAttemptsBody';
 import { QuizFormBody } from './QuizFormPopup';
 import { QuestionFormBody } from './QuestionFormPopup';
 import { HarnessBody } from './HarnessPopup';
@@ -15,6 +16,7 @@ import {
 } from '../../types/domain';
 import {
   FALLBACK_LANGUAGES,
+  QuizSaveRejectedError,
   defaultHarness,
   draftToQuestion,
   emptyQuestionDraft,
@@ -54,6 +56,8 @@ interface QuizEditorProps {
 
 type View =
   | { kind: 'list' }
+  // Tentatives « à revoir » d'un quiz (#116) : empilée sur la liste (chevron retour).
+  | { kind: 'review'; quizId: number }
   | { kind: 'form'; quizId: number; isNew: boolean }
   // `quizIsNew` = le QUIZ parent est-il en création (à préserver au retour au form) ;
   // `isNew` = la QUESTION est-elle en création.
@@ -94,6 +98,11 @@ export function QuizEditor({
   // évite d'afficher une liste vide « définitive » à la place du chargement.
   const [loadingQuizzes, setLoadingQuizzes] = useState(handlers.onFetchQuizzes != null);
   const [view, setView] = useState<View>({ kind: 'list' });
+  // Vue courante lue par les rappels asynchrones (réponse d'une relance arrivée après un retour).
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  });
   // Quiz dont le détail est en cours de chargement (clic sur le crayon) : pilote le
   // spinner du crayon dans la liste, le temps de `onFetchQuiz`.
   const [openingQuizId, setOpeningQuizId] = useState<number | null>(null);
@@ -117,15 +126,27 @@ export function QuizEditor({
   // d'affichage immédiat le temps du fetch.
   const fetchQuizzes = handlers.onFetchQuizzes;
   const showingList = view.kind === 'list';
+  // Relecture DEMANDÉE de la liste (cf. markRegraded) : elle passe par cet effet, qui annule
+  // une lecture devenue périmée — vue quittée, ou lecture plus récente lancée entre-temps.
+  const [listReload, setListReload] = useState(0);
+  // Génération de la lecture de liste en cours. L'annulation par l'effet n'a lieu qu'au rendu
+  // suivant : après le détail chargé par openEdit (suite asynchrone, rendu différé), une réponse
+  // de liste arrivée avant ce rendu remplaçait le quiz complet par sa version sans questions, et
+  // un enregistrement aurait supprimé ces questions. openEdit l'invalide donc tout de suite.
+  const listReadGen = useRef(0);
+  const invalidateListRead = () => {
+    listReadGen.current += 1;
+  };
   useEffect(() => {
     if (!fetchQuizzes || !showingList) return;
+    const gen = ++listReadGen.current;
     let cancelled = false;
     // État de chargement posé avant le fetch asynchrone (pattern fetch-in-effect assumé).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingQuizzes(true);
     Promise.resolve(fetchQuizzes(courseId))
       .then((all) => {
-        if (!cancelled) setQuizzes(all);
+        if (!cancelled && gen === listReadGen.current) setQuizzes(all);
       })
       .catch(() => {
         /* échec : on garde la liste affichée */
@@ -136,7 +157,7 @@ export function QuizEditor({
     return () => {
       cancelled = true;
     };
-  }, [courseId, fetchQuizzes, showingList]);
+  }, [courseId, fetchQuizzes, showingList, listReload]);
 
   // Langages : AUCUN cache. Chaque accès à une question Code refetch les langages
   // (« fetch tout le temps »). `effectiveLanguages` = langages chargés > prop ; sinon
@@ -185,7 +206,9 @@ export function QuizEditor({
     const i = list.findIndex((q) => q.id === quiz.id);
     if (i < 0) return [...list, quiz];
     const next = [...list];
-    next[i] = quiz;
+    // Le détail d'édition et la réponse d'enregistrement ne portent pas le compteur « à revoir »
+    // (#116), propre à la liste : on garde celui de l'entrée remplacée.
+    next[i] = { reviewAttemptCount: list[i].reviewAttemptCount, ...quiz };
     return next;
   };
   const upsertQuiz = (quiz: Quiz) => setQuizzes((prev) => upsertInList(prev, quiz));
@@ -203,6 +226,7 @@ export function QuizEditor({
       setOpeningQuizId(quiz.id); // spinner sur le crayon de CE quiz pendant le fetch
       try {
         full = await handlers.onFetchQuiz(quiz.id);
+        invalidateListRead();
         upsertQuiz(full);
       } catch {
         // Échec : on NE navigue PAS vers le formulaire (sinon message inline). On reste sur la
@@ -286,8 +310,16 @@ export function QuizEditor({
       setView({ kind: 'list' });
       // commit : remonte la liste (nouveau quiz / titre / statut / questions à jour).
       onQuizzesChange?.(next);
-    } catch {
-      setError(t.saveError);
+    } catch (e) {
+      // Refus métier de core (taille d'un code ou d'un harnais…) : son message nomme la question
+      // à corriger, alors que « Réessayez » ferait renvoyer le même quiz.
+      setError(
+        e instanceof QuizSaveRejectedError
+          ? e.reason === 'tooLarge'
+            ? t.saveTooLarge
+            : e.message
+          : t.saveError
+      );
     } finally {
       setSaving(false);
     }
@@ -380,6 +412,36 @@ export function QuizEditor({
     setView({ kind: 'list' });
   }
 
+  /**
+   * Une relance est partie : un « à revoir » de moins sur la pastille du quiz (#116). Seulement
+   * si la vue « à revoir » de ce quiz est encore affichée : revenu à la liste avant la réponse,
+   * l'enseignant a déjà un compte relu au serveur, que le décompte fausserait.
+   */
+  function markRegraded(quizId: number) {
+    if (viewRef.current.kind !== 'review' || viewRef.current.quizId !== quizId) {
+      // Revenu à la LISTE pendant la relance : sa lecture a pu être servie avant que la relance
+      // soit enregistrée, et garder un « à revoir » de trop. On la relit une fois la relance
+      // acceptée — par l'effet de liste, jamais directement : une réponse arrivée après
+      // l'ouverture d'un quiz y remplaçait le quiz complet par sa version sans questions, et un
+      // enregistrement aurait supprimé ces questions au serveur. (Ailleurs, le retour à la
+      // liste la relira de toute façon.)
+      if (viewRef.current.kind === 'list') setListReload((n) => n + 1);
+      return;
+    }
+    setQuizzes((list) =>
+      list.map((q) =>
+        q.id === quizId
+          ? { ...q, reviewAttemptCount: Math.max(0, (q.reviewAttemptCount ?? 0) - 1) }
+          : q
+      )
+    );
+  }
+
+  /** Liste « à revoir » chargée : la pastille se recale sur ce que le serveur renvoie. */
+  function setReviewCount(quizId: number, count: number) {
+    setQuizzes((list) => list.map((q) => (q.id === quizId ? { ...q, reviewAttemptCount: count } : q)));
+  }
+
   // ─────────────────────────────────── Rendu ───────────────────────────────────
 
   const activeQuiz = view.kind !== 'list' ? quizById(view.quizId) : null;
@@ -391,7 +453,7 @@ export function QuizEditor({
     else action();
   };
   // Le retour de la vue « Tester » (prévisualisation) ne perd rien → jamais de confirmation.
-  const backLosesData = view.kind !== 'list' && view.kind !== 'test';
+  const backLosesData = view.kind !== 'list' && view.kind !== 'test' && view.kind !== 'review';
 
   // Identité de la vue affichée : sert à réinitialiser le défilement de la coquille
   // à chaque navigation (liste → quiz → question → harnais), pour ne pas hériter du
@@ -399,6 +461,8 @@ export function QuizEditor({
   const scrollResetKey =
     view.kind === 'list'
       ? 'list'
+      : view.kind === 'review'
+        ? `review-${view.quizId}`
       : view.kind === 'form'
         ? `form-${view.quizId}`
         : `${view.kind}-${view.quizId}-${view.draft.id ?? 'new'}`;
@@ -417,6 +481,15 @@ export function QuizEditor({
           scrollBody: false,
           desktopMaxVh: undefined as number | undefined,
         }
+      : view.kind === 'review'
+        ? {
+            title: t.reviewTitle,
+            subtitle: activeQuiz?.title,
+            onBack: () => setView({ kind: 'list' }),
+            width: '34rem',
+            scrollBody: true,
+            desktopMaxVh: 60,
+          }
       : view.kind === 'form'
         ? {
             title: view.isNew ? t.newQuizTitle : t.editQuizTitle,
@@ -501,9 +574,10 @@ export function QuizEditor({
               }
         }
         onClose={onClose}
-        // Échap ferme l'éditeur seulement depuis la liste des quiz : ailleurs (formulaire, question,
-        // harnais, test), il ferait perdre la saisie en cours sans confirmation.
-        closeOnEscape={view.kind === 'list'}
+        // Échap ferme l'éditeur depuis la liste des quiz et depuis les tentatives à revoir (aucune
+        // saisie) : ailleurs (formulaire, question, harnais, test), il ferait perdre la saisie en
+        // cours sans confirmation.
+        closeOnEscape={view.kind === 'list' || view.kind === 'review'}
         // Enregistrement en cours : aucune sortie avant la réponse (pas de fausse alerte
         // « Modifications non enregistrées » pendant qu'elles sont justement enregistrées).
         busy={saving}
@@ -523,9 +597,28 @@ export function QuizEditor({
             onCreate={openCreate}
             onEdit={openEdit}
             onDelete={(quiz) => setPendingDelete({ kind: 'quiz', id: quiz.id, title: quiz.title })}
+            onReview={
+              handlers.onFetchReviewAttempts && handlers.onRegradeAttempt
+                ? (quiz) => setView({ kind: 'review', quizId: quiz.id })
+                : undefined
+            }
             onReorder={reorderQuizzes}
           />
         )}
+
+        {view.kind === 'review' &&
+          handlers.onFetchReviewAttempts &&
+          handlers.onRegradeAttempt && (
+            <ReviewAttemptsBody
+              quizId={view.quizId}
+              onFetch={handlers.onFetchReviewAttempts}
+              onRegrade={handlers.onRegradeAttempt}
+              onRegraded={() => markRegraded(view.quizId)}
+              onLoaded={(count) => setReviewCount(view.quizId, count)}
+              onError={(kind) => setError(kind === 'load' ? t.reviewLoadError : t.regradeError)}
+              labels={labels?.review}
+            />
+          )}
 
         {view.kind === 'form' && activeQuiz && (
           <QuizFormBody

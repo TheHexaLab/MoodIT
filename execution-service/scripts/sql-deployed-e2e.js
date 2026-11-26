@@ -1,10 +1,10 @@
 // Test d'intégration : valide le BINAIRE DÉPLOYÉ via son endpoint interne POST /internal/exec/evaluate
-// (donc le vrai code Java : runSqlIsolated + 2 appels Piston). Couvre les deux modes SQL (lecture
+// (donc le vrai code Java : runSqlIsolated + 2 conteneurs runner). Couvre les deux modes SQL (lecture
 // seule solution#, modification isolee). Requiert MOODIT_TOKEN = INTERNAL_TOKEN. Cf. scripts/README.md.
 const http = require('http');
 const TOKEN = process.env.MOODIT_TOKEN || '';
 const HOST = process.env.EXEC_HOST || 'localhost';
-const PORT = parseInt(process.env.EXEC_PORT || '8084', 10);
+const PORT = parseInt(process.env.EXEC_PORT || '8085', 10);
 
 const MARK = "\n-" + "- @student\n"; // évite un littéral "-- @student" (fragile au collage shell)
 const RO = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);\n" +

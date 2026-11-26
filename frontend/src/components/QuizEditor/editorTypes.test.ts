@@ -56,12 +56,32 @@ describe('defaultHarness', () => {
     expect(out.startsWith('//')).toBe(true);
   });
 
+  it.each(['Python', 'JavaScript', 'TypeScript', 'JSX', 'TSX', 'PHP'])(
+    'repli %s : le harnais RENVOIE vrai (un assert seul échouerait toujours)',
+    (name) => {
+      const out = defaultHarness(undefined, { id: 1, name });
+      expect(out).toMatch(/renvoie (true|True) si la réponse est correcte/);
+      expect(out).not.toMatch(/lève une exception/);
+    }
+  );
+
   it('replie sur le langage de la question si aucun langage de harnais', () => {
     const questionLang: Language = { id: 6, name: 'C' };
     const out = defaultHarness(questionLang, undefined);
-    // squelette C : renvoie 0 si correct
-    expect(out).toContain('0');
+    // squelette C : un corps qui renvoie vrai/faux (la forme notée sans falsification possible)
+    expect(out).toContain('vrai');
   });
+
+  // Compilés (#116) : seule la forme « corps booléen » est notée par le runner isolé. Les
+  // anciens gabarits (exception, panique, code de retour 0) décrivaient une forme refusée.
+  it.each(['Java', 'C', 'C++', 'C#', 'Go', 'Rust'])(
+    'le gabarit de repli %s décrit un harnais booléen',
+    (name) => {
+      const out = defaultHarness({ id: 1, name }, undefined);
+      expect(out).toMatch(/true|vrai|booléenne/);
+      expect(out).not.toMatch(/exception|panique|erreur|renvoie 0/);
+    }
+  );
 
   it('renvoie une chaîne vide si rien de connu', () => {
     expect(defaultHarness(undefined, undefined)).toBe('');
@@ -110,6 +130,25 @@ describe('emptyQuestionDraft', () => {
     expect(d.languageId).toBe(DEFAULT_LANGUAGES[0].id);
     expect(d.startCode).toBe(defaultStartCode(DEFAULT_LANGUAGES[0]));
     expect(d.testCases).toEqual([]);
+  });
+});
+
+describe('temps limite d’exécution (execTimeoutMs)', () => {
+  it('fait l’aller-retour question → brouillon → question', () => {
+    // Oublié par l'un des deux mappings, le champ s'ouvrait vide en édition, et l'enregistrement
+    // remettait à null le temps limite de la question.
+    const q: Question = {
+      id: 7,
+      qType: 'coding',
+      prompt: 'énoncé',
+      totalScore: 3,
+      language: { id: 5, name: 'Java' },
+      execTimeoutMs: 12_000,
+      testCases: [],
+    };
+    const d = questionToDraft(q);
+    expect(d.execTimeoutMs).toBe(12_000);
+    expect(draftToQuestion(d, 7).execTimeoutMs).toBe(12_000);
   });
 });
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import styles from './QuizEditor.module.css';
 import { EditorFooter } from './EditorShell';
 import { CodeEditor } from './CodeEditor';
@@ -10,6 +10,7 @@ import { TrashCan } from '../../assets/TrashCan';
 import { Check } from '../../assets/Check';
 import { ArrowRight } from '../../assets/ArrowRight';
 import { Spinner } from '../Spinner/Spinner';
+import { clampTimeoutSeconds } from './execTimeout';
 import {
   QUESTION_TYPE_LABELS,
   type Language,
@@ -135,6 +136,14 @@ export function QuestionFormBody({
   // DIXIÈME (format X.X, ≥ 0.1) au `blur`. `draft.totalScore` suit (0 tant que vide → bloque
   // l'enregistrement via canSave).
   const [pointsText, setPointsText] = useState<string>(String(initialDraft.totalScore));
+  // Tampon TEXTE du temps limite, comme pour les points : un <input type="number"> renvoie
+  // '' pour toute saisie intermédiaire invalide ('2.', '-', '1e'). Sans tampon, l'état repassait
+  // à undefined et le champ se vidait sous les doigts.
+  // Champ « Temps limite » : libellé et aide reliés par id (l'aide ne fait pas partie du nom).
+  const timeoutId = useId();
+  const [timeoutText, setTimeoutText] = useState<string>(
+    initialDraft.execTimeoutMs != null ? String(Math.round(initialDraft.execTimeoutMs / 1000)) : ''
+  );
   /** Mobile (associations) : index de la ligne active dont la flèche devient poubelle. */
   const [activeMatch, setActiveMatch] = useState<number | null>(null);
   const matchingListRef = useRef<HTMLDivElement>(null);
@@ -230,6 +239,9 @@ export function QuestionFormBody({
 
   /** Changement de type : on repart d'un brouillon vierge du type, en gardant énoncé + points. */
   function changeType(qType: QuestionType) {
+    // Le champ « Temps limite » est piloté par un tampon texte : le remettre à vide avec
+    // le brouillon, sinon il affichait une valeur qui n'était plus enregistrée.
+    setTimeoutText('');
     onDirty?.();
     setDraft((d) => ({ ...emptyQuestionDraft(qType), id: d.id, prompt: d.prompt, totalScore: d.totalScore }));
   }
@@ -298,6 +310,19 @@ export function QuestionFormBody({
 
 
       <EditorFooter>
+        {/* Gestion des harnais (question Code) : dans le pied FIXE → toujours visible, hors du
+            corps défilant (l'éditeur de code de départ peut être long). */}
+        {draft.qType === 'coding' && (
+          <div className={[styles.harnessSummary, styles.footerAddRow].join(' ')}>
+            <div className={styles.harnessSummaryText}>
+              <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
+              <span className={styles.harnessSummarySub}>{t.harnessCount((draft.testCases ?? []).length)}</span>
+            </div>
+            <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
+              {t.manageHarness} <ArrowRight width={14} height={14} />
+            </button>
+          </div>
+        )}
         {/* Bouton d'ajout HORS de la zone défilante (juste au-dessus des actions). */}
         {addEntryLabel && (
           <div className={styles.footerAddRow}>
@@ -564,9 +589,10 @@ export function QuestionFormBody({
   }
 
   function renderCoding(): React.ReactElement {
-    const tests = draft.testCases ?? [];
     const languageName = languages.find((l) => l.id === draft.languageId)?.name;
 
+    // La section « Harnais de test » (gestion) est rendue dans le PIED fixe, pas ici — voir le
+    // bloc `.harnessSummary` du footer : elle reste visible sans défiler jusqu'au bas du code.
     return (
       <>
         <div className={styles.field}>
@@ -590,16 +616,49 @@ export function QuestionFormBody({
           />
         </div>
 
-        <div className={styles.harnessSummary}>
-          <div className={styles.harnessSummaryText}>
-            <span className={styles.harnessSummaryTitle}>{t.harnessTitle}</span>
-            <span className={styles.harnessSummarySub}>
-              {t.harnessCount(tests.length)}
-            </span>
-          </div>
-          <button type="button" className={styles.outlineButton} onClick={() => onManageHarness(draft)}>
-            {t.manageHarness} <ArrowRight width={14} height={14} />
-          </button>
+        <div className={styles.field}>
+          <label className={styles.fieldLabel} htmlFor={`${timeoutId}-input`}>
+            {t.execTimeoutLabel}
+          </label>
+          {/* Saisie en SECONDES, stockée en ms (draft.execTimeoutMs) ; vide → défaut du sandbox. */}
+          <input
+            id={`${timeoutId}-input`}
+            aria-describedby={`${timeoutId}-hint`}
+            className={styles.input}
+            type="number"
+            min={1}
+            max={60}
+            step={1}
+            value={timeoutText}
+            onChange={(e) => {
+              // La frappe est conservée telle quelle (tampon texte) ; l'état ne reçoit qu'une
+              // valeur exploitable, bornée au blur comme le champ « Points ».
+              const raw = e.target.value;
+              setTimeoutText(raw);
+              const seconds = Number(raw.trim());
+              patch({
+                execTimeoutMs:
+                  raw.trim() === '' || Number.isNaN(seconds)
+                    ? undefined
+                    : clampTimeoutSeconds(seconds) * 1000,
+              });
+            }}
+            onBlur={() => {
+              // Borné comme à l'enregistrement (1 à 60 s, entier) : « Tester » utilise la même
+              // valeur que la correction réelle — pas d'aperçu qui diverge (0 s, 120 s…).
+              const seconds = Number(timeoutText.trim());
+              const clamped =
+                timeoutText.trim() === '' || Number.isNaN(seconds) ? null : clampTimeoutSeconds(seconds);
+              const next = clamped == null ? undefined : clamped * 1000;
+              setTimeoutText(clamped == null ? '' : String(clamped));
+              // Rien de changé (clic puis sortie) : pas de patch, donc pas de « modifications
+              // non enregistrées » à la fermeture.
+              if (next !== draft.execTimeoutMs) patch({ execTimeoutMs: next });
+            }}
+          />
+          <span id={`${timeoutId}-hint`} className={styles.fieldHint}>
+            {t.execTimeoutHint}
+          </span>
         </div>
       </>
     );

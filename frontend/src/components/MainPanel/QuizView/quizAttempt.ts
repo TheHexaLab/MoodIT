@@ -194,6 +194,12 @@ export interface CodingTestResult {
   passed: boolean;
   /** Poids du harnais (Test_Case.weight) — pour afficher sa contribution au score. */
   weight: number;
+  /**
+   * Diagnostic d'execution-service (harnais au format framework refusé, harnais qui ne compile
+   * pas, nom réservé…). Présent seulement dans « Tester » (enseignant, /exec/evaluate) : core
+   * ne le transmet jamais à l'étudiant (CodingTestResultDTO n'a pas ce champ).
+   */
+  detail?: string | null;
 }
 
 /**
@@ -207,6 +213,16 @@ export interface CodeEvaluationInput {
   languageId?: number;
   code: string;
   testCases: TestCase[];
+  /** Temps limite d'exécution d'un harnais (ms) choisi par le prof ; absent → défaut sandbox. */
+  execTimeoutMs?: number;
+  /**
+   * Code de départ de la question (#22) : une fonction qu'il déclare est celle que l'énoncé
+   * impose, et peut porter le nom d'une intégrée (`sum`, `max`) sans être refusée comme « Nom
+   * réservé ». Il ne sert qu'en Python, JavaScript, TypeScript et Bash (CodeAssembler.notImposed,
+   * execution-service). Java, C, C++ et Go refusent un nom réservé quel que soit ce code
+   * (supervisor.py du runner) ; PHP, Rust et C# n'ont pas ce refus.
+   */
+  startCode?: string;
 }
 
 /**
@@ -258,7 +274,10 @@ export interface QuestionResult {
    * (`Question.startCode`), l'état `answer` ayant été réinitialisé au template au chargement.
    */
   submittedCode?: string;
-  /** Code : résultat par harnais. `null` si non évalué (ex. mode mock navigateur). */
+  /**
+   * Code : résultat par harnais. `null` faute de verdict : question sans harnais, ou aucun verdict
+   * enregistré pour les harnais actuels (harnais modifiés, question ajoutée après la tentative).
+   */
   tests?: CodingTestResult[] | null;
 }
 
@@ -284,7 +303,8 @@ export interface AttemptAccepted {
 /**
  * Verdict PUSH d'une correction asynchrone (WebSocket `quiz:attempt-graded` / `-failed`), reçu par
  * l'auteur de la tentative. `ok=false` → la tentative a échoué à l'évaluation (code inévaluable) et
- * a été supprimée : l'étudiant peut renvoyer.
+ * a été supprimée : l'étudiant peut renvoyer — SAUF avec `reason` {@link REVIEW_REASON} : la
+ * tentative est GARDÉE et attend l'enseignant (cf. {@link REVIEW_REASON}).
  */
 export interface AttemptOutcome {
   quizId: number;
@@ -293,13 +313,33 @@ export interface AttemptOutcome {
   reason?: string;
 }
 
+/**
+ * Raison d'un `quiz:attempt-failed` dont la tentative est gardée « à revoir » (#116). Règle de
+ * core (QuizService.failGrading) : une correction en échec garde la tentative si c'était une
+ * RELANCE de l'enseignant (quelle que soit la cause, même avec un compte d'échecs à 0), ou si le
+ * plafond d'échecs SANS VERDICT de l'étudiant sur ce quiz est atteint et que l'échec est lui-même
+ * sans verdict ou que le quiz n'autorise pas de reprise. Sinon la tentative est supprimée.
+ */
+export const REVIEW_REASON = 'review';
+
 /** Résumé d'une tentative (historique). */
 export interface AttemptSummary {
   id: number;
   attemptNo: number;
-  earned: number;
+  /** Points obtenus ; `null` pour une tentative « à revoir » (aucun verdict). */
+  earned: number | null;
   max: number;
   submittedAt?: string;
+  /**
+   * `'done'` (corrigée) ou `'review'` : la correction automatique n'a pas abouti, la tentative
+   * attend l'enseignant (#116). Absent = corrigée.
+   */
+  status?: 'done' | 'review';
+}
+
+/** La tentative attend-elle l'enseignant (correction automatique impossible) ? */
+export function isAwaitingReview(attempt: AttemptSummary | undefined | null): boolean {
+  return attempt?.status === REVIEW_REASON;
 }
 
 /** Transforme l'état de réponses en charge utile de soumission. */
@@ -380,6 +420,21 @@ export type FetchAttemptResultHandler = (
 ) => MaybePromise<QuizResult>;
 
 /**
+ * Statut d'une tentative de l'étudiant : en correction (`pending`), corrigée (`done`), à revoir
+ * (`review`), ou `gone` (absente : correction en échec, tentative supprimée — HTTP 404).
+ */
+export type AttemptStatus = 'pending' | 'done' | 'review' | 'gone';
+
+/**
+ * Statut d'UNE tentative (GET …/attempts/{id}/status) : l'historique exclut les tentatives en
+ * correction et ne dit donc rien d'une tentative supprimée dont le verdict a été manqué.
+ */
+export type FetchAttemptStatusHandler = (
+  quizId: number,
+  attemptId: number
+) => MaybePromise<AttemptStatus>;
+
+/**
  * Erreur du contrat de soumission : le backend n'a pas pu vérifier les questions de code
  * (service d'exécution indisponible, HTTP 503). La tentative n'a PAS été enregistrée →
  * l'étudiant peut renvoyer. Distincte d'un échec générique pour afficher un message adapté.
@@ -404,5 +459,53 @@ export class ExecutionBusyError extends Error {
   constructor() {
     super(EXECUTION_BUSY_MESSAGE);
     this.name = 'ExecutionBusyError';
+  }
+}
+
+/**
+ * Soumission REFUSÉE par le serveur : renvoyer la même réponse tout de suite serait refusé de
+ * nouveau, d'où aucun « Réessayer ». Rien n'est enregistré par CET envoi.
+ * - 400 : réponse mal formée, ou code au-delà de la taille acceptée (#116) ; le message du
+ *   serveur dit quoi corriger (« Question 2 : le code soumis dépasse … ») ;
+ * - 413 (gateway, raison `tooLarge`) : corps trop volumineux ;
+ * - 409 « relance » (raison `regrading`) : refus temporaire, à renvoyer plus tard ;
+ * - 409 « déjà soumis » (raison `alreadySubmitted`) : la tentative unique est déjà consommée
+ *   (autre onglet…) ; la vue rouvre son résumé.
+ */
+export class SubmissionRejectedError extends Error {
+  /**
+   * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo).
+   * `regrading` : 409 de cause « relance » — quiz AVEC reprise dont l'enseignant relance la
+   * correction de la tentative précédente ; refus TEMPORAIRE, à renvoyer plus tard (aucune attente : l'id relancé est déjà
+   * connu, son verdict ne conclurait pas cet envoi).
+   * `alreadySubmitted` : 409 « déjà soumis » (corps texte) — tentative unique déjà consommée
+   * (autre onglet…) ; refus DÉFINITIF, la vue rouvre le résumé depuis l'historique.
+   * Le texte affiché vient alors des libellés de la vue (`submitTooLarge`, `submitRegrading`,
+   * `submitAlreadySubmitted`), pas de ce message.
+   */
+  readonly reason?: 'tooLarge' | 'regrading' | 'alreadySubmitted';
+
+  constructor(message: string, reason?: 'tooLarge' | 'regrading' | 'alreadySubmitted') {
+    super(message);
+    this.name = 'SubmissionRejectedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Soumission refusée en 409 de cause « en_cours » : une tentative de l'étudiant est déjà en
+ * correction sur ce quiz (index `uq_attempt_pending` de core ; ex. renvoi après le plafond
+ * d'attente, autre onglet). La vue rejoint l'attente de cette correction, qui ouvre le résumé dès
+ * que la tentative apparaît dans l'historique ou que son verdict est poussé. Les autres 409
+ * (tentative unique déjà consommée, relance par l'enseignant) ne passent pas par ici.
+ */
+export class SubmissionInProgressError extends Error {
+  /** Id de la tentative en correction, quand core le donne (sinon reconnue autrement). */
+  readonly attemptId?: number;
+
+  constructor(attemptId?: number) {
+    super('Une tentative est déjà en cours de correction');
+    this.name = 'SubmissionInProgressError';
+    this.attemptId = attemptId;
   }
 }

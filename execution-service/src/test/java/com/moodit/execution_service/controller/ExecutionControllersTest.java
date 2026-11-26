@@ -6,7 +6,6 @@ import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.RunResult;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonException;
 import com.moodit.execution_service.security.InternalTokenValidator;
 import com.moodit.execution_service.service.ExecutionBusyException;
 import com.moodit.execution_service.service.ExecutionLimiter;
@@ -106,12 +105,27 @@ class ExecutionControllersTest {
     }
 
     @Test
-    void piston_en_panne_donne_502_sans_fuiter_le_detail_interne() throws Exception {
-        when(service.evaluate(any())).thenThrow(new PistonException("Appel Piston échoué : http://piston:2000 refusé"));
+    void docker_runner_down_gives_502_without_leaking_internal_detail() throws Exception {
+        when(service.evaluate(any())).thenThrow(
+                new com.moodit.execution_service.sandbox.SandboxException("Démon Docker injoignable (npipe)"));
 
         mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"));
+                .andExpect(jsonPath("$.detail").value("Sandbox d'exécution indisponible"))
+                .andExpect(jsonPath("$.cause").value("indisponible"));
+    }
+
+    @Test
+    void container_without_verdict_gives_502_with_its_own_cause() throws Exception {
+        // Core compte ces échecs-là, et seulement eux, par étudiant et par quiz (#116, S4).
+        when(service.evaluate(any())).thenThrow(
+                new com.moodit.execution_service.sandbox.NoVerdictException("Superviseur muet (exit 137)"));
+
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "secret-interne")
+                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.detail").value("Notation sans verdict"))
+                .andExpect(jsonPath("$.cause").value("sans_verdict"));
     }
 
     @Test
@@ -122,6 +136,27 @@ class ExecutionControllersTest {
                         .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].passed").value(true));
+    }
+
+    @Test
+    void only_the_internal_call_is_marked_internal_during_evaluation() throws Exception {
+        // limiter.asInternal() donne à la correction d'une soumission son plafond de places et
+        // son attente plus longue (withSandboxSlot), et le mur interne (ExecutionService) ; le
+        // service le relit pendant l'évaluation via isInternal(). Le mock renvoie ce qu'il voit :
+        // sans asInternal dans InternalExecutionController, la correction attendrait comme un
+        // « Tester » public, et un refus y ferait échouer la tentative de l'étudiant.
+        when(service.evaluate(any())).thenAnswer(inv ->
+                List.of(new TestResult("t1", 2, true, String.valueOf(limiter.isInternal()))));
+
+        mvc.perform(post("/internal/exec/evaluate").header("X-Internal-Token", "secret-interne")
+                        .contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("true"));
+        mvc.perform(post("/exec/evaluate").contentType(MediaType.APPLICATION_JSON).content(EVALUATE_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].detail").value("false"));
+        // Le marquage ne fuit pas hors de l'appel interne (fil de la requête réutilisé).
+        assertThat(limiter.isInternal()).isFalse();
     }
 
     @Test

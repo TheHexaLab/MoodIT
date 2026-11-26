@@ -11,7 +11,10 @@ import org.springframework.http.ResponseEntity;
 /**
  * Traduction des exceptions métier en réponses HTTP par {@link GlobalExceptionHandler} : chaque
  * exception a SON code (404 / 409 / 503 / 403 / 400) et renvoie son message en corps, sauf la
- * violation de contrainte BD dont le message technique est remplacé par un libellé générique.
+ * violation de contrainte BD dont le message technique est remplacé par un libellé générique, et
+ * les 409 « en_cours » et « relance » de la soumission, dont le corps est un JSON
+ * {cause, message[, attemptId]} — {@code attemptId} pour « en_cours » seulement, quand la
+ * tentative en conflit est connue.
  */
 class GlobalExceptionHandlerTest {
 
@@ -48,6 +51,46 @@ class GlobalExceptionHandlerTest {
     void dejaSoumis_409() {
         assertResponse(handler.handleAlreadySubmitted(new AlreadySubmittedException()),
                 HttpStatus.CONFLICT, "Quiz already submitted");
+    }
+
+    @Test
+    @DisplayName("Relance d'une tentative qui n'est pas « à revoir » → 409, message en corps")
+    void attemptNotReviewable_409() {
+        assertResponse(handler.handleAttemptNotReviewable(new AttemptNotReviewableException()),
+                HttpStatus.CONFLICT, "Attempt is not awaiting review");
+    }
+
+    @Test
+    @DisplayName("Correction déjà en cours → 409 en JSON, cause « en_cours » et message français")
+    void gradingInProgress_409Json() {
+        ResponseEntity<java.util.Map<String, Object>> r =
+                handler.handleGradingInProgress(new GradingInProgressException());
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        // Tentative inconnue : pas de champ attemptId (ni null) — le client retombe sur son repli.
+        assertThat(r.getBody()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                "cause", "en_cours", "message", "Une correction de ce quiz est déjà en cours."));
+
+        // Tentative connue : son id, que le client attend.
+        assertThat(handler.handleGradingInProgress(new GradingInProgressException(55)).getBody())
+                .containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                        "cause", "en_cours", "message", "Une correction de ce quiz est déjà en cours.",
+                        "attemptId", 55));
+    }
+
+    @Test
+    @DisplayName("Relance de l'enseignant en cours → 409 en JSON, cause « relance » et message français")
+    void regradeInProgress_409Json() {
+        ResponseEntity<java.util.Map<String, String>> r =
+                handler.handleRegradeInProgress(new RegradeInProgressException());
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        assertThat(r.getBody()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                "cause", "relance",
+                "message", "Votre tentative précédente est en cours de recorrection par votre"
+                        + " enseignant. Réessayez plus tard."));
     }
 
     @Test

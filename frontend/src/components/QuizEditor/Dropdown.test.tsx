@@ -131,13 +131,27 @@ describe('Dropdown', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
-  it('défilement de la page ferme le menu ; défilement interne de la liste non', () => {
+  it('défilement de la page (le contrôle bouge) ferme le menu ; défilement interne de la liste non', () => {
+    mockControlRect({ top: 100, bottom: 130, left: 20, width: 200 });
     renderDropdown();
     fireEvent.click(control());
+    // Le contrôle a bougé (remonté de 40 px) AVANT le défilement de la liste : c'est donc la garde
+    // « défilement dans le menu » qui le garde ouvert, pas l'absence de mouvement du contrôle.
+    mockControlRect({ top: 60, bottom: 90, left: 20, width: 200 });
     fireEvent.scroll(screen.getByRole('listbox'));
     expect(screen.getByRole('listbox')).toBeTruthy();
+    // Le corps défile vraiment (même déplacement) : le menu se ferme.
     fireEvent.scroll(document);
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it("un scroll « fantôme » qui n'a rien déplacé (ex. remise à zéro du corps au changement de vue, dispatché en retard) ne ferme pas le menu", () => {
+    mockControlRect({ top: 100, bottom: 130, left: 20, width: 200 });
+    renderDropdown();
+    fireEvent.click(control());
+    // L'événement arrive APRÈS l'ouverture mais le contrôle n'a pas bougé : on garde le menu.
+    fireEvent.scroll(document);
+    expect(screen.getByRole('listbox')).toBeTruthy();
   });
 
   it('place le menu sous le contrôle quand il y a la place', () => {

@@ -139,12 +139,42 @@ describe('QuestionTestBody — correction Code via l’API', () => {
     expect(input.language).toBe('Python');
     expect(input.languageId).toBe(1);
     expect(input.code).toBe('def f(): pass');
+    expect(input.startCode).toBe('def f(): pass');
     expect(input.testCases.map((tc: { name: string }) => tc.name)).toEqual(['h1', 'h2']);
 
     // 4 × (1 / 4) = 1 point.
     expect(await screen.findByText('1 / 4 pts')).toBeTruthy();
     expect(screen.getByText('h1')).toBeTruthy();
     expect(screen.getByText('h2')).toBeTruthy();
+  });
+
+  it('affiche le diagnostic du serveur sous un harnais en échec, jamais sous un harnais réussi', async () => {
+    // Revue #246 : un harnais au format framework (refusé) ne montrait qu'une croix, sans la
+    // forme à écrire — « Tester » est pourtant le seul moyen de mettre au point la forme booléenne.
+    const diagnostic = 'Ce harnais est une classe de test du framework (@Test).';
+    const onEvaluateCode = vi.fn().mockResolvedValue([
+      { name: 'h1', passed: true, weight: 1, detail: 'ignoré' },
+      { name: 'h2', passed: false, weight: 3, detail: diagnostic },
+      { name: 'h3', passed: false, weight: 1, detail: null },
+    ]);
+    renderBody(codingDraft(), { onEvaluateCode });
+    fireEvent.click(correctButton());
+
+    expect(await screen.findByText(diagnostic)).toBeTruthy();
+    expect(screen.queryByText('ignoré')).toBeNull();
+  });
+
+  it('envoie le code de départ de la QUESTION et son temps limite, pas le code saisi', async () => {
+    // Le code saisi part de code de départ : sans le modifier, le test ne distinguait pas les deux.
+    const onEvaluateCode = vi.fn().mockResolvedValue([{ name: 'h1', passed: true, weight: 1 }]);
+    renderBody({ ...codingDraft(), execTimeoutMs: 7000 }, { onEvaluateCode });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'def f(): return 1' } });
+    fireEvent.click(correctButton());
+
+    const input = onEvaluateCode.mock.calls[0][0];
+    expect(input.code).toBe('def f(): return 1');
+    expect(input.startCode).toBe('def f(): pass');
+    expect(input.execTimeoutMs).toBe(7000);
   });
 
   it('arrondit le score au dixième', async () => {

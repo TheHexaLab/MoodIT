@@ -3,7 +3,6 @@ import styles from './questions.module.css';
 import { Check } from '../../../../assets/Check';
 import { X } from '../../../../assets/X';
 import { CodeEditor } from '../../../QuizEditor/CodeEditor';
-import { Spinner } from '../../../Spinner/Spinner';
 import { type CodingTestResult } from '../quizAttempt';
 import { type QuestionViewProps } from './types';
 import { defaultQuestionLabels, type QuestionLabels } from './questionLabels';
@@ -20,8 +19,8 @@ const NO_STANDALONE_RUN = new Set(['sql', 'html', 'jsx', 'tsx']);
  * Question Code : réutilise notre éditeur de code « façon IDE » (`CodeEditor` :
  * gouttière, coloration syntaxique, auto-indentation…), pré-rempli avec `start_code`.
  * La vraie exécution des harnais est SERVEUR ; en révision, l'éditeur passe en lecture
- * seule et `result.tests` liste le verdict par cas (✓/✗) ou `null` si non évalué
- * (mode mock, le code ne tourne pas dans le navigateur).
+ * seule et `result.tests` liste le verdict par cas (✓/✗), ou vaut `null` faute de verdict
+ * (question sans harnais, ou aucun verdict enregistré pour les harnais actuels).
  */
 export function CodingQuestion({
   question,
@@ -70,7 +69,7 @@ export function CodingQuestion({
   );
 }
 
-/** Verdict des harnais en révision (ou note « évalué côté serveur » si non évalué). */
+/** Verdict des harnais en révision, ou mention « Non évalué » faute de verdict. */
 function TestResults({
   tests,
   labels,
@@ -79,14 +78,14 @@ function TestResults({
   labels: QuestionLabels;
 }): React.ReactElement {
   if (tests == null) {
-    // Pas de verdicts (question Code sans harnais, ou résultat « en cours ») : placeholder.
-    // La soumission vérifie désormais le code de façon SYNCHRONE, donc une tentative
-    // enregistrée porte normalement déjà ses verdicts.
-    return (
-      <p className={styles.testNote}>
-        <Spinner tone="current" size={14} /> {labels.evaluating}
-      </p>
-    );
+    // Pas de verdicts. Un résultat n'est lu qu'une fois la tentative corrigée (`done`), donc
+    // jamais pendant la correction asynchrone : la cause est PERMANENTE — question sans harnais,
+    // ou aucun verdict enregistré pour ses harnais ACTUELS (harnais modifiés après la correction,
+    // question ajoutée après la tentative ; CodeGrading.pending côté core). Un spinner
+    // « évaluation en cours » tournait donc indéfiniment : mention fixe « Non évalué ». La
+    // maquette (grading.ts) rend un verdict par harnais : seule une question sans harnais y donne
+    // `null`.
+    return <p className={styles.testNote}>{labels.notEvaluated}</p>;
   }
   const totalWeight = tests.reduce((sum, test) => sum + test.weight, 0);
 
@@ -114,6 +113,9 @@ function TestResults({
               {t.passed ? '+' : '−'}
               {t.weight}/{totalWeight}
             </span>
+            {/* Diagnostic du serveur (« Tester » seulement) : sans lui, un harnais refusé ne
+                montrait qu'une croix, sans dire quelle forme écrire. */}
+            {!t.passed && t.detail && <pre className={styles.testDetail}>{t.detail}</pre>}
           </div>
         ))}
       </div>

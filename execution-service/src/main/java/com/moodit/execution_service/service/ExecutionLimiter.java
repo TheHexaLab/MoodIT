@@ -13,7 +13,16 @@ import java.util.function.Supplier;
 /**
  * Bornes de charge du sandbox (#24), à deux niveaux :
  * <ul>
- *   <li><b>Globale</b> : au plus {@code maxConcurrent} exécutions Piston simultanées, tous appelants
+ *   <li><b>Par côté</b> : les appels publics (« Tester », « play ») et les corrections internes
+ *       ont chacun au plus {@code maxConcurrent - 1} places (dès que {@code maxConcurrent ≥ 2}).
+ *       Chaque côté garde donc toujours au moins UNE place que l'autre ne peut pas prendre :
+ *       ni une rafale de « Tester » n'affame les corrections, ni une file de corrections
+ *       (fin d'examen) ne refuse tous les « Exécuter » pendant qu'elle se résorbe.
+ *       <b>La garantie porte sur UNE place, pas sur {@code maxConcurrent - 1}</b> : core mène
+ *       {@code maxConcurrent - 1} corrections de front, mais dès que les appels publics tiennent
+ *       leurs {@code maxConcurrent - 1} places, une seule correction passe ; les autres
+ *       attendent {@code internalQueueWaitMs}, puis sont refusées (tentative supprimée, sauf relance de l'enseignant, ou plafond d'échecs atteint sur un quiz sans reprise, cf. QuizService#failGrading).</li>
+ *   <li><b>Globale</b> : au plus {@code maxConcurrent} conteneurs runner simultanés, tous appelants
  *       confondus (« Tester », « play », correction interne). Une exécution en trop attend une place
  *       au plus {@code queueWaitMs} (file d'attente courte), puis est refusée. La correction
  *       interne des soumissions ({@link #asInternal}) attend plus longtemps
@@ -28,7 +37,26 @@ import java.util.function.Supplier;
 @Component
 public class ExecutionLimiter {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(ExecutionLimiter.class);
+
     private final Semaphore global;
+    /**
+     * Places accessibles aux appels PUBLICS (« Tester », « play ») : {@code maxConcurrent - 1}
+     * dès que possible — une place reste RÉSERVÉE aux corrections internes. Depuis le runner
+     * (#116), une évaluation compilée tient sa place pendant toute la vie de son conteneur
+     * (minutes) : sans réserve, deux « Tester » publics suffisaient à affamer les corrections
+     * (tentatives d'étudiants supprimées en rafale). À {@code maxConcurrent = 1}, pas de
+     * réserve possible : tout le monde partage l'unique place.
+     */
+    private final Semaphore publicCap;
+    /**
+     * Pendant de {@link #publicCap} pour les corrections INTERNES : {@code maxConcurrent - 1}
+     * places au plus. Une correction compilée tient sa place pendant tout son conteneur ; sans
+     * ce plafond, une file de soumissions occupait toutes les places pendant des minutes et
+     * chaque « Exécuter » finissait en 429 après son attente.
+     */
+    private final Semaphore internalCap;
     private final long queueWaitMs;
     private final long internalQueueWaitMs;
     private final int maxPerUser;
@@ -45,7 +73,7 @@ public class ExecutionLimiter {
     public ExecutionLimiter(
             @Value("${app.exec.max-concurrent:4}") int maxConcurrent,
             @Value("${app.exec.queue-wait-ms:5000}") long queueWaitMs,
-            @Value("${app.exec.internal-queue-wait-ms:15000}") long internalQueueWaitMs,
+            @Value("${app.exec.internal-queue-wait-ms:120000}") long internalQueueWaitMs,
             @Value("${app.exec.max-per-user:2}") int maxPerUser) {
         if (maxConcurrent < 1 || maxPerUser < 1 || queueWaitMs < 0 || internalQueueWaitMs < 0) {
             throw new IllegalArgumentException("Limites d'exécution invalides : max-concurrent et "
@@ -53,29 +81,71 @@ public class ExecutionLimiter {
         }
         // Équitable : les exécutions en attente passent dans leur ordre d'arrivée.
         this.global = new Semaphore(maxConcurrent, true);
+        int publicSlots = Math.max(1, maxConcurrent - 1);
+        this.publicCap = new Semaphore(publicSlots, true);
+        this.internalCap = new Semaphore(publicSlots, true);
+        if (maxPerUser >= publicSlots) {
+            // Sinon la borne par utilisateur ne borne plus rien : UN compte peut occuper
+            // toutes les places publiques (un appel public tient un conteneur entier, pas
+            // une requête HTTP) et refuser « Exécuter »/« Tester » à toute l'instance.
+            LOG.warn("app.exec.max-per-user ({}) ≥ places publiques ({}) : un seul utilisateur "
+                    + "peut saturer le sandbox public — abaisser max-per-user ou relever "
+                    + "max-concurrent", maxPerUser, publicSlots);
+        }
         this.queueWaitMs = queueWaitMs;
         this.internalQueueWaitMs = internalQueueWaitMs;
         this.maxPerUser = maxPerUser;
     }
 
-    /** Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus). */
+    /**
+     * Sommes-nous dans un appel INTERNE (correction d'une soumission par core-service) ?
+     * Les appels publics (« Tester », « play ») sont plus sévèrement bornés : la route
+     * {@code /exec/run} est ouverte à tout authentifié (bouton « Exécuter » de l'étudiant).
+     */
+    public boolean isInternal() {
+        return internalCall.get();
+    }
+
+    /**
+     * Exécute {@code action} en occupant une place du sandbox (attente bornée, sinon refus).
+     * Chaque appel passe d'abord par le plafond de son côté ({@link #publicCap} ou
+     * {@link #internalCap}) : une place reste réservée à l'autre côté.
+     */
     public <T> T withSandboxSlot(Supplier<T> action) {
-        boolean acquired;
+        boolean internal = internalCall.get();
+        long waitMs = internal ? internalQueueWaitMs : queueWaitMs;
+        // ÉCHÉANCE unique pour les DEUX acquisitions : les attendre l'une après l'autre avec
+        // le délai complet chacune laissait un appel public patienter 2 × queue-wait-ms avant
+        // son 429 — le double de ce qu'annoncent la configuration et DEPLOY.md.
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMs);
+        Semaphore sideCap = internal ? internalCap : publicCap;
+        boolean sideAcquired = false;
         try {
-            long waitMs = internalCall.get() ? internalQueueWaitMs : queueWaitMs;
-            acquired = global.tryAcquire(waitMs, TimeUnit.MILLISECONDS);
+            sideAcquired = sideCap.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS);
+            if (!sideAcquired) {
+                throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+            }
+            if (!global.tryAcquire(remainingMs(deadline), TimeUnit.MILLISECONDS)) {
+                throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
+            }
+            try {
+                return action.get();
+            } finally {
+                global.release();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        if (!acquired) {
-            throw new ExecutionBusyException(ExecutionBusyException.SANDBOX_BUSY);
-        }
-        try {
-            return action.get();
         } finally {
-            global.release();
+            if (sideAcquired) {
+                sideCap.release();
+            }
         }
+    }
+
+    /** Millisecondes restantes avant l'échéance (jamais négatif : 0 = plus d'attente). */
+    private static long remainingMs(long deadlineNanos) {
+        return Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
     }
 
     /**
@@ -109,7 +179,7 @@ public class ExecutionLimiter {
 
     /**
      * Exécute {@code action} comme appel INTERNE (correction des soumissions par core-service) :
-     * pas de limite par utilisateur, et les places du sandbox sont attendues
+     * pas de limite par utilisateur, au plus {@code maxConcurrent - 1} places, et elles sont attendues
      * {@code internalQueueWaitMs} au lieu de {@code queueWaitMs}.
      */
     public <T> T asInternal(Supplier<T> action) {

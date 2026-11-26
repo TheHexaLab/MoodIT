@@ -374,6 +374,7 @@
 
 .testRow {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.625rem;
     padding: 0.5rem 0;
@@ -386,8 +387,25 @@
     border-bottom: none;
 }
 
+/* Diagnostic sous la ligne du harnais en échec (« Tester ») : texte du serveur, sur sa propre
+   ligne, retours à la ligne gardés (sortie du compilateur). */
+.testDetail {
+    flex: 1 0 100%;
+    margin: 0;
+    padding-left: calc(1.125rem + 0.625rem);
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .testName {
-    flex: 1 1 auto;
+    /* Base 0 : le nom partage TOUJOURS la ligne du ✓/✗ et du score (largeur fixe, flex 0 0 auto)
+       et s'enroule à l'intérieur. En base `auto`, un nom long prenait sa largeur entière et, la
+       ligne étant en flex-wrap, passait seul sur une ligne (✓ / nom / score sur trois lignes sur
+       mobile). Le diagnostic (.testDetail, base 100 %) garde sa propre ligne. */
+    flex: 1 1 0;
     min-width: 0;
     /* Un nom long (surtout sans espace) s'enroule au lieu de déborder horizontalement. */
     overflow-wrap: anywhere;

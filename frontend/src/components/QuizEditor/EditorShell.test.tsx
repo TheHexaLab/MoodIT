@@ -197,4 +197,39 @@ describe('EditorShell — en-tête et navigation', () => {
     );
     expect(body().scrollTop).toBe(0);
   });
+
+  it('changer de vue : focus perdu → chevron ; focus dans une AUTRE fenêtre → laissé en place', () => {
+    const view = (key: string) => (
+      <EditorShell title="Éditeur" onClose={() => {}} onBack={() => {}} scrollResetKey={key}>
+        <p>Contenu</p>
+      </EditorShell>
+    );
+    const { rerender } = render(view('a'));
+    // Focus perdu (sur <body>) : rendu au chevron.
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(view('b'));
+    expect(document.activeElement).toBe(screen.getByLabelText('Retour'));
+    // Focus dans une autre fenêtre modale ouverte par-dessus (revue #246) : il y reste.
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    rerender(view('c'));
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
+  it('changer de vue sans chevron (vue liste) : focus perdu → titre de la fenêtre', () => {
+    // Retour à la liste des quiz : pas de chevron, le focus reste quand même dans la fenêtre.
+    const view = (key: string, onBack?: () => void) => (
+      <EditorShell title="Éditeur" onClose={() => {}} onBack={onBack} scrollResetKey={key}>
+        <p>Contenu</p>
+      </EditorShell>
+    );
+    const { rerender } = render(view('form', () => {}));
+    screen.getByLabelText('Retour').focus();
+    // Le chevron disparaît avec la vue : le focus qu'il portait est perdu.
+    rerender(view('list'));
+    expect(screen.queryByLabelText('Retour')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Éditeur' }));
+  });
 });

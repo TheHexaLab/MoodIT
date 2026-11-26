@@ -95,6 +95,8 @@ export function QuestionTestBody({
           languageId: question.language?.id,
           code: answer.kind === 'coding' ? answer.code : '',
           testCases: question.testCases ?? [],
+          execTimeoutMs: question.execTimeoutMs,
+          startCode: question.startCode,
         });
         setResult(codingResult(question, tests));
       } catch (e) {

@@ -167,6 +167,31 @@ class ExecutionLimiterTest {
     }
 
     @Test
+    void own_side_slot_obtained_but_no_global_slot_refuses_and_releases_the_first() throws Exception {
+        // Une seule place : la correction interne la tient. L'appel public obtient la place de
+        // SON côté, pas la place globale → refus, et sa place de côté est rendue.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 5000, 5);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> internal = occupy(pool, release,
+                    s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "public"))
+                    .isInstanceOf(ExecutionBusyException.class)
+                    .hasMessage(ExecutionBusyException.SANDBOX_BUSY);
+
+            release.countDown();
+            assertThat(internal.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            // Place publique rendue au refus : l'appel suivant passe.
+            assertThat(limiter.withSandboxSlot(() -> "ensuite")).isEqualTo("ensuite");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void appel_interne_attend_plus_longtemps_qu_un_appel_public() throws Exception {
         // Attente publique nulle, attente interne longue : seule la correction interne patiente.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 5000, 5);
@@ -221,5 +246,111 @@ class ExecutionLimiterTest {
         assertThatThrownBy(() -> new ExecutionLimiter(1, 0, -1, 1)).isInstanceOf(IllegalArgumentException.class);
         // Bornes minimales acceptées.
         assertThat(new ExecutionLimiter(1, 0, 1).availableSlots()).isEqualTo(1);
+    }
+
+    @Test
+    void a_slot_stays_reserved_for_internal_grading() throws Exception {
+        // max = 2 : le PUBLIC ne peut occuper qu'UNE place — un conteneur de notation public
+        // (qui peut vivre des minutes) ne doit jamais affamer la correction interne.
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> holder = occupy(pool, release, limiter::withSandboxSlot);
+            // Deuxième appel PUBLIC : refusé — la place restante est réservée à l'interne.
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
+                    .isInstanceOf(ExecutionBusyException.class);
+            // Un appel INTERNE, lui, obtient la place réservée.
+            assertThat(limiter.asInternal(() -> limiter.withSandboxSlot(() -> "interne")))
+                    .isEqualTo("interne");
+            release.countDown();
+            assertThat(holder.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void a_slot_stays_reserved_for_public_calls() throws Exception {
+        // max = 3 (prod) : les corrections internes n'occupent que DEUX places — une file de
+        // soumissions (fin d'examen) ne doit jamais refuser tous les « Exécuter ».
+        ExecutionLimiter limiter = new ExecutionLimiter(3, 0, 200, 5);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<String> g1 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            Future<String> g2 = occupy(pool, release, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));
+            // Troisième correction : refusée après son attente — la place restante est publique.
+            assertThatThrownBy(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> "non")))
+                    .isInstanceOf(ExecutionBusyException.class)
+                    .hasMessage(ExecutionBusyException.SANDBOX_BUSY);
+            assertThat(limiter.availableSlots()).isEqualTo(1);
+            // Un appel PUBLIC, lui, obtient la place réservée, sans attendre.
+            assertThat(limiter.withSandboxSlot(() -> "public")).isEqualTo("public");
+            release.countDown();
+            assertThat(g1.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            assertThat(g2.get(5, TimeUnit.SECONDS)).isEqualTo("fini");
+            // Places rendues des deux côtés : une correction repasse.
+            assertThat(limiter.availableSlots()).isEqualTo(3);
+            assertThat(limiter.asInternal(() -> limiter.withSandboxSlot(() -> "interne"))).isEqualTo("interne");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void internal_context_is_visible_and_restored() {
+        // Le mur du conteneur dépend de ce drapeau (public : plafond court).
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 2);
+        assertThat(limiter.isInternal()).isFalse();
+        assertThat(limiter.asInternal(limiter::isInternal)).isTrue();
+        assertThat(limiter.isInternal()).isFalse();
+    }
+
+    @Test
+    void public_wait_does_not_exceed_configured_delay() throws Exception {
+        // Les deux acquisitions (place publique puis place globale) partagent UNE échéance :
+        // sinon l'appelant patientait jusqu'à 2 × queue-wait-ms avant son 429. Scénario qui les
+        // exerce TOUTES LES DEUX : la place publique se libère à mi-délai, mais la place globale
+        // qu'elle rend est aussitôt prise par une correction interne en attente — l'appel public
+        // attend alors la globale, sur le RESTE du délai seulement.
+        ExecutionLimiter limiter = new ExecutionLimiter(3, 600, 600, 5);   // 3 globales, 2 publiques
+        ExecutorService pool = Executors.newFixedThreadPool(5);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch releaseAll = new CountDownLatch(1);
+        CountDownLatch internalStarted = new CountDownLatch(1);
+        try {
+            occupy(pool, releaseFirst, limiter::withSandboxSlot);          // publique 1, globale 1
+            occupy(pool, releaseAll, limiter::withSandboxSlot);            // publique 2, globale 2
+            occupy(pool, releaseAll, s -> limiter.asInternal(() -> limiter.withSandboxSlot(s)));  // globale 3
+            pool.submit(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {   // attend une globale
+                internalStarted.countDown();
+                try {
+                    releaseAll.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return "interne";
+            })));
+            pool.submit(() -> {
+                Thread.sleep(300);
+                releaseFirst.countDown();                                  // publique libérée à 300 ms
+                return null;
+            });
+            long start = System.nanoTime();
+            assertThatThrownBy(() -> limiter.withSandboxSlot(() -> "non"))
+                    .isInstanceOf(ExecutionBusyException.class);
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            // La place globale rendue est bien allée à la correction interne (scénario atteint).
+            assertThat(internalStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            // Une échéance : ~600 ms. Deux attentes complètes : ~300 + 600 = 900 ms.
+            assertThat(elapsedMs).isBetween(500L, 800L);
+        } finally {
+            releaseFirst.countDown();
+            releaseAll.countDown();
+            pool.shutdownNow();
+        }
     }
 }

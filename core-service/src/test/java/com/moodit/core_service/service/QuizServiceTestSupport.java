@@ -19,6 +19,7 @@ import com.moodit.core_service.model.User;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import com.moodit.core_service.repository.AttemptRepository;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.GradingFailureRepository;
 import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
@@ -69,6 +70,7 @@ abstract class QuizServiceTestSupport {
     @Mock PlatformTransactionManager transactionManager;
     @Mock ApplicationEventPublisher eventPublisher;
     @Mock AuditLogService auditLogService;
+    @Mock GradingFailureRepository gradingFailureRepository;
 
     final ObjectMapper objectMapper = new ObjectMapper();
     /** Graine fixée : mélanges reproductibles. Ids publics des éléments via {@link #pub}. */
@@ -81,7 +83,14 @@ abstract class QuizServiceTestSupport {
                 quizRepository, courseRepository, qTypeRepository, languageRepository,
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
-                auditLogService, obfuscator);
+                auditLogService, obfuscator, gradingFailureRepository);
+        // Contrôle préalable d'une soumission, par défaut : aucune tentative (ce que rendaient
+        // implicitement les anciennes lectures séparées, comptage 0 et pas de pending). Lenient :
+        // la plupart des tests ne soumettent pas ; ceux qui le font le surchargent au besoin.
+        org.mockito.Mockito.lenient()
+                .when(attemptRepository.snapshotForSubmission(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.moodit.core_service.repository.AttemptSnapshot(0L, 0, null, 0));
     }
 
     /** Id PUBLIC (passation) d'un élément déplaçable. */

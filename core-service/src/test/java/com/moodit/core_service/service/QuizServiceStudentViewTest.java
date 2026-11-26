@@ -199,7 +199,8 @@ class QuizServiceStudentViewTest extends QuizServiceTestSupport {
                     quizRepository, courseRepository, qTypeRepository, languageRepository,
                     submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                     objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
-                    auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(99)));
+                    auditLogService, new QuizItemObfuscator("test-secret", new java.util.Random(99)),
+                    gradingFailureRepository);
             assertThat(sentRealIds(other)).isEqualTo(first);
         }
 

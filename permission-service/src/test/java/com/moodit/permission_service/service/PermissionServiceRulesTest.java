@@ -772,6 +772,28 @@ class PermissionServiceRulesTest {
       assertThat(allowed("/api/quizzes/12", "DELETE", null)).isFalse();
     }
 
+    // Tentatives « a revoir » (#116, S4) : gestion du quiz, jamais l'etudiant abonne.
+    @Test
+    void reviewAttempts_courseTeacher_allowed() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/review-attempts", "GET", null)).isTrue();
+      assertThat(allowed("/api/quizzes/12/attempts/81/regrade", "POST", null)).isTrue();
+    }
+
+    @Test
+    void reviewAttempts_subscribedStudent_refused() {
+      loggedIn(user(5));
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.ADMIN)).thenReturn(false);
+      when(membershipService.hasRoleInQuizCourse(5, 12, RoleNames.TEACHER)).thenReturn(false);
+      // Abonne au cours et quiz publie : la regle de passation ne doit pas s'appliquer ici.
+      org.mockito.Mockito.lenient().when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      org.mockito.Mockito.lenient().when(membershipService.isQuizPublished(12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/review-attempts", "GET", null)).isFalse();
+      assertThat(allowed("/api/quizzes/12/attempts/81/regrade", "POST", null)).isFalse();
+    }
+
     @Test
     void lireQuiz_abonne_autorise() {
       loggedIn(user(5));
@@ -890,6 +912,37 @@ class PermissionServiceRulesTest {
       loggedIn(user(5));
       when(membershipService.canAccessQuiz(5, 12)).thenReturn(false);
       assertThat(allowed("/api/quizzes/12/attempts/3", "GET", null)).isFalse();
+    }
+
+    @Test
+    void attemptStatus_subscriber_allowed() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "GET", null)).isTrue();
+    }
+
+    @Test
+    void attemptStatus_nonSubscriber_refused() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "GET", null)).isFalse();
+    }
+
+    @Test
+    void attemptStatus_nonNumericQuizId_refused() {
+      loggedIn(user(5));
+      assertThat(allowed("/api/quizzes/abc/attempts/3/status", "GET", null)).isFalse();
+      verifyNoInteractions(membershipService);
+    }
+
+    @Test
+    void attemptStatus_writeMethod_refused() {
+      // Lecture seule : aucune règle d'écriture sur ce chemin (403 par défaut au gateway), refusé
+      // avant même de charger l'utilisateur — comme verbeNonDeclare_defaultDeny. Sans cette
+      // vérification, une règle POST ajoutée passerait inaperçue : l'utilisateur, non connecté
+      // ici, serait refusé de toute façon.
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "POST", null)).isFalse();
+      verifyNoInteractions(userRepository, membershipService);
     }
 
     @Test

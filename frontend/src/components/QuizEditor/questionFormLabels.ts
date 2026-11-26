@@ -47,6 +47,10 @@ export interface QuestionFormLabels {
   startCodeLabel: string;
   startCodePlaceholder: string;
   startCodeAria: string;
+  /** Libellé du champ « temps limite d'exécution » (en secondes). */
+  execTimeoutLabel: string;
+  /** Aide sous le champ de temps limite (défaut + plafond). */
+  execTimeoutHint: string;
   harnessTitle: string;
   harnessCount: (count: number) => string;
   manageHarness: string;
@@ -87,6 +91,8 @@ export const defaultQuestionFormLabels: QuestionFormLabels = {
   startCodeLabel: 'Code de départ',
   startCodePlaceholder: 'def fonction():\n    # à compléter\n    pass',
   startCodeAria: 'Code de départ',
+  execTimeoutLabel: "Temps limite d'exécution (s)",
+  execTimeoutHint: 'Laisser vide pour le défaut du sandbox. Maximum 60 s.',
   harnessTitle: 'Harnais de test',
   harnessCount: (count) => `${count} harnais`,
   manageHarness: 'Gérer',

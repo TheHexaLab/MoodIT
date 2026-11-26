@@ -1,31 +1,29 @@
 package com.moodit.execution_service.assembly;
 
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Compléments aux tests de {@link CodeAssemblerTest} (mêmes conventions : aucun Piston, on vérifie
- * le programme assemblé) : langages compilés non encore exercés (Go, Rust, C#), HTML (bundle
- * vendor), exécution simple (« run ») de chaque langage, alias, proxys de classes (JS/PHP) et cas
- * limites du découpage SQL. Pour les langages compilés, on vérifie des PROPRIÉTÉS (point d'entrée
- * unique, code étudiant intact, harnais et nonce dans le noteur) plutôt que le texte exact ; le
- * fait que le programme s'exécute et note correctement relève d'ExecutionIntegrationTest.
+ * Compléments aux tests de {@link CodeAssemblerTest} (mêmes conventions : aucun conteneur, on
+ * vérifie le programme assemblé) : HTML (bundle vendor), proxys de classes et filtrage des symboles
+ * internes (JS/PHP/Python/Bash), alias, exécution simple (« run ») de chaque langage et cas limites
+ * du découpage SQL. Les langages COMPILÉS ne sont plus assemblés ici pour la notation (#116 :
+ * l'assembleur les refuse, DockerEvaluator les note) ; seul leur « run » l'est encore. Le fait que
+ * le programme s'exécute et note correctement sur le vrai runner relève d'ExecutionIntegrationTest
+ * (interprétés, SQL, JSX/TSX, HTML et JSON) et de RpcGradingIntegrationTest (compilés).
  */
 class CodeAssemblerLanguagesTest {
 
@@ -34,145 +32,6 @@ class CodeAssemblerLanguagesTest {
     private static String onlyFileContent(CodeAssembler.Assembled a) {
         assertThat(a.files()).hasSize(1);
         return a.files().get(0).content();
-    }
-
-    // ── Langages compilés : propriétés du programme assemblé ────────────────────
-    //
-    // On ne compare plus le programme caractère par caractère (fragile, et ça ne prouve pas qu'il
-    // s'exécute : c'est le rôle d'ExecutionIntegrationTest contre un vrai Piston). On vérifie les
-    // INVARIANTS dont dépend la correction : un seul point d'entrée (le nôtre), le code étudiant
-    // présent tel quel (au renommage de son main près), le harnais intact dans sa fonction, le nonce
-    // émis une seule fois, par notre main, APRÈS l'appel du harnais, et aucun code étudiant dans la
-    // partie « noteur ». Un harnais = un programme : le nonce est le marqueur propre à chaque test.
-
-    /**
-     * Cas d'un langage compilé. {@code studentSegment} = code étudiant attendu dans le programme
-     * (identique à la soumission pour C/C++, main renommé ailleurs) ; {@code macroGuard} = le main
-     * étudiant est neutralisé par {@code #define main} (C/C++) plutôt que par renommage.
-     */
-    private record Compiled(String language, String pistonLanguage, String fileName, String studentCode,
-            String studentSegment, String harness, String harnessSignature, String harnessCall,
-            String entryPoint, boolean macroGuard) {
-        @Override
-        public String toString() {
-            return language;
-        }
-    }
-
-    private static final String MARK = "ETUDIANT_SEULEMENT";
-    private static final String NONCE = "MOODIT_OK_n0nce";
-
-    static Stream<Compiled> compiledLanguages() {
-        return Stream.of(
-                new Compiled("Go", "go", "main.go",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc main() {}",
-                        "package main\n\n// " + MARK + "\nfunc solution() int { return 5 }\n\nfunc __moodit_student_main() {}",
-                        "return solution() == 5", "func __moodit_harness() bool {", "__moodit_harness()",
-                        "func\\s+main\\s*\\(", false),
-                // Espaces autour de « main » : le renommage doit quand même s'appliquer.
-                new Compiled("Rust", "rust", "main.rs",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn  main ()  {}",
-                        "// " + MARK + "\nfn solution() -> i32 { 5 }\nfn __moodit_student_main()  {}",
-                        "solution() == 5", "fn __moodit_harness() -> bool {", "__moodit_harness()",
-                        "fn\\s+main\\s*\\(", false),
-                new Compiled("C", "c", "main.c",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "/* " + MARK + " */\nint solution(void){ return 5; }\nint main(void){ return 0; }",
-                        "return solution() == 5;", "static int __moodit_harness(void) {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
-                new Compiled("C++", "c++", "main.cpp",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "// " + MARK + "\nint solution(){ return 5; }\nint main(){ return 0; }",
-                        "return solution() == 5;", "static bool __moodit_harness() {", "__moodit_harness()",
-                        "int\\s+main\\s*\\(", true),
-                // Les deux formes de Main (void et int) doivent être renommées.
-                new Compiled("C#", "csharp", "main.cs",
-                        "// " + MARK + "\nclass A { static void Main(string[] a) {} }\n"
-                                + "class B { static int Main () { return 0; } }",
-                        "// " + MARK + "\nclass A { static void __moodit_student_main(string[] a) {} }\n"
-                                + "class B { static int __moodit_student_main () { return 0; } }",
-                        "return true;", "static bool __moodit_run() {", "__moodit_run()",
-                        "static\\s+(?:void|int)\\s+Main\\s*\\(", false),
-                new Compiled("Java", "java", "Main.java",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
-                                + "public static void main(String[] a){} }",
-                        "// " + MARK + "\nclass Solution { static int solution(){ return 5; } "
-                                + "public static void __moodit_student_main(String[] a){} }",
-                        "return Solution.solution() == 5;", "static boolean __moodit_harness() {",
-                        "__moodit_harness()", "static\\s+void\\s+main\\s*\\(\\s*String", false));
-    }
-
-    private static int occurrences(String text, String needle) {
-        return text.split(Pattern.quote(needle), -1).length - 1;
-    }
-
-    private static int matches(String regex, String text) {
-        return (int) Pattern.compile(regex).matcher(text).results().count();
-    }
-
-    /** Programme assemblé, découpé en segment étudiant et partie « noteur » (tout le reste). */
-    private record Split(String program, int studentStart, int studentEnd) {
-        String grader() {
-            return program.substring(0, studentStart) + program.substring(studentEnd);
-        }
-    }
-
-    private Split assembleCompiled(Compiled c) {
-        var a = assembler.assemble(c.language(), c.studentCode(), c.harness(), NONCE);
-        assertThat(a.pistonLanguage()).isEqualTo(c.pistonLanguage());
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly(c.fileName());
-        String program = onlyFileContent(a);
-        // Le code étudiant figure une seule fois, tel quel (main renommé le cas échéant).
-        assertThat(occurrences(program, c.studentSegment())).isEqualTo(1);
-        int start = program.indexOf(c.studentSegment());
-        return new Split(program, start, start + c.studentSegment().length());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_un_seul_point_d_entree_et_le_code_etudiant_intact(Compiled c) {
-        Split s = assembleCompiled(c);
-
-        // Exactement UN point d'entrée effectif : le nôtre, dans la partie noteur.
-        assertThat(matches(c.entryPoint(), s.grader())).isEqualTo(1);
-        if (c.macroGuard()) {
-            // C/C++ : le main étudiant reste dans le texte, mais encadré par la macro qui le renomme.
-            assertThat(s.program().substring(0, s.studentStart())).isEqualTo("#define main __moodit_student_main\n");
-            assertThat(s.program().substring(s.studentEnd())).startsWith("\n#undef main\n");
-        } else {
-            assertThat(matches(c.entryPoint(), c.studentSegment())).isZero();
-        }
-
-        // Aucun fragment étudiant dans le noteur, ni harnais/nonce dans le segment étudiant.
-        assertThat(s.grader()).doesNotContain(MARK);
-        assertThat(c.studentSegment()).doesNotContain(NONCE).doesNotContain(c.harness());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("compiledLanguages")
-    void compile_harnais_intact_et_nonce_emis_par_notre_main_apres_le_harnais(Compiled c) {
-        Split s = assembleCompiled(c);
-        String grader = s.grader();
-
-        // Le harnais est le corps exact de SA fonction, dans le noteur.
-        assertThat(occurrences(grader, c.harnessSignature() + "\n" + c.harness() + "\n")).isEqualTo(1);
-
-        // Notre main appelle le harnais, puis seulement émet le nonce (une seule émission en tout).
-        assertThat(occurrences(s.program(), NONCE)).isEqualTo(1);
-        Matcher entry = Pattern.compile(c.entryPoint()).matcher(grader);
-        assertThat(entry.find()).isTrue();
-        int callAt = grader.indexOf(c.harnessCall(), entry.end());
-        assertThat(callAt).isPositive();
-        assertThat(grader.indexOf(NONCE)).isGreaterThan(callAt);
-    }
-
-    @Test
-    void java_notre_classe_d_entree_vient_en_premier() {
-        // Mode fichier-source unique (JEP 330) : la PREMIÈRE classe porte le main exécuté.
-        String program = onlyFileContent(assembler.assemble("Java",
-                "public class Main { public static void main(String[] a){} }", "return true;", "N"));
-
-        assertThat(program).startsWith("public class __MooditMain {");
     }
 
     // ── HTML (bundle vendor) ────────────────────────────────────────────────────
@@ -184,8 +43,8 @@ class CodeAssemblerLanguagesTest {
 
         var a = asm.assemble("HTML", "<h1>Bonjour</h1>", "return doc.querySelector('h1') !== null;", "MOODIT_OK_html");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name)
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name)
                 .containsExactly("main.js", "htmlparser.js", "submission.html");
         assertThat(a.files().get(0).content())
                 .contains("require('./htmlparser.js')")
@@ -223,7 +82,7 @@ class CodeAssemblerLanguagesTest {
     void javascript_proxifie_les_classes_par_construction_rpc() {
         var a = assembler.assemble("JavaScript",
                 "class Pile { constructor(){ this.e=[]; } }\nconst taille = (p) => 0;",
-                "return new Pile() !== null;", "MOODIT_OK_c");
+                "return taille(new Pile()) === 0;", "MOODIT_OK_c");
         String grader = a.files().get(0).content();
 
         assertThat(grader)
@@ -238,7 +97,7 @@ class CodeAssemblerLanguagesTest {
     void javascript_ne_proxifie_pas_une_classe_au_nom_interne() {
         // Une classe nommée __moodit… ne doit pas redéclarer un symbole interne du noteur.
         var a = assembler.assemble("JavaScript", "class __moodit_K {}\nclass Pile {}",
-                "return true;", "MOODIT_OK_c");
+                "return new Pile() !== null && new __moodit_K() !== null;", "MOODIT_OK_c");
         String grader = a.files().get(0).content();
 
         assertThat(grader)
@@ -269,7 +128,8 @@ class CodeAssemblerLanguagesTest {
     void python_ignore_les_fonctions_et_classes_internes_de_l_etudiant() {
         var a = assembler.assemble("Python",
                 "def __moodit_rpc(x):\n    return 1\nclass __moodit_Faux:\n    pass\nasync def lire():\n    return 2",
-                "return True", "MOODIT_OK_py");
+                "return lire() == 2 and __moodit_Faux is not None and __moodit_rpc is not None",
+                "MOODIT_OK_py");
         String grader = a.files().get(0).content();
 
         // Le vrai __moodit_rpc du noteur n'est pas écrasé par un proxy portant le même nom.
@@ -281,15 +141,32 @@ class CodeAssemblerLanguagesTest {
     @Test
     void bash_ignore_les_fonctions_internes_et_accepte_le_mot_cle_function() {
         var a = assembler.assemble("Bash", "function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }",
-                "[ \"$(doubler)\" = 2 ]", "MOODIT_OK_sh");
+                "[ \"$(doubler)\" = 2 ] && type __moodit_rpc >/dev/null", "MOODIT_OK_sh");
         String grader = a.files().get(0).content();
 
         assertThat(grader).contains("doubler() { __moodit_rpc doubler \"$@\"; }\n")
                 .doesNotContain("__moodit_rpc() { __moodit_rpc")
-                .endsWith("if __moodit_harness; then printf '%s' 'MOODIT_OK_sh' >&2; exit 0; else exit 1; fi\n");
+                .endsWith("if __moodit_harness; then printf '%s' 'MOODIT_OK_sh' >&2; exit 0; else exit 1; fi\n}\n");
+        // Le répartiteur CADRE sa réponse par l'identifiant reçu du noteur : un `echo` de
+        // premier niveau du code étudiant ne vaut plus réponse. C'était la forge naïve du chemin
+        // interprété — imprimer l'attendu et ne rien imprimer dans sa fonction. Et il ne peut
+        // pas non plus CONTREFAIRE la ligne de réponse : l'identifiant est lu AVANT que son code
+        // soit chargé, et ce chargement se fait dans un sous-shell qui ne l'a pas en portée et
+        // dont la sortie est capturée.
+        assertThat(grader).contains("read -r __moodit_id __moodit_name __moodit_rest")
+                .contains("unset __moodit_id")
+                // Le répartiteur n'est PAS un fichier : dans un fichier, le code soumis pouvait
+                // le réécrire, et c'est lui qui détient l'identifiant à l'appel suivant.
+                .contains("bash -c \"$__moodit_srv\"")
+                // L'identifiant ne passe JAMAIS en argument d'un processus : il serait lisible
+                // par tout voisin du même UID.
+                .doesNotContain("sed -n")
+                .contains("case \"$__l\" in \"$__id|\"*)");
+        // Le code soumis vit dans son propre fichier, tel quel.
+        assertThat(a.files()).extracting(RunnerExec.File::name)
+                .containsExactly("grader.sh", "solution.sh");
         assertThat(a.files().get(1).content())
-                .isEqualTo("function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }"
-                        + "\nread -r __moodit_name __moodit_rest\n$__moodit_name $__moodit_rest\n");
+                .isEqualTo("function doubler() { echo 2; }\n__moodit_rpc() { echo pirate; }");
     }
 
     // ── Alias et normalisation ──────────────────────────────────────────────────
@@ -299,17 +176,22 @@ class CodeAssemblerLanguagesTest {
             "node, javascript",
             "' Python ', python",
             "ts, typescript",
-            "cplusplus, c++",
-            "cs, csharp",
-            "c-sharp, csharp",
             "shell, bash",
             "sh, bash",
-            "golang, go",
             "sqlite, sqlite3",
             "SQLITE3, sqlite3",
     })
-    void alias_de_langage_resolus_a_l_assemblage(String language, String pistonLanguage) {
-        assertThat(assembler.assemble(language, "", "", "N").pistonLanguage()).isEqualTo(pistonLanguage);
+    void language_aliases_resolved_at_assembly(String language, String runtime) {
+        assertThat(assembler.assemble(language, "", "", "N").runtime()).isEqualTo(runtime);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"cplusplus", "cs", "c-sharp", "golang", "Java", "Rust", "C"})
+    void compiled_aliases_rejected_by_assembler_graded_by_docker_runner(String language) {
+        // #116 : l'évaluation des compilés passe par sandbox/DockerEvaluator, jamais par
+        // l'assembleur du mode exec.
+        assertThatThrownBy(() -> assembler.assemble(language, "", "", "N"))
+                .isInstanceOf(UnsupportedLanguageException.class);
     }
 
     @Test
@@ -348,12 +230,12 @@ class CodeAssemblerLanguagesTest {
             "SQL, sqlite3, main.sql",
             "Java, java, Main.java",
     })
-    void run_envoie_le_code_tel_quel_dans_le_fichier_attendu(String language, String pistonLanguage,
+    void run_sends_code_as_is_in_expected_file(String language, String runtime,
             String fileName) {
         String code = "// code étudiant de " + language;
         var a = assembler.assembleRun(language, code);
 
-        assertThat(a.pistonLanguage()).isEqualTo(pistonLanguage);
+        assertThat(a.runtime()).isEqualTo(runtime);
         assertThat(a.files()).singleElement().satisfies(f -> {
             assertThat(f.name()).isEqualTo(fileName);
             assertThat(f.content()).isEqualTo(code);   // aucun harnais, aucune enveloppe
@@ -368,11 +250,24 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void run_java_reads_file_name_like_grading() {
+        // « Exécuter » avait son propre lecteur (public class \w+) : Unicode, sealed et classe
+        // commentee y donnaient un autre fichier que celui de la notation.
+        var a = assembler.assembleRun("Java", """
+                // public class Ancienne { }
+                public sealed interface Réponse permits Oui { }
+                record Oui() implements Réponse { }
+                """);
+
+        assertThat(a.files()).singleElement().satisfies(f -> assertThat(f.name()).isEqualTo("Réponse.java"));
+    }
+
+    @Test
     void run_json_valide_et_reindente_sans_harnais() {
         var a = assembler.assembleRun("JSON", "{\"a\":1}");
 
-        assertThat(a.pistonLanguage()).isEqualTo("javascript");
-        assertThat(a.files()).extracting(PistonClient.File::name).containsExactly("main.js", "submission.json");
+        assertThat(a.runtime()).isEqualTo("javascript");
+        assertThat(a.files()).extracting(RunnerExec.File::name).containsExactly("main.js", "submission.json");
         assertThat(a.files().get(0).content())
                 .contains("console.log(JSON.stringify(data, null, 2));")
                 .contains("console.error('JSON invalide: '")
@@ -422,14 +317,14 @@ class CodeAssemblerLanguagesTest {
 
         assertThat(onlyFileContent(a)).isEqualTo(
                 "CREATE TABLE t(n INT);\nUPDATE t SET n = 0\n;\n"
-                        + "SELECT 'N_DUMP_START';\n.dump\nSELECT 'N_DUMP_END';\n");
+                        + ".print N_DUMP_START\n.dump\n.print N_DUMP_END\n");
     }
 
     @Test
     void phase1_tolere_code_et_harnais_nuls() {
         var a = assembler.assembleSqlPhase1(null, null, "N");
 
-        assertThat(onlyFileContent(a)).isEqualTo("\n;\nSELECT 'N_DUMP_START';\n.dump\nSELECT 'N_DUMP_END';\n");
+        assertThat(onlyFileContent(a)).isEqualTo("\n;\n.print N_DUMP_START\n.dump\n.print N_DUMP_END\n");
     }
 
     @Test
@@ -471,6 +366,68 @@ class CodeAssemblerLanguagesTest {
     }
 
     @Test
+    void unicode_names_are_read_in_full() {
+        // Revue #246 : en ASCII seul, `def carré` donnait un mandataire `carr`, et la table
+        // `élèves` n'était pas une table de travail (base vide en phase 2) — 0 sur une réponse juste.
+        assertThat(assembler.assemble("Python", "def carré(x):\n    return x * x",
+                "return carré(3) == 9", "N").files().get(0).content()).contains("def carré(*a):");
+        assertThat(assembler.assemble("JavaScript", "function carré(x) { return x * x; }",
+                "return carré(3) === 9;", "N").files().get(0).content())
+                .contains("function carré(...a)");
+        assertThat(assembler.assemble("PHP", "<?php\nfunction carré($x) { return $x * $x; }",
+                "return carré(3) === 9;", "N").files().get(0).content()).contains("function carré(");
+        assertThat(CodeAssembler.sqlWorkingTables("CREATE TABLE élèves (nom TEXT);\n-- @student\n"))
+                .containsExactly("élèves");
+        assertThat(CodeAssembler.filterDumpToData(
+                "CREATE TABLE élèves (nom TEXT);\nINSERT INTO \"élèves\" VALUES('a');\n", Set.of("élèves")))
+                .isEqualTo("CREATE TABLE élèves (nom TEXT)\n;\nINSERT INTO \"élèves\" VALUES('a')\n;\n");
+    }
+
+    @Test
+    void filterDumpToData_refuses_a_parameter_in_a_kept_statement() {
+        // Revue #246 : sqlite_master réécrit en phase 1 (writable_schema). `$x(/*)` est UN
+        // paramètre pour SQLite ; lu comme un commentaire, il cachait au filtre une vue TEMP
+        // exécutée en phase 2. .dump n'écrit jamais de paramètre : dump refusé.
+        String forged = "CREATE TABLE utilisateurs (nom TEXT, actif INTEGER);"
+                + "INSERT INTO utilisateurs VALUES($x(/*),0);"
+                + "CREATE TEMP VIEW utilisateurs AS SELECT * FROM temp.attendu;SELECT 1 /* */;\n";
+        assertThat(CodeAssembler.filterDumpToData(forged, Set.of("utilisateurs"))).isNull();
+        for (String parameter : List.of(":a", "@a", "#a", "?1", "?", "$a", "$a::b(x)")) {
+            assertThat(CodeAssembler.filterDumpToData(
+                    "INSERT INTO t VALUES(" + parameter + ");", Set.of("t")))
+                    .as(parameter).isNull();
+        }
+        // Un paramètre dans une instruction JETÉE (table hors liste) ne fait rien refuser, et les
+        // mêmes caractères en chaîne, en identifiant ou au milieu d'un nom sont des données.
+        assertThat(CodeAssembler.filterDumpToData(
+                "INSERT INTO autre VALUES(:a);INSERT INTO t VALUES(':a $b(/*) @c #d ?');"
+                        + "CREATE TABLE t2 (\"a:b\" INT, prix$ INT);", Set.of("t", "t2")))
+                .isEqualTo("INSERT INTO t VALUES(':a $b(/*) @c #d ?')\n;\n"
+                        + "CREATE TABLE t2 (\"a:b\" INT, prix$ INT)\n;\n");
+    }
+
+    @Test
+    void splitSqlStatements_reads_parameters_like_sqlite() {
+        // Variable TCL : jusqu'à `)` incluse, ou au premier blanc ; son contenu n'ouvre ni
+        // commentaire, ni chaîne, et son `;` ne finit pas l'instruction.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(/*); SELECT 2 /* */"))
+                .containsExactly("SELECT $x(/*)", "SELECT 2 /* */");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(';'); SELECT 2"))
+                .containsExactly("SELECT $x(';')", "SELECT 2");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT $x(a /*; b */; SELECT 3"))
+                .containsExactly("SELECT $x(a /*; b */", "SELECT 3");
+        assertThat(CodeAssembler.splitSqlStatements("SELECT :a::b(/*);SELECT ?12;SELECT @(/*)*/;S"))
+                .containsExactly("SELECT :a::b(/*)", "SELECT ?12", "SELECT @(/*)*/", "S");
+        // `$` au milieu d'un identifiant le prolonge : `a$x(/*` ouvre bien un commentaire.
+        assertThat(CodeAssembler.splitSqlStatements("SELECT a$x(/*;*/); SELECT 4"))
+                .containsExactly("SELECT a$x(/*;*/)", "SELECT 4");
+        List<Boolean> flags = new java.util.ArrayList<>();
+        assertThat(CodeAssembler.splitSqlStatements("SELECT a$b; SELECT $c\t;SELECT '$d'", flags))
+                .hasSize(3);
+        assertThat(flags).containsExactly(false, true, false);
+    }
+
+    @Test
     void splitSqlStatements_null_donne_une_liste_vide() {
         assertThat(CodeAssembler.splitSqlStatements(null)).isEmpty();
     }
@@ -485,6 +442,90 @@ class CodeAssemblerLanguagesTest {
     void splitSqlStatements_commentaire_de_bloc_non_ferme_avale_la_fin() {
         assertThat(CodeAssembler.splitSqlStatements("SELECT 1 /* ; SELECT 2"))
                 .containsExactly("SELECT 1 /* ; SELECT 2");
+    }
+
+    @Test
+    void splitSqlStatements_blank_or_comment_only_segments_are_ignored() {
+        assertThat(CodeAssembler.splitSqlStatements(" /* a */ ; -- b\n ;\t\n; SELECT 1 ; /* fin"))
+                .containsExactly("SELECT 1");
+        // Le « /* » d'un commentaire de ligne n'ouvre rien : ce qui suit le saut de ligne est
+        // du SQL, comme pour SQLite (le découpage et le test « porte du SQL » lisent pareil).
+        assertThat(CodeAssembler.splitSqlStatements("-- x /*\n y */"))
+                .containsExactly("-- x /*\n y */");
+        // Un littéral ou un identifiant seul est du SQL, même s'il contient des commentaires.
+        assertThat(CodeAssembler.splitSqlStatements("'/* a */'; [-- b]"))
+                .containsExactly("'/* a */'", "[-- b]");
+    }
+
+    @Test
+    void pythonStringLiteral_escapes_everything_that_would_leave_the_literal() {
+        // Valable en Python comme en JavaScript : barre oblique inverse, guillemet, saut de
+        // ligne, contrôles et non-ASCII échappés ; l'ASCII imprimable (espace à ~) tel quel.
+        assertThat(CodeAssembler.pythonStringLiteral("a\\b\"c\nd\te\u001f é~ "))
+                .isEqualTo("\"a\\\\b\\\"c\\nd\\u0009e\\u001f \\u00e9~ \"");
+        assertThat(CodeAssembler.pythonStringLiteral("\u007f")).isEqualTo("\"\\u007f\"");
+    }
+
+    @Test
+    void isShellTerminatorLine_exact_boundaries() {
+        // Lignes coupées pile en fin de chaîne : aucun accès au-delà du dernier caractère.
+        assertThat(CodeAssembler.isShellTerminatorLine("   ")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("g")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("go -")).isFalse();
+        assertThat(CodeAssembler.isShellTerminatorLine("go /")).isFalse();
+        // Commentaire de ligne, puis commentaire de bloc fermé, après le terminateur.
+        assertThat(CodeAssembler.isShellTerminatorLine("go -- x")).isTrue();
+        assertThat(CodeAssembler.isShellTerminatorLine("/ /* x */")).isTrue();
+        // « */ » cherché APRÈS l'ouverture « /* » : celui-ci ne la ferme pas.
+        assertThat(CodeAssembler.isShellTerminatorLine("/ /*/")).isFalse();
+    }
+
+    @Test
+    void splitSqlStatements_stays_linear_on_a_literal_full_of_open_comments() {
+        // Dump de phase 1 (contenu étudiant, jusqu'à 512 000 caractères) : une valeur faite de
+        // « /* » répétés. L'ancien test « porte du SQL » (regex) relançait un balayage jusqu'à la
+        // fin à chaque « /* » : plusieurs minutes de CPU sur le fil de la requête.
+        String dump = "INSERT INTO t VALUES('" + "/* ".repeat(170_000) + "');";
+        java.util.List<String> statements = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(2), () -> CodeAssembler.splitSqlStatements(dump));
+        assertThat(statements).hasSize(1);
+        assertThat(statements.get(0)).startsWith("INSERT INTO t VALUES('/* ").endsWith("')");
+    }
+
+    @Test
+    void reading_submitted_names_stays_linear() {
+        // Revue #246 : `function` + 100 000 blancs + `(` coûtait 45 s de CPU par harnais à
+        // JS_CALLABLE (deux `\s*` autour de `\*?`), hors de toute place du sandbox.
+        for (String language : List.of("JavaScript", "TypeScript", "Python", "PHP", "Bash")) {
+            for (String code : List.of("function" + " ".repeat(99_000) + "(",
+                    "function" + "\t".repeat(99_000) + "*",
+                    "export" + " ".repeat(99_000) + "x",
+                    "f" + " ".repeat(99_000) + "= lambda",
+                    "def" + " ".repeat(99_000) + "(")) {
+                org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),
+                        () -> assembler.assemble(language, code, "return f(1) == 1", "N"), language);
+            }
+        }
+    }
+
+    @Test
+    void bash_function_forms_and_python_lambdas_get_their_proxy() {
+        // Revue #246 : `function f {` (sans parenthèses), un nom Unicode en Bash, et une lambda
+        // nommée en Python n'avaient pas de mandataire — « command not found », 0 sur une
+        // réponse juste.
+        String bash = assembler.assemble("Bash",
+                "function carre {\n  echo $(( $1 * $1 ))\n}\ncarré() { echo 1; }\nfunction cube() { echo 8; }",
+                "[ \"$(carre 3)\" = 9 ] && [ \"$(carré)\" = 1 ] && [ \"$(cube)\" = 8 ]", "N")
+                .files().get(0).content();
+        assertThat(bash).contains("carre() { __moodit_rpc carre \"$@\"; }")
+                .contains("carré() { __moodit_rpc carré \"$@\"; }")
+                .contains("cube() { __moodit_rpc cube \"$@\"; }");
+        // Aucun métacaractère du shell ne passe dans un nom (recopié sans guillemets).
+        assertThat(assembler.assemble("Bash", "function a;rm {\n:\n}\nb$(x)() { :; }",
+                "a;rm; b$(x)", "N").files().get(0).content())
+                .doesNotContain("__moodit_rpc a;rm").doesNotContain("__moodit_rpc b$(x)");
+        assertThat(assembler.assemble("Python", "carre = lambda x: x * x",
+                "return carre(3) == 9", "N").files().get(0).content()).contains("def carre(*a):");
     }
 
     @Test

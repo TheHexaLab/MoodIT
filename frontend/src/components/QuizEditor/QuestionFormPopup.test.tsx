@@ -210,6 +210,22 @@ describe('QuestionFormBody', () => {
     expect(onRequestLanguages).toHaveBeenCalled();
   });
 
+  it('changer de type vide le temps limite : Code 8 s → Choix unique → Code affiche un champ vide', () => {
+    // Le champ est piloté par un tampon texte : sans remise à vide, il réaffichait « 8 » alors
+    // que le brouillon vierge du type n'a plus de temps limite (rien ne serait enregistré).
+    const draft: QuestionDraft = { ...emptyQuestionDraft('coding'), prompt: 'Q', execTimeoutMs: 8000 };
+    renderForm(draft, { isNew: true });
+    expect((screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement).value).toBe('8');
+
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
+    fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.single_choice }));
+    expect(screen.queryByLabelText(t.execTimeoutLabel)).toBeNull();
+    fireEvent.click(screen.getByLabelText(t.typeLabel, { exact: false }));
+    fireEvent.click(screen.getByRole('option', { name: QUESTION_TYPE_LABELS.coding }));
+
+    expect((screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement).value).toBe('');
+  });
+
   // ── Points ──
 
   it('barème : arrondi au dixième borné ≥ 0.1 au blur', () => {
@@ -324,6 +340,119 @@ describe('QuestionFormBody', () => {
     };
     renderForm(draft, { isNew: true });
     expect(saveButton(t.add).disabled).toBe(false);
+  });
+
+  it('code : le temps limite saisi en secondes est stocké en millisecondes', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel), { target: { value: '5' } });
+    // Nom accessible = le libellé seul ; l'aide est une description (aria-describedby).
+    const field = screen.getByLabelText(t.execTimeoutLabel);
+    expect(document.getElementById(field.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      t.execTimeoutHint
+    );
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(5000);
+  });
+
+  it('code : entrer puis sortir du temps limite sans rien changer ne marque rien comme modifié', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      execTimeoutMs: 8000,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const onDirty = vi.fn();
+    renderForm(draft, { onDirty });
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(onDirty).not.toHaveBeenCalled();
+    // Une vraie modification, elle, marque la question.
+    fireEvent.change(input, { target: { value: '9' } });
+    fireEvent.blur(input);
+    expect(onDirty).toHaveBeenCalled();
+  });
+
+  it('code : vider le temps limite revient au défaut du sandbox', () => {
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      execTimeoutMs: 8000,
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
+    expect(input.value).toBe('8');
+    fireEvent.change(input, { target: { value: '' } });
+    // Quitter le champ vide ne le remplit pas d'une borne : il reste vide (défaut du sandbox).
+    fireEvent.blur(input);
+    expect(input.value).toBe('');
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBeUndefined();
+  });
+
+  it('code : le temps limite est borné à 1-60 s entières (saisie et blur)', () => {
+    // Sans bornage, la valeur partait telle quelle au backend et l'aperçu « Tester »
+    // divergeait de la correction réelle. Ces cas échouent si le clamp est retiré.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '61' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('60');
+
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('1');
+
+    fireEvent.change(input, { target: { value: '2.6' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('3');
+
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(3000);
+  });
+
+  it('code : la valeur enregistrée est bornée dès la saisie, sans attendre la sortie du champ', () => {
+    // « Ajouter » cliqué sans blur du champ : seul le bornage de la saisie (onChange) protège
+    // l'enregistrement d'un 75 s hors bornes.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    const { onSave } = renderForm(draft, { isNew: true });
+    fireEvent.change(screen.getByLabelText(t.execTimeoutLabel), { target: { value: '75' } });
+    fireEvent.click(saveButton(t.add));
+    expect((onSave.mock.calls[0][0] as QuestionDraft).execTimeoutMs).toBe(60_000);
+  });
+
+  it('code : la frappe n’est pas réécrite en cours de saisie (bornage au blur)', () => {
+    // Sans tampon texte, le clamp s'appliquait à CHAQUE frappe : taper « 75 » affichait « 7 »
+    // puis « 60 », et l'utilisateur ne pouvait plus corriger sa saisie.
+    const draft: QuestionDraft = {
+      ...emptyQuestionDraft('coding'),
+      prompt: 'Q',
+      testCases: [{ name: 'c', harnessCode: 'h', weight: 1 }],
+    };
+    renderForm(draft, { isNew: true });
+    const input = screen.getByLabelText(t.execTimeoutLabel) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '7' } });
+    expect(input.value).toBe('7');
+    fireEvent.change(input, { target: { value: '75' } });
+    expect(input.value).toBe('75');        // la frappe reste intacte…
+    fireEvent.blur(input);
+    expect(input.value).toBe('60');        // …et n'est bornée qu'à la sortie du champ.
   });
 
   it('code : changer de langage repose le code de départ et vide les harnais', () => {

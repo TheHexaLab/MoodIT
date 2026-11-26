@@ -131,6 +131,27 @@ export function EditorShell({
     if (bodyRef.current) bodyRef.current.scrollTop = 0;
   }, [scrollResetKey]);
 
+  // Changement de vue : l'élément qui avait le focus (crayon, pastille, chevron…) a souvent
+  // disparu avec la vue précédente, et le focus retombait sur <body>, HORS de la fenêtre
+  // modale. On le replace dans la coquille (chevron « Retour », sinon le titre) — seulement s'il
+  // est orphelin : un champ de la nouvelle vue qui l'a déjà pris le garde.
+  const backRef = useRef<HTMLButtonElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const firstViewRef = useRef(true);
+  useEffect(() => {
+    if (firstViewRef.current) {
+      firstViewRef.current = false;
+      return;
+    }
+    // Focus PERDU seulement (absent, sur <body> ou détaché) : un focus posé dans une autre
+    // fenêtre modale au-dessus de l'éditeur (confirmation de suppression ouverte pendant un
+    // chargement) y reste — le ramener sur le chevron, derrière elle, coinçait le clavier.
+    const active = document.activeElement;
+    const orphaned = !active || active === document.body || !active.isConnected;
+    if (!orphaned) return;
+    (backRef.current ?? titleRef.current)?.focus({ preventScroll: true });
+  }, [scrollResetKey]);
+
   useLayoutEffect(() => {
     const measure = () => {
       // Desktop : borne supplémentaire en vh si demandée (ex. 60vh pour la question).
@@ -191,6 +212,7 @@ export function EditorShell({
         <div className={styles.headerTitle}>
           {onBack && (
             <button
+              ref={backRef}
               type="button"
               className={styles.backChevron}
               aria-label="Retour"
@@ -201,7 +223,9 @@ export function EditorShell({
             </button>
           )}
           <div className={styles.headerText}>
-            <h1>{title}</h1>
+            <h1 ref={titleRef} tabIndex={-1}>
+              {title}
+            </h1>
             {subtitle && <p>{subtitle}</p>}
           </div>
         </div>

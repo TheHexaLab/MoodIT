@@ -143,6 +143,7 @@ vi.mock('../../components/MainPanel/QuizView/QuizView.tsx', () => ({
       <button type="button" onClick={() => props.onReloadStale?.()}>
         quiz:reload
       </button>
+      {probe(props, 'quiz:status', 'onFetchAttemptStatus', props.channel.id, 9)}
     </>
   ),
 }));
@@ -1444,6 +1445,48 @@ describe('Dashboard — compléments', () => {
         attemptId: 100,
         ok: false,
         reason: 'délai dépassé',
+      });
+    });
+
+    it('statut d’une tentative attendue : routé vers l’API (attente d’une correction)', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      fireEvent.click(screen.getByRole('button', { name: 'quiz:status' }));
+      expect(api.fetchAttemptStatus).toHaveBeenCalledWith(7, 9);
+    });
+
+    it('verdict d’un AUTRE quiz : n’écrase pas celui du quiz ouvert (un verdict par quiz)', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      act(() => programsWs().onQuizAttemptFailed(7, 100));
+      act(() => programsWs().onQuizAttemptGraded(8, 200));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 7,
+        attemptId: 100,
+        ok: false,
+      });
+    });
+
+    it('verdict reçu pendant que SON quiz est fermé : transmis à son ouverture', async () => {
+      // Quiz 8 ajouté au cours 10 pour ce test seulement (la fixture partagée reste intacte).
+      vi.mocked(api.fetchCourses).mockImplementation(async (id: number) =>
+        id === 1
+          ? structuredClone(coursesByProgram[1]).map((c) =>
+              c.id === 10 ? { ...c, quizzes: [...(c.quizzes ?? []), { id: 8, title: 'Quiz deux' }] } : c
+            )
+          : structuredClone(coursesByProgram[id] ?? [])
+      );
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      // Quiz 7 ouvert : le verdict de 8 arrive (fermé), puis celui de 7.
+      act(() => programsWs().onQuizAttemptFailed(8, 200));
+      act(() => programsWs().onQuizAttemptGraded(7, 100));
+      fireEvent.click(screen.getByText('Quiz deux'));
+      await waitFor(() => expect(screen.getByTestId('quiz-view').textContent).toBe('Quiz deux'));
+      expect(JSON.parse(screen.getByTestId('quiz-view').dataset.outcome ?? '')).toEqual({
+        quizId: 8,
+        attemptId: 200,
+        ok: false,
       });
     });
 

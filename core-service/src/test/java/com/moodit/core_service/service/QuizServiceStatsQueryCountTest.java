@@ -79,7 +79,8 @@ class QuizServiceStatsQueryCountTest {
             mock(PlatformTransactionManager.class),
             mock(ApplicationEventPublisher.class),
             mock(AuditLogService.class),
-            mock(QuizItemObfuscator.class));
+            mock(QuizItemObfuscator.class),
+            mock(com.moodit.core_service.repository.GradingFailureRepository.class));
 
     single = new QType();
     single.setName("Choix unique");

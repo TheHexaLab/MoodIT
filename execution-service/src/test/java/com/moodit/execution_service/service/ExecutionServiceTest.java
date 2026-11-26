@@ -5,11 +5,15 @@ import com.moodit.execution_service.dto.EvaluateRequest;
 import com.moodit.execution_service.dto.RunRequest;
 import com.moodit.execution_service.dto.TestCaseInput;
 import com.moodit.execution_service.dto.TestResult;
-import com.moodit.execution_service.piston.PistonClient;
+import com.moodit.execution_service.sandbox.RunnerExec;
+import com.moodit.execution_service.sandbox.DockerEvaluator;
+import com.moodit.execution_service.sandbox.HarnessProjects;
+import com.moodit.execution_service.sandbox.SandboxException;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,28 +21,33 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Tests de la LOGIQUE DE VERDICT (Piston mocké, assembleur réel). Vérifie surtout l'ANTI-TRICHE :
+ * Tests de la LOGIQUE DE VERDICT (RunnerExec mocké — mode exec des conteneurs runner —,
+ * assembleur réel). Vérifie surtout l'ANTI-TRICHE :
  * un test ne réussit que si le harnais a émis le NONCE secret — pas parce que le programme s'est
  * terminé en exit 0 (falsifiable). Couvre aussi compilation, timeout et le verdict SQL par sortie.
  */
 class ExecutionServiceTest {
 
     private final CodeAssembler assembler = new CodeAssembler("/nonexistent-vendor");
-    private final PistonClient piston = mock(PistonClient.class);
-    private final ExecutionService service = new ExecutionService(assembler, piston);
+    private final RunnerExec runner = mock(RunnerExec.class);
+    private final ExecutionService service = new ExecutionService(assembler, runner);
 
     private static final Pattern NONCE = Pattern.compile("MOODIT_OK_[0-9a-f]+");
 
     /** Retrouve le nonce injecté dans les fichiers assemblés (pour simuler un harnais qui réussit). */
-    private static String nonceIn(List<PistonClient.File> files) {
-        for (PistonClient.File f : files) {
+    private static String nonceIn(List<RunnerExec.File> files) {
+        for (RunnerExec.File f : files) {
             Matcher m = NONCE.matcher(f.content());
             if (m.find()) return m.group();
         }
@@ -49,11 +58,11 @@ class ExecutionServiceTest {
         return new EvaluateRequest(language, null, code, List.of(new TestCaseInput("t", harness, 1)));
     }
 
-    /** Fait renvoyer à Piston une étape run(stdout, stderr) calculée à partir des fichiers soumis. */
-    private void pistonRun(Function<List<PistonClient.File>, PistonClient.Stage> runFn) {
-        when(piston.execute(anyString(), any(), any())).thenAnswer((Answer<PistonClient.Result>) inv -> {
-            List<PistonClient.File> files = inv.getArgument(2);
-            return new PistonClient.Result(null, runFn.apply(files), null);
+    /** Fait renvoyer au runner (mode exec) une étape run(stdout, stderr) calculée à partir des fichiers soumis. */
+    private void runnerRun(Function<List<RunnerExec.File>, RunnerExec.Stage> runFn) {
+        when(runner.execute(anyString(), any(), any(), any())).thenAnswer((Answer<RunnerExec.Result>) inv -> {
+            List<RunnerExec.File> files = inv.getArgument(1);
+            return new RunnerExec.Result(null, runFn.apply(files), null);
         });
     }
 
@@ -64,31 +73,345 @@ class ExecutionServiceTest {
     }
 
     @Test
+    void budget_exceeded_remaining_harnesses_not_launched() {
+        // Le chemin interprété lance un conteneur et prend une place PAR HARNAIS (100 autorisés) :
+        // sans échéance, une correction occupait le sandbox des heures après que l'appelant a
+        // renoncé, et core devait budgéter un délai de lecture du même ordre (#216). Budget à 0 :
+        // le PREMIER harnais part quand même (un budget mal réglé dégrade, il ne vide pas la
+        // correction de tout verdict réel), les suivants reçoivent un verdict explicite.
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        service.interpretedBudgetMs = 0;
+
+        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
+                "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2),
+                        new TestCaseInput("c", "return True", 3))));
+
+        assertThat(results).hasSize(3);
+        // Le premier est réellement évalué…
+        assertThat(results.get(0).name()).isEqualTo("a");
+        assertThat(results.get(0).passed()).isTrue();
+        // …les suivants ne sont pas lancés : verdict NON réussi, poids conservé (la note reste
+        // calculable), détail explicite pour le prof.
+        assertThat(results).extracting(TestResult::name).containsExactly("a", "b", "c");
+        assertThat(results.get(1).passed()).isFalse();
+        assertThat(results.get(1).weight()).isEqualTo(2);
+        assertThat(results.get(1).detail()).contains("budget d'évaluation dépassé");
+        assertThat(results.get(2).weight()).isEqualTo(3);
+        assertThat(results.get(2).detail()).contains("budget d'évaluation dépassé");
+        // Un SEUL passage au runner : c'est la garantie de capacité, pas seulement un libellé.
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void budget_exhausted_by_internal_slot_wait_is_a_failure_not_a_grade()
+            throws Exception {
+        // VRAIE charge : la place unique du sandbox est occupee par une autre correction pendant
+        // 600 ms. L'evaluation attend, et c'est cette attente — creee par les autres — qui epuise
+        // le budget de 200 ms ; le travail lui-meme (harnais instantanes) tenait dedans. Sur le
+        // chemin interne, ce n'est pas une note : 502, la tentative est a reprendre.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
+        Thread other = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            acquired.countDown();
+            try {
+                Thread.sleep(600);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        })));
+        other.start();
+        acquired.await();
+        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+
+        // Compté par core (S4, F4) : sinon un code qui s'arrête juste sous le temps limite
+        // laissait la file transformer chaque essai en suppression non comptée.
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(req)))
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class);
+        other.join();
+    }
+
+    @Test
+    void public_budget_exhausted_by_slot_wait_stays_a_grade() throws Exception {
+        // Même charge que ci-dessus (place tenue 600 ms par une correction interne, budget
+        // 200 ms, harnais instantanés), mais sur le chemin PUBLIC (« Tester ») : aucune tentative
+        // à reprendre, rien que core compterait. Le 502 « sans verdict » est réservé au chemin
+        // interne ; ici, le second harnais reçoit son verdict « Non évalué » et l'appel rend 200.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        Thread other = holdSlot(limiter, 600);
+
+        List<TestResult> r = svc.evaluate(twoPythonCases());
+        other.join();
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isTrue();
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+        verify(runner, times(1)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void slow_solution_within_delay_without_wait_gets_partial_grade() {
+        // Le scenario de la revue : une solution CORRECTE mais lente, chaque harnais sous son
+        // delai, aucune attente de place. Le budget s'epuise de facon REPRODUCTIBLE — en faire un
+        // 502 rendait la question impossible a noter (502 a chaque renvoi) et bloquait une place a
+        // chaque essai. C'est une note PARTIELLE, comme avant.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 200;
+        runnerRun(files -> {
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            return new RunnerExec.Stage("", nonceIn(files), 0, null, null);
+        });
+        EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(req));
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isTrue();
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    /** Occupe la place UNIQUE du sandbox pendant {@code holdMs}, puis rend la main. */
+    private static Thread holdSlot(ExecutionLimiter limiter, long holdMs) throws InterruptedException {
+        java.util.concurrent.CountDownLatch acquired = new java.util.concurrent.CountDownLatch(1);
+        Thread other = new Thread(() -> limiter.asInternal(() -> limiter.withSandboxSlot(() -> {
+            acquired.countDown();
+            sleep(holdMs);
+            return null;
+        })));
+        other.start();
+        acquired.await();
+        return other;
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static EvaluateRequest twoPythonCases() {
+        return new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 2)));
+    }
+
+    @Test
+    void budget_exhausted_by_interrupted_harness_stays_a_grade() throws Exception {
+        // VRAIE contention (place occupee 500 ms par une autre correction, budget 1000 ms) ET un
+        // harnais qui boucle jusqu'a son delai (800 ms, puis tue). Le travail mesure tient dans le
+        // budget, mais l'etudiant a consomme PLUS que l'attente : c'est sa boucle, pas la charge,
+        // qui a fait deborder. Sans ce garde-fou, une solution qui boucle dans une file chargee
+        // partait en 502 — un essai de plus. Avec, c'est une note.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 1000;
+        runnerRun(files -> {
+            sleep(800);
+            return new RunnerExec.Stage("", "", null, "SIGKILL", null);
+        });
+        Thread other = holdSlot(limiter, 500);
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(twoPythonCases()));
+        other.join();
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).detail()).startsWith("Interrompu");
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    @Test
+    void budget_exhausted_by_killed_compilation_stays_a_grade() throws Exception {
+        // Variante TypeScript (job avec une étape de compilation tsc) : c'est la COMPILATION qui
+        // est tuée après 800 ms (signal, sans code, aucune étape run). Son temps compte comme
+        // une interruption due au code soumis, au même titre qu'une exécution tuée : sinon
+        // l'attente (500 ms) l'emportait sur 0 ms d'interruption, et un code qui fait exploser
+        // tsc dans une file chargée partait en 502 — un essai de plus. Mêmes marges que le test
+        // précédent : budget dépassé (1300 contre 1000), travail dedans (800), 800 > 500.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 1000;
+        when(runner.execute(anyString(), any(), any(), any())).thenAnswer(inv -> {
+            sleep(800);
+            return new RunnerExec.Result(
+                    new RunnerExec.Stage("", "", null, "SIGKILL", null), null, null);
+        });
+        Thread other = holdSlot(limiter, 500);
+
+        List<TestResult> r = limiter.asInternal(() -> svc.evaluate(new EvaluateRequest(
+                "TypeScript", null, "function solution(): number { return 5; }",
+                List.of(new TestCaseInput("a", "return true;", 1),
+                        new TestCaseInput("b", "return true;", 2)))));
+        other.join();
+        assertThat(r).hasSize(2);
+        assertThat(r.get(0).passed()).isFalse();
+        assertThat(r.get(0).detail()).startsWith("Interrompu à la compilation");
+        assertThat(r.get(1).passed()).isFalse();
+        assertThat(r.get(1).detail()).contains("budget d'évaluation dépassé");
+    }
+
+    @Test
+    void wait_dominating_a_short_interruption_is_still_load() throws Exception {
+        // Un seul harnais interrompu tot (150 ms) ne met pas toute l'attente (900 ms) sur le
+        // compte de l'etudiant : c'est la file qui a fait deborder le budget. Avant, la moindre
+        // interruption suffisait a enregistrer des harnais « Non evalue » a 0 — sur une
+        // tentative unique, pendant un examen charge.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 800;
+        runnerRun(files -> {
+            sleep(150);
+            return new RunnerExec.Stage("", "", null, "SIGKILL", null);
+        });
+        Thread other = holdSlot(limiter, 900);
+
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class)
+                .hasMessageContaining("charge du serveur");
+        other.join();
+    }
+
+    @Test
+    void student_output_imitating_an_interruption_does_not_count() throws Exception {
+        // L'interruption se lit sur le SIGNAL de l'execution, plus sur le texte du detail : un
+        // stderr etudiant qui commence par « Interrompu » ne change pas la regle. Scenario qui
+        // TRANCHE : 500 ms d'attente de place, puis 800 ms d'execution qui imite le texte, sans
+        // signal. Lue sur le texte, l'interruption (800 ms) depasserait l'attente et donnerait une
+        // note partielle ; lue sur le signal, elle vaut 0 et l'attente l'emporte : 502.
+        // Chiffres choisis pour que chaque condition tienne avec au moins 200 ms de marge, quel
+        // que soit le bruit d'ordonnancement : budget DEPASSE apres le premier harnais (500 + 800
+        // = 1300 ms contre 1000, marge 300 ; avec 300 ms d'attente, la marge n'etait que de
+        // 100 ms, et une attente mesuree un peu courte laissait partir le second harnais) ;
+        // TRAVAIL dans le budget (800 contre 1000, marge 200) ; et les deux lectures restent
+        // SEPAREES (texte : 800 d'interruption > 500 d'attente, marge 300 ; signal : 0 < 500).
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = 1000;
+        runnerRun(files -> {
+            sleep(800);
+            return new RunnerExec.Stage("", "Interrompu (signal SIGKILL)", 1, null, null);
+        });
+        Thread other = holdSlot(limiter, 500);
+
+        assertThatThrownBy(() -> limiter.asInternal(() -> svc.evaluate(twoPythonCases())))
+                .isInstanceOf(com.moodit.execution_service.sandbox.NoVerdictException.class);
+        other.join();
+    }
+
+    @Test
+    void absurd_budget_does_not_degrade_grading() {
+        // Garde-fou de débordement : un budget délirant (mauvaise variable d'environnement) fait
+        // saturer la conversion en nanosecondes, et l'échéance déborde en valeur NÉGATIVE. Seule
+        // une comparaison par différence la lit encore juste ; `nanoTime() >= deadline` verrait
+        // une échéance déjà dépassée et n'évaluerait qu'un harnais sur trois. Chemin INTERNE : le
+        // public plafonne le budget à PUBLIC_WALL_MS avant tout calcul, et ne l'exercerait pas.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        svc.interpretedBudgetMs = Long.MAX_VALUE;
+
+        List<TestResult> results = limiter.asInternal(() -> svc.evaluate(new EvaluateRequest(
+                "Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 1),
+                        new TestCaseInput("c", "return True", 1)))));
+
+        assertThat(results).extracting(TestResult::passed).containsExactly(true, true, true);
+        verify(runner, times(3)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void public_budget_is_capped_internal_budget_is_not() {
+        // Revue #246 : un « Tester » public (jusqu'à 100 cas fournis par l'appelant) est borné à
+        // PUBLIC_WALL_MS ; la correction interne garde le budget configuré, même au-delà.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 5000, 5000, 1);
+        ExecutionService svc = new ExecutionService(assembler, runner, limiter, null);
+        svc.interpretedBudgetMs = Long.MAX_VALUE;
+        assertThat(svc.interpretedBudgetMs()).isEqualTo(DockerEvaluator.PUBLIC_WALL_MS);
+        assertThat(limiter.asInternal(svc::interpretedBudgetMs)).isEqualTo(Long.MAX_VALUE);
+        // Sous le plafond, le budget configuré vaut des deux côtés.
+        svc.interpretedBudgetMs = 1000;
+        assertThat(svc.interpretedBudgetMs()).isEqualTo(1000);
+        assertThat(limiter.asInternal(svc::interpretedBudgetMs)).isEqualTo(1000L);
+    }
+
+    @Test
+    void ample_budget_evaluates_every_harness() {
+        // Contrôle négatif de budget_exceeded_remaining_harnesses_not_launched : avec le budget
+        // par défaut (15 min, plafonné ici à PUBLIC_WALL_MS puisque l'appel est public),
+        // l'échéance n'intervient jamais — sinon ce test-là passerait pour la mauvaise raison.
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+
+        List<TestResult> results = service.evaluate(new EvaluateRequest("Python", null,
+                "def solution(): return 5",
+                List.of(new TestCaseInput("a", "return True", 1),
+                        new TestCaseInput("b", "return True", 1),
+                        new TestCaseInput("c", "return True", 1))));
+
+        assertThat(results).extracting(TestResult::passed).containsExactly(true, true, true);
+        verify(runner, times(3)).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
     void passes_when_harness_emits_the_nonce() {
         // Harnais réussi = il a écrit le nonce sur stderr.
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isTrue();
+    }
+
+    @Test
+    void fails_when_nonce_present_but_grader_did_not_exit_zero() {
+        // La réussite exige AUSSI une sortie 0 du noteur (revue #246) : un nonce émis puis un
+        // noteur sorti en erreur (ou sans code) ne vaut pas réussite.
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 1, null, null));
+        assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isFalse();
+    }
+
+    @Test
+    void fails_when_nonce_present_but_grader_exit_code_unknown() {
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), null, null, null));
+        assertThat(verdict(oneTest("Python", "def solution(): return 5", "return True"))).isFalse();
     }
 
     @Test
     void fails_when_nonce_absent_even_though_exit_zero() {
         // ANTI-TRICHE : exit 0 mais AUCUN nonce (ex. sys.exit(0) anticipé) → échec.
-        pistonRun(files -> new PistonClient.Stage("", "", 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage("", "", 0, null, null));
         assertThat(verdict(oneTest("Python", "import sys; sys.exit(0)", "return False"))).isFalse();
     }
 
     @Test
     void fails_when_harness_returns_false() {
         // Échec légitime : le programme s'est terminé sans émettre le nonce.
-        pistonRun(files -> new PistonClient.Stage("", "", 1, null, null));
+        runnerRun(files -> new RunnerExec.Stage("", "", 1, null, null));
         assertThat(verdict(oneTest("Python", "def solution(): return 5", "return solution() == 6"))).isFalse();
     }
 
     @Test
     void fails_on_compile_error() {
-        when(piston.execute(anyString(), any(), any())).thenReturn(new PistonClient.Result(
-                new PistonClient.Stage("", "erreur de compilation", 1, null, null), null, null));
-        List<TestResult> r = service.evaluate(oneTest("C", "int solution(){return 5;}", "return 1;"));
+        // TypeScript : seul langage NOTÉ en mode exec dont le job comporte une compilation (tsc).
+        when(runner.execute(anyString(), any(), any(), any())).thenReturn(new RunnerExec.Result(
+                new RunnerExec.Stage("", "erreur de compilation", 1, null, null), null, null));
+        List<TestResult> r = service.evaluate(
+                oneTest("TypeScript", "function solution(): number { return 5; }", "return true;"));
         assertThat(r).singleElement().satisfies(t -> {
             assertThat(t.passed()).isFalse();
             assertThat(t.detail()).contains("erreur de compilation");
@@ -97,12 +420,12 @@ class ExecutionServiceTest {
 
     @Test
     void fails_on_timeout_signal() {
-        pistonRun(files -> new PistonClient.Stage("", "", null, "SIGKILL", null));
+        runnerRun(files -> new RunnerExec.Stage("", "", null, "SIGKILL", null));
         assertThat(verdict(oneTest("Python", "while True: pass", "return True"))).isFalse();
     }
 
     /** Sortie SQL = verdict encadré par les sentinelles au nonce (comme le produit main.sql). */
-    private static String sqlFenced(List<PistonClient.File> files, String verdictLine) {
+    private static String sqlFenced(List<RunnerExec.File> files, String verdictLine) {
         String nonce = nonceIn(files);
         return CodeAssembler.sqlVerdictStart(nonce) + "\n" + verdictLine + "\n"
                 + CodeAssembler.sqlVerdictEnd(nonce) + "\n";
@@ -110,13 +433,13 @@ class ExecutionServiceTest {
 
     @Test
     void sql_passes_when_fenced_verdict_is_one() {
-        pistonRun(files -> new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT nom FROM t", "SELECT 1;"))).isTrue();
     }
 
     @Test
     void sql_fails_when_fenced_verdict_is_zero() {
-        pistonRun(files -> new PistonClient.Stage(sqlFenced(files, "0"), "", 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage(sqlFenced(files, "0"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT nom FROM t", "SELECT 0;"))).isFalse();
     }
 
@@ -124,14 +447,14 @@ class ExecutionServiceTest {
     void sql_ignores_student_output_printed_before_the_fence() {
         // ANTI-FORGERIE : l'étudiant affiche « 1 » AVANT la sentinelle, mais le vrai verdict (entre
         // sentinelles) vaut « 0 » → échec. Sans encadrement, la ligne « 1 » aurait fait réussir.
-        pistonRun(files -> new PistonClient.Stage("1\n" + sqlFenced(files, "0"), "", 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage("1\n" + sqlFenced(files, "0"), "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT 1", "SELECT 0;"))).isFalse();
     }
 
     @Test
     void sql_fails_when_the_fence_is_absent() {
         // Sentinelles avalées (ex. un /* étudiant) → verdict introuvable → échec.
-        pistonRun(files -> new PistonClient.Stage("1\n", "", 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage("1\n", "", 0, null, null));
         assertThat(verdict(oneTest("SQL", "SELECT 1", "SELECT 0;"))).isFalse();
     }
 
@@ -142,15 +465,15 @@ class ExecutionServiceTest {
     @Test
     void sql_mutation_runs_two_isolated_phases() {
         // Phase 1 (contient « .dump ») → renvoie un dump encadré ; phase 2 → verdict encadré « 1 ».
-        pistonRun(files -> {
+        runnerRun(files -> {
             String nonce = nonceIn(files);
             if (files.get(0).content().contains(".dump")) {
                 String dump = CodeAssembler.sqlDumpStart(nonce) + "\n"
                         + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
                         + CodeAssembler.sqlDumpEnd(nonce) + "\n";
-                return new PistonClient.Stage(dump, "", 0, null, null);
+                return new RunnerExec.Stage(dump, "", 0, null, null);
             }
-            return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null);
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
         });
         assertThat(verdict(oneTest("SQL", "UPDATE t SET n = 0", SQL_MUTATION_HARNESS))).isTrue();
     }
@@ -158,16 +481,16 @@ class ExecutionServiceTest {
     @Test
     void sql_mutation_phase2_never_receives_student_code() {
         // Le code étudiant ne doit JAMAIS apparaître dans le fichier de la phase 2 (le noteur).
-        pistonRun(files -> {
+        runnerRun(files -> {
             String nonce = nonceIn(files);
             if (files.get(0).content().contains(".dump")) {
                 assertThat(files.get(0).content()).contains("UPDATE t SET n = 0"); // phase 1 : oui
-                return new PistonClient.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
+                return new RunnerExec.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
                         + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
                         + CodeAssembler.sqlDumpEnd(nonce) + "\n", "", 0, null, null);
             }
             assertThat(files.get(0).content()).doesNotContain("UPDATE t SET n = 0"); // phase 2 : jamais
-            return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null);
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
         });
         assertThat(verdict(oneTest("SQL", "UPDATE t SET n = 0", SQL_MUTATION_HARNESS))).isTrue();
     }
@@ -175,7 +498,7 @@ class ExecutionServiceTest {
     @Test
     void sql_mutation_fails_when_student_phase_errors() {
         // Erreur SQL de l'étudiant en phase 1 (exit != 0) → test échoué, sans lancer la phase 2.
-        pistonRun(files -> new PistonClient.Stage("", "near \"x\": syntax error", 1, null, null));
+        runnerRun(files -> new RunnerExec.Stage("", "near \"x\": syntax error", 1, null, null));
         assertThat(verdict(oneTest("SQL", "x", SQL_MUTATION_HARNESS))).isFalse();
     }
 
@@ -183,16 +506,16 @@ class ExecutionServiceTest {
     void sql_student_code_cannot_trigger_two_phase_via_marker() {
         // SÉCURITÉ : « -- @student » dans le CODE de l'étudiant n'active PAS le mode 2 phases — le
         // routage ne regarde QUE le harnais. Harnais SANS marqueur → lecture seule = UN seul appel
-        // Piston (un mode 2 phases en ferait deux). On compte les appels pour le prouver.
+        // au runner (un mode 2 phases en ferait deux). On compte les appels pour le prouver.
         final int[] calls = { 0 };
-        pistonRun(files -> { calls[0]++; return new PistonClient.Stage(sqlFenced(files, "1"), "", 0, null, null); });
+        runnerRun(files -> { calls[0]++; return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null); });
         assertThat(verdict(oneTest("SQL", "SELECT 1 -- @student", "SELECT (SELECT count(*) FROM solution1) >= 0;"))).isTrue();
         assertThat(calls[0]).isEqualTo(1);
     }
 
     @Test
     void weights_are_reported_per_test() {
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
         EvaluateRequest req = new EvaluateRequest("Python", null, "def solution(): return 5",
                 List.of(new TestCaseInput("a", "return True", 3)));
         assertThat(service.evaluate(req)).singleElement()
@@ -200,12 +523,13 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void chaque_appel_piston_occupe_une_place_du_sandbox() {
-        // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel Piston (run, harnais,
-        // SQL en deux phases) doit passer par cette place, donc être refusé sans appeler Piston.
+    void each_runner_call_takes_a_sandbox_slot() {
+        // Limite globale d'UNE place, déjà occupée par l'appelant : tout appel au runner (run,
+        // harnais, SQL en deux phases) doit passer par cette place, donc être refusé sans
+        // lancer de conteneur.
         ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
-        ExecutionService limited = new ExecutionService(assembler, piston, limiter);
-        pistonRun(files -> new PistonClient.Stage("", nonceIn(files), 0, null, null));
+        ExecutionService limited = new ExecutionService(assembler, runner, limiter, null);
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
 
         limiter.withSandboxSlot(() -> {
             assertThatThrownBy(() -> limited.run(new RunRequest("Python", null, "print(1)")))
@@ -216,10 +540,321 @@ class ExecutionServiceTest {
                     .isInstanceOf(ExecutionBusyException.class);
             return null;
         });
-        verify(piston, never()).execute(anyString(), any(), any());
+        verify(runner, never()).execute(anyString(), any(), any(), any());
 
         // Place rendue : la même exécution passe.
         assertThat(limited.evaluate(oneTest("Python", "def f(): pass", "return True")))
                 .singleElement().satisfies(t -> assertThat(t.passed()).isTrue());
+    }
+
+    // ── Routage des langages COMPILÉS vers le runner Docker (#116) ────────────────
+
+    /** Harnais BOOLÉEN par langage : la forme des gabarits, notée sans falsification possible. */
+    private static String booleanHarness(String language) {
+        return switch (language) {
+            case "Rust" -> "doubler(5) == 10";
+            case "Go" -> "return doubler(5) == 10";
+            default -> "return doubler(5) == 10;";    // Java, C#, C, C++
+        };
+    }
+
+    @Test
+    void reserved_java_class_name_rejected_with_diagnostic() {
+        // `public class harnais_rpc` portait la même clé de fichier que le harnais du prof (le
+        // code soumis était écrasé) et `MooditX` est sauté à la copie par le superviseur : dans
+        // les deux cas, « Aucun fichier de code soumis » — un 0 qui n'explique pas la cause.
+        // Refus AVANT toute prise de place, avec le nom fautif dans le diagnostic.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+
+        for (String className : List.of("MooditPiege", "harnais_rpc")) {
+            List<TestResult> results = routed.evaluate(oneTest("Java",
+                    "public class " + className + " { static int f() { return 1; } }",
+                    "return " + className + ".f() == 1;"));
+            assertThat(results).as("refus de " + className).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            assertThat(results.get(0).detail()).contains(className).contains("réservé");
+        }
+        verifyNoInteractions(docker);
+        // Et un nom NORMAL ne déclenche rien : le refus est chirurgical.
+        assertThat(DockerEvaluator.reservedNameRejection("Java",
+                "public class Solution { }", List.of())).isNull();
+    }
+
+    @Test
+    void overlong_java_class_name_rejected_with_diagnostic() {
+        // Le nom de la classe devient un nom de fichier : au-delà de la limite de Linux, le dépôt
+        // dans le conteneur échouait — 502, tentative supprimée — au lieu d'une note.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        String longName = "A".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES + 1);
+
+        List<TestResult> results = routed.evaluate(oneTest("Java",
+                "public class " + longName + " { static int f() { return 1; } }",
+                "return " + longName + ".f() == 1;"));
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).passed()).isFalse();
+        assertThat(results.get(0).detail()).contains("trop long").doesNotContain(longName);
+        verifyNoInteractions(docker);
+        // À la limite exacte, le nom passe.
+        assertThat(DockerEvaluator.reservedNameRejection("Java",
+                "public class " + "A".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES) + " { }",
+                List.of())).isNull();
+    }
+
+    @Test
+    void java_class_name_with_control_character_rejected_with_diagnostic() {
+        // Java admet U+0000 (et les autres caractères « ignorables ») dans un identifiant, mais
+        // le nom devient un nom de fichier : l'archive du dépôt était refusée par le démon (502,
+        // tentative supprimée) ou le nom tronqué au NUL — jamais une note expliquée.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        // U+0001 : un autre caractère « ignorable » de Java. Le NUL, lui, est refusé plus tôt, pour
+        // tout le code soumis et dans tous les langages (nulRejection, #23).
+        char control = (char) 1;
+        char zeroWidthSpace = (char) 0x200B;
+        for (String className : List.of("A" + control + "B", "S" + "a".repeat(90) + control + "b",
+                "A" + zeroWidthSpace + "B")) {
+            List<TestResult> results = routed.evaluate(oneTest("Java",
+                    "public class " + className + " { static int f() { return 1; } }",
+                    "return true;"));
+            assertThat(results).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            // Ni le nom fautif ni son caractère invisible ne sont recopiés dans le détail, pour
+            // CHAQUE nom (U+0001 comme U+200B).
+            assertThat(results.get(0).detail()).contains("caractère de contrôle ou invisible")
+                    .doesNotContain(className)
+                    .doesNotContain(String.valueOf(control))
+                    .doesNotContain(String.valueOf(zeroWidthSpace));
+        }
+        // Nom à la fois TROP LONG et porteur d'un caractère invisible : le diagnostic du caractère
+        // passe AVANT celui de la longueur, qui citerait le préfixe, caractère compris.
+        String longAndControl = "A" + control + "B".repeat(HarnessProjects.MAX_JAVA_TYPE_NAME_BYTES);
+        List<TestResult> both = routed.evaluate(oneTest("Java",
+                "public class " + longAndControl + " { static int f() { return 1; } }", "return true;"));
+        assertThat(both.get(0).detail()).contains("caractère de contrôle ou invisible")
+                .doesNotContain("trop long").doesNotContain(String.valueOf(control));
+        List<TestResult> nul = routed.evaluate(oneTest("Java",
+                "public class A" + (char) 0 + "B { static int f() { return 1; } }", "return true;"));
+        assertThat(nul.get(0).passed()).isFalse();
+        assertThat(nul.get(0).detail()).contains("caractère nul");
+        verifyNoInteractions(docker);
+    }
+
+    @Test
+    void framework_format_harness_rejected_with_diagnostic() {
+        // Cette forme compilait le harnais AVEC le code de l'étudiant : le processus qui détenait
+        // le secret était celui qu'il contrôle, et cinq canaux de forge y ont été démontrés. Elle
+        // n'a jamais été déployée, donc rien n'en dépend — mais la laisser vivre offrait au prof
+        // un chemin contournable sans qu'il le sache. Refus AVANT toute prise de place, avec la
+        // forme à écrire à la place.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+
+        Map<String, String> examples = Map.of("Java", "(@Test)", "C#", "([Test])",
+                "Go", "(func TestXxx(t *testing.T))", "Rust", "(#[test])",
+                "C", "(MOODIT_TEST(nom))", "C++", "(MOODIT_TEST(nom))");
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            List<TestResult> results = routed.evaluate(
+                    oneTest(language, "code", frameworkHarness(language)));
+            assertThat(results).as("refus en " + language).hasSize(1);
+            assertThat(results.get(0).passed()).isFalse();
+            // L'exemple cité au prof est celui de SON langage.
+            assertThat(results.get(0).detail())
+                    .contains("classe de test du framework " + examples.get(language))
+                    .contains("renvoie un booléen");
+        }
+        verifyNoInteractions(docker);
+    }
+
+    @Test
+    void framework_harness_mixed_with_a_boolean_one_rejects_the_whole_question() {
+        // Une question qui mêle un harnais booléen et une classe de test du framework : aucun
+        // cas n'est noté, et le booléen dit pourquoi (sans se dire fautif lui-même).
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        List<TestResult> results = routed.evaluate(new EvaluateRequest("Java", null, "code",
+                List.of(new TestCaseInput("booleen", booleanHarness("Java"), 1),
+                        new TestCaseInput("framework", frameworkHarness("Java"), 2))));
+        assertThat(results).extracting(TestResult::name).containsExactly("booleen", "framework");
+        assertThat(results).extracting(TestResult::passed).containsExactly(false, false);
+        assertThat(results).extracting(TestResult::weight).containsExactly(1, 2);
+        assertThat(results.get(0).detail()).isEqualTo(
+                "Non évalué : un autre harnais de cette question est une classe de test du framework.");
+        assertThat(results.get(1).detail()).contains("(@Test)");
+        verifyNoInteractions(docker);
+    }
+
+    @Test
+    void boolean_harness_reaches_runner_in_all_six_languages() {
+        // RÉGRESSION : un garde-fou en amont renvoyait 0 à tous les cas d'une question dont le
+        // harnais était justement au format SÛR, sans jamais atteindre le runner. Ce test entre
+        // par la porte de PRODUCTION (ExecutionService.evaluate), pas par DockerEvaluator.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(expected);
+
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            assertThat(routed.evaluate(oneTest(language, "code", booleanHarness(language))))
+                    .as("harnais booléen en " + language)
+                    .isEqualTo(expected);
+        }
+        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
+    }
+
+    /**
+     * Harnais au format « vraie classe de test du framework », par langage.
+     *
+     * <p>Cette forme n'est plus notée : elle était compilée AVEC le code de l'étudiant, donc
+     * falsifiable. Elle ne sert plus qu'à vérifier le REFUS.
+     */
+    private static String frameworkHarness(String language) {
+        return switch (language) {
+            case "Java" -> "@Test void t() {}";
+            case "C#" -> "[Test] public void T() {}";
+            case "Go" -> "func TestT(t *testing.T) {}";
+            case "Rust" -> "#[test] fn t() {}";
+            default -> "MOODIT_TEST(t) { }";          // C / C++
+        };
+    }
+
+    @Test
+    void compiled_languages_route_to_docker_evaluator_not_runner_exec() {
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        List<TestResult> expected = List.of(new TestResult("t", 1, true, null));
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(expected);
+
+        for (String language : List.of("Java", "C#", "Go", "Rust", "C", "C++")) {
+            assertThat(routed.evaluate(oneTest(language, "code", booleanHarness(language))))
+                    .isEqualTo(expected);
+        }
+        verify(docker, times(6)).evaluate(anyString(), anyString(), any(), any(), anyLong());
+        verify(runner, never()).execute(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void compiled_evaluation_fails_cleanly_without_docker_runner() {
+        // Service construit sans runner (ex. mauvaise config) : erreur 502 propre, pas de NPE.
+        assertThatThrownBy(() -> service.evaluate(oneTest("Java", "class A {}", "harnais")))
+                .isInstanceOf(SandboxException.class);
+    }
+
+    @Test
+    void compiled_evaluation_takes_a_sandbox_slot() {
+        // Un conteneur de notation consomme une place de la limite globale, comme un appel
+        // au runner en mode exec.
+        ExecutionLimiter limiter = new ExecutionLimiter(1, 0, 1);
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService limited = new ExecutionService(assembler, runner, limiter, docker);
+        limiter.withSandboxSlot(() -> {
+            assertThatThrownBy(() -> limited.evaluate(
+                    oneTest("Go", "code", booleanHarness("Go"))))
+                    .isInstanceOf(ExecutionBusyException.class);
+            return null;
+        });
+        verify(docker, never()).evaluate(anyString(), anyString(), any(), any(), anyLong());
+    }
+
+    @Test
+    void timeout_is_forwarded_to_the_runner_for_interpreted_and_sql() {
+        // Un retour silencieux au défaut (3 s) passerait avec any() : on épingle eq(42_000)
+        // sur le chemin interprété et sur le chemin SQL en lecture seule (un conteneur). Le SQL
+        // en modification (deux phases) : timeout_is_forwarded_to_both_isolated_sql_phases.
+        runnerRun(files -> new RunnerExec.Stage("", nonceIn(files), 0, null, null));
+        service.evaluate(new EvaluateRequest("Python", null, "def solution(): return 5",
+                List.of(new TestCaseInput("t", "return True", 1)), 42_000));
+        verify(runner).execute(eq("python"), any(), any(), eq(42_000));
+
+        service.evaluate(new EvaluateRequest("SQL", null, "SELECT 1;",
+                List.of(new TestCaseInput("t", "SELECT 1;", 1)), 42_000));
+        verify(runner, times(1)).execute(eq("sqlite3"), any(), any(), eq(42_000));
+    }
+
+    @Test
+    void timeout_is_forwarded_to_both_isolated_sql_phases() {
+        // Harnais à marqueur « -- @student » : runSqlIsolated lance DEUX conteneurs (phase 1 qui
+        // rend le dump, phase 2 qui note). Les deux reçoivent le temps limite demandé.
+        runnerRun(files -> {
+            String nonce = nonceIn(files);
+            if (files.get(0).content().contains(".dump")) {
+                return new RunnerExec.Stage(CodeAssembler.sqlDumpStart(nonce) + "\n"
+                        + "CREATE TABLE t(n INT);\nINSERT INTO t VALUES(0);\n"
+                        + CodeAssembler.sqlDumpEnd(nonce) + "\n", "", 0, null, null);
+            }
+            return new RunnerExec.Stage(sqlFenced(files, "1"), "", 0, null, null);
+        });
+        List<TestResult> r = service.evaluate(new EvaluateRequest("SQL", null,
+                "UPDATE t SET n = 0", List.of(new TestCaseInput("t", SQL_MUTATION_HARNESS, 1)),
+                42_000));
+        assertThat(r).singleElement().satisfies(t -> assertThat(t.passed()).isTrue());
+        verify(runner, times(2)).execute(eq("sqlite3"), any(), any(), eq(42_000));
+    }
+
+    @Test
+    void timeout_is_forwarded_to_docker_evaluator() {
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionService routed = new ExecutionService(assembler, runner, docker);
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong())).thenReturn(List.of());
+        routed.evaluate(new EvaluateRequest("Rust", null, "code",
+                List.of(new TestCaseInput("t", booleanHarness("Rust"), 1)), 42_000));
+        verify(docker).evaluate(eq("Rust"), eq("code"), any(), eq(42_000), anyLong());
+    }
+
+    @Test
+    void rejections_before_slot_and_wall_capped_by_caller() {
+        // 1. Les quatre refus amont (octet nul, marqueur réservé, harnais au format framework,
+        // nom de classe réservé en Java) passent AVANT la prise de place : l'UNIQUE place du
+        // limiteur est occupée, et chacun rend pourtant son verdict explicite, sans 429. Déplacé
+        // dans withSandboxSlot, un refus lèverait ici ExecutionBusyException — sous saturation,
+        // l'étudiant recevrait « réessaie plus tard » au lieu de la cause de son 0.
+        DockerEvaluator busyDocker = mock(DockerEvaluator.class);
+        ExecutionLimiter full = new ExecutionLimiter(1, 0, 1);
+        ExecutionService saturated = new ExecutionService(assembler, runner, full, busyDocker);
+        record Rejection(String what, EvaluateRequest request, String detail) { }
+        List<Rejection> rejections = List.of(
+                new Rejection("octet nul", oneTest("Go",
+                        "package main\nfunc doubler(n int) int { return n * 2 }" + (char) 0,
+                        booleanHarness("Go")), "caractère nul"),
+                new Rejection("marqueur réservé", oneTest("Go", "jeton=__MOODIT_T__",
+                        booleanHarness("Go")), "Marqueur réservé"),
+                new Rejection("format framework", oneTest("Go", "code", frameworkHarness("Go")),
+                        "classe de test du framework"),
+                new Rejection("nom réservé Java", oneTest("Java",
+                        "public class harnais_rpc { static int f() { return 1; } }",
+                        "return harnais_rpc.f() == 1;"), "est réservé par la notation"));
+        full.withSandboxSlot(() -> {
+            for (Rejection r : rejections) {
+                assertThat(saturated.evaluate(r.request())).as(r.what()).singleElement()
+                        .satisfies(t -> {
+                            assertThat(t.passed()).isFalse();
+                            assertThat(t.detail()).contains(r.detail());
+                        });
+            }
+            // Témoin : sans refus amont, la même place occupée refuse bien la notation — sans
+            // lui, un limiteur qui ne bloquerait plus rien laisserait passer les quatre refus
+            // ci-dessus quel que soit leur emplacement.
+            assertThatThrownBy(() -> saturated.evaluate(oneTest("Go", "code", booleanHarness("Go"))))
+                    .isInstanceOf(ExecutionBusyException.class);
+            return null;
+        });
+        // Ni les quatre refus ni le témoin refusé par le limiteur n'ont appelé le runner (qu'un
+        // harnais booléen l'atteigne hors saturation : boolean_harness_reaches_runner_in_all_six_languages).
+        verifyNoInteractions(busyDocker);
+
+        // 2. Appel PUBLIC : le mur est plafonné ; appel INTERNE : budget complet.
+        DockerEvaluator docker = mock(DockerEvaluator.class);
+        ExecutionLimiter limiter = new ExecutionLimiter(2, 0, 5);
+        ExecutionService routed = new ExecutionService(assembler, runner, limiter, docker);
+        when(docker.evaluate(anyString(), anyString(), any(), any(), anyLong()))
+                .thenReturn(List.of());
+        routed.evaluate(oneTest("Go", "code", booleanHarness("Go")));
+        verify(docker).evaluate(anyString(), anyString(), any(), any(),
+                eq(DockerEvaluator.PUBLIC_WALL_MS));
+
+        limiter.asInternal(() -> routed.evaluate(oneTest("Go", "code", booleanHarness("Go"))));
+        verify(docker).evaluate(anyString(), anyString(), any(), any(), eq(Long.MAX_VALUE));
     }
 }

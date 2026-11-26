@@ -128,6 +128,27 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
     }
 
     @Test
+    @DisplayName("Vue éditeur : compteur des tentatives à revoir par quiz ; vue étudiant : absent")
+    void listQuizzes_reviewCount() {
+        Quiz withReview = quiz(2, course);
+        withReview.setPosition(0);
+        Quiz without = quiz(3, course);
+        without.setPosition(1);
+        course.getQuizzes().addAll(List.of(withReview, without));
+        when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+        when(attemptRepository.countByStatusPerQuiz(1, QuizService.REVIEW))
+                .thenReturn(List.<Object[]>of(new Object[] {2, 3L}));
+
+        assertThat(service.listQuizzes(1, false)).extracting(QuizDTO::getReviewAttemptCount)
+                .containsExactly(3, 0);
+        assertThat(service.listQuizzes(1, true)).extracting(QuizDTO::getReviewAttemptCount)
+                .containsOnlyNulls();
+        // Vue étudiant : la requête n'est pas faite.
+        org.mockito.Mockito.verify(attemptRepository, org.mockito.Mockito.times(1))
+                .countByStatusPerQuiz(1, QuizService.REVIEW);
+    }
+
+    @Test
     @DisplayName("Cours sans collection de quiz (null) → liste vide")
     void listQuizzes_collectionNull_vide() {
         course.setQuizzes(null);
@@ -142,6 +163,7 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         Question code = question(20, CODE, 5.0, 1);
         code.setLanguage(language(2, "python"));
         code.setStartCode("def f():");
+        code.setExecTimeoutMs(5_000);
         testCase(code, 30, "cas", 2);
         Question match = question(21, MATCHING, 2.0, 0);
         drag(match, 40, "Java", 1, "Objet");
@@ -196,6 +218,8 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         assertThat(match.getDragItems()).extracting(DragItemDTO::getCorrectOrder).containsExactly(1, 2);
         assertThat(match.getAnswers().get(0).getIsCorrect()).isTrue();
         QuestionDTO code = detail.getQuestions().get(1);
+        // L'éditeur relit le temps limite enregistré sur la question Code.
+        assertThat(code.getExecTimeoutMs()).isEqualTo(5_000);
         assertThat(code.getTestCases()).singleElement().satisfies(tc -> {
             assertThat(tc.getId()).isEqualTo(30);
             assertThat(tc.getName()).isEqualTo("cas");
@@ -270,6 +294,73 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
                             .build()))
                     .build());
 
+            verify(quizRepository).save(any(Quiz.class));
+        }
+
+        @Test
+        @DisplayName("execTimeoutMs : non positif → null (défaut du sandbox), plafonné à 60 s, arrondi à la seconde supérieure")
+        void execTimeout_normalizedOnWrite() {
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            java.util.function.Function<Integer, QuestionDTO> q = ms -> QuestionDTO.builder()
+                    .qType("multiple_choice").execTimeoutMs(ms)
+                    .answers(List.of(AnswerDTO.builder().content("A").isCorrect(true).build()))
+                    .build();
+
+            service.createQuiz(1, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(q.apply(-5_000), q.apply(999_999), q.apply(30_000), q.apply(null),
+                            q.apply(1_500), q.apply(1), q.apply(Integer.MAX_VALUE), q.apply(0)))
+                    .build());
+
+            org.mockito.ArgumentCaptor<Quiz> saved = org.mockito.ArgumentCaptor.forClass(Quiz.class);
+            verify(quizRepository).save(saved.capture());
+            // 1 500 ms → 2 s : le runner tronquait à 1 s ce que core budgétait à 1,5 s.
+            assertThat(saved.getValue().getQuestions())
+                    .extracting(com.moodit.core_service.model.Question::getExecTimeoutMs)
+                    .containsExactly(null, 60_000, 30_000, null, 2_000, 1_000, 60_000, null);
+        }
+
+        @Test
+        @DisplayName("Code de départ, harnais trop longs ou trop nombreux → refusés à l'écriture (execution-service les refuserait à chaque correction)")
+        void executableSizes_bounded() {
+            java.util.function.BiFunction<String, List<TestCaseDTO>, QuizDetailDTO> quizWith =
+                    (start, cases) -> QuizDetailDTO.builder().title("T").questions(List.of(
+                            QuestionDTO.builder().qType("multiple_choice").startCode(start).testCases(cases)
+                                    .answers(List.of(AnswerDTO.builder().content("A").isCorrect(true).build()))
+                                    .build()))
+                            .build();
+            java.util.function.BiFunction<String, String, TestCaseDTO> tc =
+                    (name, harness) -> TestCaseDTO.builder().name(name).harnessCode(harness).weight(1).build();
+            when(courseRepository.findById(1)).thenReturn(Optional.of(course));
+
+            assertThatThrownBy(() -> service.createQuiz(1, quizWith.apply("x".repeat(100_001), List.of())))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : le code de départ dépasse 100000 caractères.");
+            List<TestCaseDTO> tooMany = java.util.stream.IntStream.range(0, 101)
+                    .mapToObj(i -> tc.apply("c" + i, "return true;")).toList();
+            assertThatThrownBy(() -> service.createQuiz(1, quizWith.apply(null, tooMany)))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : au plus 100 harnais.");
+            assertThatThrownBy(() -> service.createQuiz(1,
+                    quizWith.apply(null, List.of(tc.apply("c", "x".repeat(50_001))))))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : un harnais dépasse 50000 caractères.");
+            assertThatThrownBy(() -> service.createQuiz(1,
+                    quizWith.apply(null, List.of(tc.apply("n".repeat(129), "return true;")))))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : un nom de harnais dépasse 128 caractères.");
+            verify(quizRepository, never()).save(any());
+
+            // Aux bornes exactes : accepté.
+            when(qTypeRepository.findByName(MULTIPLE)).thenReturn(Optional.of(type(3, MULTIPLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+            List<TestCaseDTO> atLimit = new java.util.ArrayList<>(java.util.stream.IntStream.range(0, 99)
+                    .mapToObj(i -> tc.apply("c" + i, "return true;")).toList());
+            // 128 : la colonne Test_Case.name, plus courte que la borne d'execution-service.
+            atLimit.add(tc.apply("n".repeat(128), "x".repeat(50_000)));
+            service.createQuiz(1, quizWith.apply("x".repeat(100_000), atLimit));
             verify(quizRepository).save(any(Quiz.class));
         }
 
@@ -605,6 +696,20 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
         }
 
         @Test
+        @DisplayName("Mise à jour avec un code de départ trop long → refusée, rien n'est enregistré")
+        void startCodeTooLong_rejected() {
+            when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
+
+            assertThatThrownBy(() -> service.updateQuiz(5, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(1).qType("single_choice")
+                            .startCode("x".repeat(100_001)).build()))
+                    .build()))
+                    .isInstanceOf(InvalidQuizException.class)
+                    .hasMessage("Question 1 : le code de départ dépasse 100000 caractères.");
+            verify(quizRepository, never()).save(any());
+        }
+
+        @Test
         @DisplayName("Mise à jour d'une remise en ordre avec un correctOrder absent → refusée (pas de repli à 0)")
         void remiseEnOrdre_correctOrderAbsent_refuse() {
             Question ordering = question(3, ORDERING, 1.0, 0);
@@ -757,6 +862,27 @@ class QuizServiceEditorTest extends QuizServiceTestSupport {
             verify(realtimePublisher).quizUpdated(11L, 1L, 5L);
             verify(realtimePublisher).quizUpdated(12L, 1L, 5L);
             verify(realtimePublisher, never()).quizCreated(anyLong(), anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("execTimeoutMs d'une question réutilisée : remplacé et arrondi à la seconde supérieure (1 500 ms → 2 s)")
+        void execTimeout_normalizedOnUpdate() {
+            kept.setExecTimeoutMs(10_000);
+            when(quizRepository.findById(5)).thenReturn(Optional.of(quiz));
+            when(qTypeRepository.findByName(SINGLE)).thenReturn(Optional.of(type(2, SINGLE)));
+            when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            service.updateQuiz(5, QuizDetailDTO.builder().title("T")
+                    .questions(List.of(QuestionDTO.builder().id(1).qType("single_choice")
+                            .execTimeoutMs(1_500)
+                            .answers(List.of(AnswerDTO.builder().id(10).content("A").isCorrect(true).build()))
+                            .build()))
+                    .build());
+
+            // Même entité (ids stables), valeur normalisée comme à la création : le runner
+            // tronquerait 1,5 s à 1 s, la base garde ce qui s'applique vraiment.
+            assertThat(quiz.getQuestions()).singleElement().isSameAs(kept);
+            assertThat(kept.getExecTimeoutMs()).isEqualTo(2_000);
         }
 
         @Test

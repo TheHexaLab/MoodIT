@@ -56,7 +56,44 @@ export interface QuestionDraft {
   dragItems?: DragItemDraft[];
   languageId?: number;
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais en ms (question Code) ; absent → défaut du sandbox. */
+  execTimeoutMs?: number;
   testCases?: TestCaseDraft[];
+}
+
+/**
+ * Enregistrement d'un quiz refusé par core (HTTP 400) avec un message lisible, en français, qui
+ * nomme ce qu'il faut corriger (« Question 2 : un harnais dépasse 50000 caractères. »). L'éditeur
+ * l'affiche tel quel : le « Réessayez » générique faisait renvoyer le même quiz, refusé à chaque
+ * fois, sans dire quelle question corriger (#116).
+ */
+export class QuizSaveRejectedError extends Error {
+  /**
+   * `tooLarge` : corps refusé par le gateway (HTTP 413, au-delà de 1 Mo). Le texte affiché vient
+   * alors des libellés de l'éditeur (`saveTooLarge`), pas de ce message.
+   */
+  readonly reason?: 'tooLarge';
+
+  constructor(message: string, reason?: 'tooLarge') {
+    super(message);
+    this.name = 'QuizSaveRejectedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Tentative « à revoir » d'un quiz, vue par l'enseignant (#116) : sa correction automatique a
+ * échoué et core l'a gardée — relance de l'enseignant en échec (quelle que soit la cause), ou
+ * plafond d'échecs sans verdict atteint (règle complète : REVIEW_REASON, QuizView/quizAttempt.ts).
+ * `noVerdictFailures` = échecs sans verdict de l'étudiant sur ce quiz (peut valoir 0 : remis à
+ * zéro par une autre tentative corrigée).
+ */
+export interface ReviewAttempt {
+  attemptId: number;
+  attemptNo: number;
+  studentName: string;
+  submittedAt?: string | null;
+  noVerdictFailures: number;
 }
 
 /**
@@ -107,6 +144,10 @@ export interface QuizEditorHandlers {
    * l'onglet « Tester » d'une question Code. Renvoie la sortie brute (stdout/stderr/exit).
    */
   onRunCode?: (input: RunCodeInput) => MaybePromise<RunResult>;
+  /** Charge les tentatives « à revoir » d'un quiz (#116). */
+  onFetchReviewAttempts?: (quizId: number) => MaybePromise<ReviewAttempt[]>;
+  /** Relance la correction d'une tentative « à revoir » (#116). */
+  onRegradeAttempt?: (quizId: number, attemptId: number) => MaybePromise<unknown>;
 }
 
 /** Langages disponibles pour les questions Code (fournis par le parent ; sinon défaut). */
@@ -175,18 +216,23 @@ export function defaultStartCode(language?: Language): string {
  * fourni. Le langage passé est celui du harnais (résolu via Language.harnessLanguageId).
  */
 const HARNESS_TEMPLATE_BY_LANGUAGE: Record<string, string> = {
-  python: '# Harnais : lève une exception (ou renvoie False) si la réponse est incorrecte.\n',
-  javascript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  typescript: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  jsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  tsx: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  java: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  c: '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
-  'c++': '// Harnais : renvoie 0 si la réponse est correcte, non-zéro sinon.\n',
-  'c#': '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
-  go: '// Harnais : lève une erreur (ou renvoie false) si la réponse est incorrecte.\n',
-  rust: '// Harnais : panique (ou renvoie false) si la réponse est incorrecte.\n',
-  php: '// Harnais : lève une exception (ou renvoie false) si la réponse est incorrecte.\n',
+  // Interprétés : le harnais RENVOIE un booléen, comme les gabarits du backend (V2/V5) — un
+  // harnais qui ne fait qu'un `assert` (sans renvoyer vrai) échoue toujours.
+  python: '# Harnais : renvoie True si la réponse est correcte (False ou une exception = échec).\n',
+  javascript: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  typescript: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  jsx: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  tsx: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
+  // Compilés : le harnais est un corps qui RENVOIE UN BOOLÉEN. C'est cette forme que le
+  // superviseur note sans que l'étudiant puisse falsifier son résultat (harnais compilé dans un
+  // processus séparé, sous un UID séparé) — le gabarit du backend, plus détaillé, prime.
+  java: '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  c: '/* Harnais : renvoie vrai si la réponse est correcte, faux sinon. */\n',
+  'c++': '/* Harnais : renvoie vrai si la réponse est correcte, faux sinon. */\n',
+  'c#': '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  go: '// Harnais : renvoie true si la réponse est correcte, false sinon.\n',
+  rust: '// Harnais : une expression booléenne, vraie si la réponse est correcte.\n',
+  php: '// Harnais : renvoie true si la réponse est correcte (false ou une exception = échec).\n',
   sql: '-- Harnais : requête de vérification renvoyant vrai/faux.\n',
   bash: '# Harnais : sortie 0 si la réponse est correcte, non-zéro sinon.\n',
 };
@@ -273,6 +319,7 @@ export function questionToDraft(q: Question): QuestionDraft {
     dragItems: q.dragItems?.map((d) => ({ ...d })),
     languageId: q.language?.id,
     startCode: q.startCode,
+    execTimeoutMs: q.execTimeoutMs,
     testCases: q.testCases?.map((t) => ({ ...t })),
   };
 }
@@ -321,6 +368,7 @@ export function draftToQuestion(
     })),
     language,
     startCode: draft.startCode,
+    execTimeoutMs: draft.execTimeoutMs,
     testCases: draft.testCases?.map((t, i) => ({
       id: t.id ?? -(i + 1),
       name: t.name,

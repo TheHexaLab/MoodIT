@@ -5,14 +5,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moodit.core_service.dto.*;
 import com.moodit.core_service.exception.AlreadySubmittedException;
 import com.moodit.core_service.exception.AttemptNotFoundException;
+import com.moodit.core_service.exception.AttemptNotReviewableException;
+import com.moodit.core_service.exception.CodeVerificationNoVerdictException;
 import com.moodit.core_service.exception.CodeVerificationUnavailableException;
+import com.moodit.core_service.exception.GradingInProgressException;
+import com.moodit.core_service.exception.GradingInterruptedException;
 import com.moodit.core_service.exception.CourseNotFoundException;
 import com.moodit.core_service.exception.InvalidQuizException;
 import com.moodit.core_service.exception.QuizNotFoundException;
+import com.moodit.core_service.exception.RegradeInProgressException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.AttemptRepository;
+import com.moodit.core_service.repository.AttemptSnapshot;
 import com.moodit.core_service.repository.CourseRepository;
+import com.moodit.core_service.repository.GradingFailureRepository;
 import com.moodit.core_service.repository.LanguageRepository;
 import com.moodit.core_service.repository.QTypeRepository;
 import com.moodit.core_service.repository.QuizRepository;
@@ -22,10 +29,12 @@ import com.moodit.core_service.repository.UserRepository;
 import com.moodit.core_service.realtime.RealtimeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -64,6 +73,35 @@ public class QuizService {
     private final ApplicationEventPublisher eventPublisher;
     private final AuditLogService auditLogService;
     private final QuizItemObfuscator itemObfuscator;
+    private final GradingFailureRepository gradingFailureRepository;
+
+    /**
+     * Statut d'une tentative gardée « à revoir » par l'enseignant (#116, S4) : sa correction a
+     * échoué et failGrading l'a gardée — relance par l'enseignant, ou plafond atteint sur un échec
+     * sans verdict ou sur un quiz sans reprise.
+     */
+    public static final String REVIEW = "review";
+
+    /**
+     * Plafond des échecs de correction SANS VERDICT par étudiant et par quiz (#116, S4). En deçà,
+     * la tentative échouée est supprimée et l'étudiant resoumet ; à partir de ce compte, elle est
+     * gardée « à revoir ». Une sandbox simplement indisponible ne compte pas.
+     */
+    private int maxNoVerdictFailures = 3;
+
+    /**
+     * Au moins 1, vérifié au démarrage : 0 ne DÉSACTIVE pas le plafond, il le rend toujours
+     * atteint — toute tentative en échec SANS VERDICT, et toute panne sur un quiz sans reprise,
+     * serait gardée « à revoir » au lieu d'être resoumise par l'étudiant (revue #246).
+     */
+    @Value("${app.quiz.grading.max-no-verdict-failures:3}")
+    void setMaxNoVerdictFailures(int maxNoVerdictFailures) {
+        if (maxNoVerdictFailures < 1) {
+            throw new IllegalArgumentException(
+                    "app.quiz.grading.max-no-verdict-failures doit valoir au moins 1");
+        }
+        this.maxNoVerdictFailures = maxNoVerdictFailures;
+    }
 
     /**
      * Correspondance Q_Type.name (libellé FR en base) ↔ slug front (discriminant stable).
@@ -119,11 +157,24 @@ public class QuizService {
     public List<QuizDTO> listQuizzes(Integer courseId, boolean publishedOnly) {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(CourseNotFoundException::new);
+        // Vue ÉDITEUR : compteur des tentatives « à revoir » par quiz (#116, S4), en une requête.
+        Map<Integer, Integer> toReview = new HashMap<>();
+        if (!publishedOnly) {
+            for (Object[] row : attemptRepository.countByStatusPerQuiz(courseId, REVIEW)) {
+                toReview.put((Integer) row[0], ((Number) row[1]).intValue());
+            }
+        }
         return (course.getQuizzes() == null ? List.<Quiz>of() : course.getQuizzes()).stream()
                 .filter(q -> !publishedOnly || Boolean.TRUE.equals(q.getIsPublished()))
                 .sorted(Comparator.comparing(Quiz::getPosition,
                         Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(this::toQuizMetaDTO)
+                .map(q -> {
+                    QuizDTO dto = toQuizMetaDTO(q);
+                    if (!publishedOnly) {
+                        dto.setReviewAttemptCount(toReview.getOrDefault(q.getId(), 0));
+                    }
+                    return dto;
+                })
                 .toList();
     }
 
@@ -340,20 +391,101 @@ public class QuizService {
      * le résultat est poussé par WebSocket ({@code quiz:attempt-graded} / {@code -failed}).
      *
      * <p>Pourquoi async : le sandbox prend plusieurs secondes et ne doit tenir NI la requête HTTP
-     * (risque de timeout proxy) NI une connexion BD (pool partagé). Tentative unique : 409 si déjà
-     * soumise (quiz sans reprise) ou si une correction est déjà en cours (index partiel
-     * {@code uq_attempt_pending}). `userEmail` vient du JWT (header gateway).
+     * (risque de timeout proxy) NI une connexion BD (pool partagé). Trois 409 distincts :
+     * {@link GradingInProgressException} (corps JSON {@code cause = "en_cours"}) si une correction
+     * d'une soumission de l'étudiant sur ce quiz est déjà en cours (tentative {@code "pending"},
+     * index partiel {@code uq_attempt_pending}) — le frontend rejoint alors l'attente de la
+     * tentative {@code attemptId} du corps (le pending existant, ou après un conflit d'insertion la
+     * dernière tentative relue ; omis si elle a disparu ou si elle est plus ancienne que le numéro
+     * que cette soumission a tenté d'insérer — concurrente supprimée entre-temps, ou relance d'une
+     * ancienne tentative finie avant la relecture : ce n'est pas l'écriture concurrente) ;
+     * {@link RegradeInProgressException} ({@code cause = "relance"}) si ce pending est une RELANCE
+     * de l'enseignant ({@link Attempt#isRegrade()}) sur un quiz AVEC reprise, dont le verdict
+     * n'est pas celui de cette soumission ; sinon {@link AlreadySubmittedException} (corps texte)
+     * si la tentative unique est déjà consommée (quiz sans reprise — relance en cours comprise :
+     * elle porte forcément sur cette tentative unique). `userEmail` vient du JWT (header gateway).
      */
     public Integer submitQuiz(Integer quizId, QuizSubmissionDTO submission, String userEmail) {
         Map<Integer, SubmittedAnswerDTO> byQuestion = toAnswerMap(submission.getAnswers());
         TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
-        return writeTx.execute(status -> persistPendingAttempt(quizId, userEmail, byQuestion));
+        try {
+            return writeTx.execute(status -> persistPendingAttempt(quizId, userEmail, byQuestion));
+        } catch (ConcurrentSubmissionException e) {
+            // Insert refusé par une contrainte : une autre écriture CONCURRENTE a créé, pour le
+            // même étudiant et le même quiz, une tentative pending (sa soumission, ou une relance
+            // de l'enseignant). C'est donc TOUJOURS une correction en cours, jamais « déjà soumis »
+            // : relire seulement le pending de l'autre écriture ne suffirait pas, car sur un quiz
+            // sans harnais elle passe en done en quelques millisecondes (ou est supprimée) et la
+            // relecture ne trouverait plus rien. Reste à distinguer la relance, relue dans une
+            // transaction NOUVELLE : celle de l'insert est annulée — sous PostgreSQL, une
+            // transaction en erreur refuse toute requête jusqu'à son rollback. Sur un quiz SANS
+            // reprise, une relance concurrente est en pratique inatteignable ici (elle suppose une
+            // tentative « à revoir », que le comptage aurait déjà refusée) ; si elle survenait,
+            // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
+            // La tentative à attendre est celle de l'écriture concurrente : la DERNIÈRE de
+            // l'étudiant sur ce quiz, pending ou déjà corrigée, à condition que son numéro soit au
+            // moins celui que cette soumission a tenté d'insérer. Ce numéro est le plus grand + 1
+            // de l'instantané unique du contrôle préalable (cf. persistPendingAttempt) : une
+            // écriture concurrente absente de cet instantané a été validée APRÈS lui, et porte
+            // donc un numéro au moins égal. Plus ancienne, ce n'est PAS elle : la concurrente a
+            // été supprimée entre-temps (correction abandonnée), ou c'était une relance d'une
+            // ANCIENNE tentative, finie avant la relecture. Son id ferait ouvrir au client le
+            // résultat d'une autre tentative comme celui de son envoi : il est omis, et le client
+            // retombe sur son repli.
+            TransactionTemplate readTx = new TransactionTemplate(transactionManager);
+            readTx.setReadOnly(true);
+            throw readTx.execute(status -> pendingConflict(
+                    attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(
+                            quizId, e.userId, "pending", true),
+                    e.allowRetry,
+                    () -> attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(quizId, e.userId)
+                            .filter(a -> a.getAttemptNo() >= e.attemptNo)   // attempt_no NOT NULL
+                            .map(Attempt::getId).orElse(null)));
+        }
+    }
+
+    /**
+     * 409 d'une soumission face au pending de l'étudiant sur ce quiz : « en_cours » pour la
+     * correction de sa propre soumission, avec l'id de la tentative à attendre
+     * ({@code inProgressAttemptId}, lu seulement dans ce cas ; {@code null} si inconnu) ; pour une
+     * RELANCE de l'enseignant, « relance » sur un quiz avec reprise (il pourra resoumettre ensuite),
+     * mais « déjà soumis » sur un quiz sans reprise — la relance porte forcément sur sa tentative
+     * unique, « réessayez plus tard » le mènerait de toute façon à ce refus.
+     */
+    private static RuntimeException pendingConflict(boolean regrade, boolean allowRetry,
+            java.util.function.Supplier<Integer> inProgressAttemptId) {
+        if (!regrade) {
+            return new GradingInProgressException(inProgressAttemptId.get());
+        }
+        return allowRetry ? new RegradeInProgressException() : new AlreadySubmittedException();
+    }
+
+    /**
+     * Insert de la tentative refusé par {@code UNIQUE(quiz,user,attempt_no)} ou
+     * {@code uq_attempt_pending} (écriture concurrente du même étudiant sur le même quiz) :
+     * {@link #submitQuiz} répond « correction en cours », sauf relance relue hors de la
+     * transaction annulée (cf. {@link #pendingConflict}, d'où {@code allowRetry}).
+     * {@code attemptNo} : le numéro que cette soumission a tenté d'insérer ; seule une tentative
+     * relue de numéro au moins égal peut être celle de l'écriture concurrente.
+     */
+    private static final class ConcurrentSubmissionException extends RuntimeException {
+        private final Integer userId;
+        private final boolean allowRetry;
+        private final int attemptNo;
+
+        ConcurrentSubmissionException(Integer userId, boolean allowRetry, int attemptNo, Throwable cause) {
+            super(cause);
+            this.userId = userId;
+            this.allowRetry = allowRetry;
+            this.attemptNo = attemptNo;
+        }
     }
 
     /** Une question Code à vérifier, DÉTACHÉE du quiz (utilisable hors transaction). */
     private record CodeVerificationTask(
             Integer questionId, String language, String code,
-            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses) {}
+            List<Integer> testCaseIds, List<ExecutionClient.Harness> harnesses, Integer timeoutMs,
+            String startCode) {}
 
     /** Contexte détaché d'une correction async : à qui pousser + quoi exécuter. */
     private record GradingContext(Integer userId, Integer quizId, List<CodeVerificationTask> tasks) {}
@@ -362,9 +494,21 @@ public class QuizService {
      * (tx écriture) Crée la tentative {@code "pending"} + une {@link Submission} brute par question
      * (réponses, SANS verdicts encore) et déclenche la correction async après commit.
      *
+     * <p>Contrôle préalable sur UN instantané ({@link AttemptRepository#snapshotForSubmission}) :
+     * une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
+     * contrôle de tentative unique : sur un quiz sans reprise, elle compte aussi parmi les
+     * tentatives et donnerait sinon le 409 « déjà soumis » à tort. Le numéro de la nouvelle
+     * tentative est le plus grand + 1 : un trou déjà en base ne provoque pas de collision. Le
+     * 409 suit
+     * {@link #pendingConflict} : {@link GradingInProgressException} pour sa propre correction ;
+     * pour une relance de l'enseignant, {@link RegradeInProgressException} avec reprise,
+     * {@link AlreadySubmittedException} sans reprise.
+     *
      * <p>Anti-double-soumission ATOMIQUE : la contrainte {@code UNIQUE(quiz,user,attempt_no)} ET
      * l'index partiel {@code uq_attempt_pending} garantissent qu'un seul pending existe à la fois —
-     * un 2e insert concurrent viole l'un d'eux → {@link AlreadySubmittedException} (409).
+     * un 2e insert concurrent viole l'un d'eux → {@link ConcurrentSubmissionException}, que
+     * {@link #submitQuiz} traduit en 409 « en_cours » même si le pending concurrent est déjà
+     * corrigé (ou supprimé) à la relecture ; seule une relance relue change la réponse.
      */
     private Integer persistPendingAttempt(Integer quizId, String userEmail,
             Map<Integer, SubmittedAnswerDTO> submitted) {
@@ -377,23 +521,46 @@ public class QuizService {
 
         // Avant toute écriture : une réponse mal formée est refusée (400) sans consommer la tentative.
         requireValidOrderings(quiz, byQuestion);
+        requireBoundedCode(quiz, byQuestion);
 
-        long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
-        if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
+        // Comptage, plus grand numéro et pending lus en UNE requête, donc un seul instantané
+        // (READ COMMITTED : chaque SELECT voit les validations faites avant lui). En deux
+        // lectures, un pending validé entre elles était compté sans être vu — « déjà soumis » au
+        // lieu de « en cours », ou un numéro trop grand qui faisait écarter la concurrente au
+        // conflit — et un pending SUPPRIMÉ entre elles (correction échouée) était compté puis
+        // introuvable — « déjà soumis » à tort, ou un trou de numérotation. Ici, une soumission
+        // concurrente validée avant la lecture y est vue ; validée après, elle porte le même
+        // numéro que celui tenté ici, et le conflit d'insertion la retrouve (cf. submitQuiz).
+        AttemptSnapshot snapshot = attemptRepository.snapshotForSubmission(quizId, user.getId());
+        if (snapshot.hasPending()) {
+            Integer pendingId = snapshot.pendingAttemptId();
+            throw pendingConflict(snapshot.pendingIsRegrade(), Boolean.TRUE.equals(quiz.getAllowRetry()),
+                    () -> pendingId);
+        }
+        if (snapshot.count() > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
         }
 
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
-        attempt.setAttemptNo((int) existing + 1);
+        // Numéro = plus grand + 1, et non comptage + 1 : ROBUSTESSE face aux trous déjà en base.
+        // Le code actuel n'en crée pas (le pending supprimé après un échec est toujours la
+        // tentative de plus grand numéro, et une relance n'est jamais supprimée), mais l'ancien
+        // contrôle à deux lectures a pu en laisser. Sur un trou, compter redonnait un numéro
+        // déjà pris — collision sur UNIQUE(quiz,user,attempt_no) à CHAQUE soumission suivante,
+        // lue comme une correction concurrente en cours : l'étudiant ne pouvait plus soumettre.
+        // Un trou dans la numérotation est sans effet (l'affichage montre « #n »).
+        attempt.setAttemptNo(snapshot.maxAttemptNo() + 1);
         attempt.setStatus("pending");
         Attempt saved;
         try {
             saved = attemptRepository.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException e) {
-            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending (correction déjà en cours) → 409.
-            throw new AlreadySubmittedException();
+            // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending : écriture concurrente. Le 409
+            // est décidé hors de cette transaction, désormais inutilisable (cf. submitQuiz).
+            throw new ConcurrentSubmissionException(
+                    user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()), attempt.getAttemptNo(), e);
         }
 
         // Réponses brutes ; les verdicts de code seront ajoutés par la correction async.
@@ -407,21 +574,64 @@ public class QuizService {
         }
 
         // Correction lancée APRÈS commit (l'entité pending doit être visible du job) : évènement
-        // transactionnel @AfterCommit + @Async (cf. QuizGradingListener).
-        eventPublisher.publishEvent(new AttemptSubmittedEvent(saved.getId()));
+        // transactionnel @AfterCommit, puis pool selon la présence de harnais (cf. QuizGradingListener).
+        eventPublisher.publishEvent(new AttemptSubmittedEvent(saved.getId(), needsSandbox(quiz)));
         return saved.getId();
+    }
+
+    /**
+     * Vrai si la correction passera par execution-service : au moins une question Code avec des
+     * harnais (même règle que {@link #buildCodeTasks}, qui ignore une question Code sans harnais).
+     */
+    private boolean needsSandbox(Quiz quiz) {
+        for (Question question : sortedQuestions(quiz)) {
+            if ("coding".equals(slugFor(question)) && !orderedTestCases(question).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Tentatives encore {@code "pending"} en BD, à relancer au démarrage de core (cf.
+     * QuizGradingListener). Une correction vit seulement en mémoire, dans la file d'un executor :
+     * un arrêt de core (déploiement, OOM, redémarrage de l'hôte) perd celles en file ou en cours,
+     * et leurs tentatives resteraient {@code "pending"} pour toujours, l'index
+     * {@code uq_attempt_pending} refusant alors toute resoumission. Chacune revient avec le pool
+     * qui lui convient, comme à la soumission.
+     */
+    public List<AttemptSubmittedEvent> pendingGradings() {
+        TransactionTemplate readOnlyTx = new TransactionTemplate(transactionManager);
+        readOnlyTx.setReadOnly(true);
+        List<AttemptSubmittedEvent> pending = readOnlyTx.execute(status ->
+                attemptRepository.findByStatusOrderByIdAsc("pending").stream()
+                        .map(a -> new AttemptSubmittedEvent(a.getId(), needsSandbox(a.getQuiz())))
+                        .toList());
+        return pending == null ? List.of() : pending;
+    }
+
+    /**
+     * Abandonne une correction qui n'a pas pu être planifiée (executor saturé, cf.
+     * QuizGradingListener) : même traitement qu'une défaillance de correction (failGrading) — la
+     * tentative pending est supprimée et l'auteur prévenu, ou gardée « à revoir » selon les règles de
+     * failGrading (relance par l'enseignant, ou plafond atteint sur un échec sans verdict ou sur un quiz sans reprise).
+     */
+    public void abandonGrading(Integer attemptId, RuntimeException cause) {
+        failGrading(attemptId, cause);
     }
 
     /**
      * Corrige une tentative {@code "pending"} : exécute les harnais de code HORS transaction (lent),
      * puis FINALISE en {@code "done"} + pousse {@code quiz:attempt-graded}.
      *
-     * <p><b>TOUTE défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
-     * SUPPRIME la tentative pending et pousse {@code quiz:attempt-failed} : on ne laisse JAMAIS un
-     * {@code "pending"} coincé, sinon l'index {@code uq_attempt_pending} verrouillerait tout renvoi.
-     * La tentative unique n'est donc pas consommée. Appelée en async après commit (cf.
-     * QuizGradingListener) ; publique pour passer par le proxy Spring (l'@Async ne marche pas en
-     * self-invocation).
+     * <p><b>Toute défaillance</b> (sandbox indisponible, erreur inattendue, échec de finalisation)
+     * passe par failGrading, qui pousse {@code quiz:attempt-failed} et SUPPRIME la tentative pending
+     * (la tentative unique n'est pas consommée) ou la garde {@code "review"} (plafond d'échecs sans
+     * verdict, tentative relancée par l'enseignant) : jamais un {@code "pending"} coincé, sinon
+     * l'index {@code uq_attempt_pending} verrouillerait tout renvoi. Seule exception, l'ARRÊT de core
+     * pendant la correction ({@link GradingInterruptedException}) : la tentative reste
+     * {@code "pending"} et la reprise au démarrage la recorrige. Appelée après commit sur l'un des executors de
+     * correction (cf. QuizGradingListener), hors de toute transaction.
      */
     public void gradeAttempt(Integer attemptId) {
         GradingContext ctx;
@@ -439,7 +649,20 @@ public class QuizService {
             // (3) persiste les verdicts + passe en "done" (transactionnel : un échec ici annule tout
             // et laisse la tentative en "pending" → traité comme une défaillance ci-dessous).
             TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
-            writeTx.executeWithoutResult(status -> finalizeAttempt(attemptId, verdicts));
+            Boolean finalized = writeTx.execute(status -> finalizeAttempt(attemptId, verdicts));
+            if (!Boolean.TRUE.equals(finalized)) {
+                // Déjà corrigée par une autre passe (reprise au démarrage + soumission) : rien à
+                // pousser, l'autre passe l'a fait.
+                return;
+            }
+        } catch (GradingInterruptedException e) {
+            // Arrêt de core pendant l'attente d'execution-service : seule exception à la règle
+            // « jamais de pending coincé ». La tentative reste "pending" et sera reprise au
+            // démarrage suivant (resumePendingGradings) ; la supprimer obligeait l'étudiant à
+            // resoumettre alors qu'aucune correction n'avait commencé.
+            log.warn("Correction de la tentative {} interrompue par l'arrêt : reprise au démarrage",
+                    attemptId);
+            return;
         } catch (RuntimeException e) {
             failGrading(attemptId, e);
             return;
@@ -460,15 +683,38 @@ public class QuizService {
      * destinataire et le push sont best-effort (à défaut, le front retombe sur son polling). Une
      * {@link CodeVerificationUnavailableException} est attendue (sandbox indisponible) ; toute autre
      * exception est un incident, journalisé.
+     *
+     * <p>Plafond (#116, S4) : un échec SANS VERDICT ({@link CodeVerificationNoVerdictException} —
+     * le conteneur a tourné sans rendre de verdict) est compté par étudiant et par quiz. Supprimer
+     * la tentative offrait sinon un nouvel essai à volonté sur une question à tentative unique, à
+     * tout code soumis capable de provoquer cet échec. Dès que le compte atteint
+     * {@code app.quiz.grading.max-no-verdict-failures}, la tentative n'est plus supprimée : elle
+     * reste en {@value #REVIEW}, « à revoir » par l'enseignant, et l'événement porte la raison
+     * {@value #REVIEW}. Le compte n'est pas une note : l'enseignant relance la correction
+     * ({@link #regradeAttempt}). Sur un quiz SANS reprise, une fois le plafond atteint, TOUT échec
+     * garde aussi la tentative à revoir. Cas rare : après la tentative gardée au plafond,
+     * l'étudiant ne peut plus soumettre et une relance est couverte par son marqueur (ci-dessous) ;
+     * il reste un quiz dont la reprise a été retirée, ou un plafond abaissé dans la configuration,
+     * pendant qu'une correction tournait. La tentative unique est alors consommée ou en jeu :
+     * l'effacer sur une simple panne la rendrait à un étudiant déjà au plafond. Sur un quiz AVEC
+     * reprise, une panne supprime la tentative comme d'habitude (l'étudiant resoumet ; la garder
+     * ne ferait que charger l'enseignant). Une correction aboutie remet le compte à zéro (cf. finalizeAttempt).
+     * Une tentative RELANCÉE par l'enseignant ({@link Attempt#isRegrade()}) revient à revoir quel
+     * que soit l'échec et quel que soit le compte : sur un quiz avec reprise, une autre tentative
+     * corrigée entre-temps a pu le remettre à zéro.
      */
     private void failGrading(Integer attemptId, RuntimeException cause) {
+        boolean noVerdict = cause instanceof CodeVerificationNoVerdictException;
         if (!(cause instanceof CodeVerificationUnavailableException)) {
-            log.error("Correction de la tentative {} en échec inattendu : suppression du pending",
-                    attemptId, cause);
+            log.error("Correction de la tentative {} en échec inattendu", attemptId, cause);
         }
         long[] who = null;
         try {
+            // REQUIRES_NEW : depuis abandonGrading, on est encore dans le rappel after-commit de la
+            // soumission, dont les ressources restent liées au thread. Une propagation REQUIRED
+            // rejoindrait cette transaction déjà committée et la suppression ne serait jamais écrite.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
+            readTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             readTx.setReadOnly(true);
             who = readTx.execute(status -> {
                 Attempt a = attemptRepository.findById(attemptId).orElse(null);
@@ -477,11 +723,129 @@ public class QuizService {
         } catch (RuntimeException ignore) {
             // Destinataire introuvable : on pousse pas d'event, le front récupère par polling.
         }
+        // Suppression CONDITIONNELLE, sous verrou de ligne : seulement si la tentative est encore
+        // "pending". Une tentative peut être corrigée deux fois (soumise pendant la reprise au
+        // démarrage) : la passe perdante échoue sur la clé de Submission_Test_Case, et ne doit pas
+        // supprimer la tentative que l'autre passe vient de finaliser en "done". Suppression par
+        // l'entité : soumissions et verdicts partent par la cascade JPA.
         TransactionTemplate delTx = new TransactionTemplate(transactionManager);
-        delTx.executeWithoutResult(status -> attemptRepository.deleteById(attemptId));
-        if (who != null) {
-            realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, null);
+        delTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        String outcome = delTx.execute(status -> attemptRepository.findByIdForUpdate(attemptId)
+                .filter(a -> "pending".equals(a.getStatus()))
+                .map(a -> {
+                    int failures = noVerdictFailuresAfter(a, noVerdict);
+                    // Une relance revient TOUJOURS à revoir : son compte a pu être remis à zéro
+                    // par une autre tentative corrigée entre-temps (quiz avec reprise).
+                    boolean capped = a.isRegrade()
+                            || failures >= maxNoVerdictFailures
+                            && (noVerdict || !Boolean.TRUE.equals(a.getQuiz().getAllowRetry()));
+                    if (capped) {
+                        a.setStatus(REVIEW);
+                        attemptRepository.save(a);
+                        // Raison du journal : une relance revient à revoir quel que soit le compte.
+                        return a.isRegrade() ? REVIEW + ":relance" : REVIEW;
+                    }
+                    attemptRepository.delete(a);
+                    return "deleted";
+                })
+                .orElse(null));
+        if (outcome == null) {
+            log.info("Tentative {} plus en pending : déjà corrigée ou supprimée, rien à abandonner",
+                    attemptId);
+            return;
         }
+        boolean kept = outcome.startsWith(REVIEW);
+        if (kept && outcome.equals(REVIEW)) {
+            log.warn("Tentative {} gardée à revoir : plafond de {} échecs sans verdict atteint",
+                    attemptId, maxNoVerdictFailures);
+        } else if (kept) {
+            log.warn("Tentative {} gardée à revoir : relance de l'enseignant en échec", attemptId);
+        } else {
+            log.info("Tentative {} supprimée après l'échec de sa correction", attemptId);
+        }
+        if (who != null) {
+            realtimePublisher.quizAttemptFailed(who[0], who[1], attemptId, kept ? REVIEW : null);
+        }
+    }
+
+    /**
+     * Échecs SANS VERDICT de l'auteur sur ce quiz, celui-ci compris s'il en est un (il est alors
+     * enregistré). Appelée dans la transaction qui verrouille la tentative : un seul pending existe
+     * par (quiz, étudiant), donc deux échecs du même étudiant ne se croisent pas ici.
+     */
+    private int noVerdictFailuresAfter(Attempt attempt, boolean noVerdict) {
+        GradingFailure.Key key = new GradingFailure.Key(attempt.getQuiz().getId(), attempt.getUser().getId());
+        GradingFailure failure = gradingFailureRepository.findById(key).orElse(null);
+        if (!noVerdict) {
+            return failure == null ? 0 : failure.getNoVerdictCount();
+        }
+        if (failure == null) {
+            failure = new GradingFailure();
+            failure.setQuizId(attempt.getQuiz().getId());
+            failure.setUserId(attempt.getUser().getId());
+            failure.setNoVerdictCount(0);
+        }
+        failure.setNoVerdictCount(failure.getNoVerdictCount() + 1);
+        failure.setLastFailureAt(LocalDateTime.now());
+        gradingFailureRepository.save(failure);
+        return failure.getNoVerdictCount();
+    }
+
+    /**
+     * Tentatives « à revoir » d'un quiz (#116, S4), pour l'enseignant : leur correction a échoué
+     * et failGrading les a gardées (relance, ou plafond atteint). Autorisation par rôle assurée en amont par le
+     * permission-service (gestionnaires du contenu du quiz).
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewAttemptDTO> getAttemptsToReview(Integer quizId) {
+        return attemptRepository.findByQuiz_IdAndStatusOrderBySubmittedAtAscIdAsc(quizId, REVIEW).stream()
+                .map(a -> new ReviewAttemptDTO(
+                        a.getId(),
+                        a.getAttemptNo(),
+                        a.getUser().getFirstName() + " " + a.getUser().getLastName(),
+                        a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC),
+                        gradingFailureRepository.findById(
+                                        new GradingFailure.Key(quizId, a.getUser().getId()))
+                                .map(GradingFailure::getNoVerdictCount).orElse(0)))
+                .toList();
+    }
+
+    /**
+     * L'enseignant RELANCE la correction d'une tentative « à revoir » (#116, S4) : elle repasse en
+     * {@code "pending"} et repart en correction après commit, comme une soumission. Si elle échoue
+     * encore, quelle que soit la cause, elle revient à revoir grâce à son marqueur de relance
+     * ({@link Attempt#isRegrade()}, cf. {@link #failGrading}) — pas grâce au plafond : sur un quiz
+     * avec reprise, une autre tentative corrigée entre-temps a pu remettre le compte à zéro ; si
+     * elle aboutit, l'étudiant reçoit son résultat ({@code quiz:attempt-graded}).
+     *
+     * <p>404 si la tentative n'appartient pas à ce quiz (la règle d'autorisation ne porte que sur
+     * le quiz) ; 409 si elle n'est pas à revoir, ou si l'étudiant a déjà une correction en cours
+     * sur ce quiz (index {@code uq_attempt_pending}).
+     */
+    public void regradeAttempt(Integer quizId, Integer attemptId) {
+        TransactionTemplate writeTx = new TransactionTemplate(transactionManager);
+        writeTx.executeWithoutResult(status -> {
+            Attempt attempt = attemptRepository.findByIdForUpdate(attemptId)
+                    .filter(a -> a.getQuiz().getId().equals(quizId))
+                    .orElseThrow(AttemptNotFoundException::new);
+            if (!REVIEW.equals(attempt.getStatus())) {
+                throw new AttemptNotReviewableException();
+            }
+            attempt.setStatus("pending");
+            attempt.setRegrade(true);
+            try {
+                attemptRepository.saveAndFlush(attempt);
+            } catch (DataIntegrityViolationException e) {
+                throw new AttemptNotReviewableException();
+            }
+            Quiz quiz = attempt.getQuiz();
+            auditLogService.record("QUIZ_REGRADE", "QUIZ", quizId,
+                    "Correction relancée : tentative " + attempt.getAttemptNo() + " de "
+                            + attempt.getUser().getFirstName() + " " + attempt.getUser().getLastName()
+                            + " au quiz « " + quiz.getTitle() + " »",
+                    AuditContext.ofChildOfCourse(quiz.getCourse()));
+            eventPublisher.publishEvent(new AttemptSubmittedEvent(attempt.getId(), needsSandbox(quiz)));
+        });
     }
 
     /**
@@ -490,7 +854,8 @@ public class QuizService {
      */
     private GradingContext loadGradingContext(Integer attemptId) {
         Attempt attempt = attemptRepository.findById(attemptId).orElse(null);
-        if (attempt == null) return null;
+        // Plus en "pending" : une autre passe l'a déjà corrigée (cf. finalizeAttempt).
+        if (attempt == null || !"pending".equals(attempt.getStatus())) return null;
         Quiz quiz = attempt.getQuiz();
         Map<Integer, SubmittedAnswerDTO> byQuestion = new HashMap<>();
         for (Submission s : attempt.getSubmissions()) {
@@ -515,10 +880,15 @@ public class QuizService {
             SubmittedAnswerDTO answer = byQuestion.get(question.getId());
             String code = answer != null ? answer.getCode() : null;
             List<Integer> testCaseIds = harnesses.stream().map(TestCase::getId).toList();
+            // Harnais-code pour TOUS les langages, côté execution-service : conteneur runner de
+            // notation pour les compilés (harnais booléen, deux programmes sous deux UID,
+            // verdict au nonce — #116), mode exec (programmes RPC à nonce) pour les
+            // interprétés/SQL/vues.
             List<ExecutionClient.Harness> inputs = harnesses.stream()
                     .map(tc -> new ExecutionClient.Harness(tc.getName(), tc.getHarnessCode(), weightOf(tc)))
                     .toList();
-            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs));
+            tasks.add(new CodeVerificationTask(question.getId(), language, code, testCaseIds, inputs,
+                    question.getExecTimeoutMs(), question.getStartCode()));
         }
         return tasks;
     }
@@ -527,12 +897,17 @@ public class QuizService {
      * Exécute SYNCHRONEMENT (mais HORS transaction) les harnais de chaque question Code et renvoie
      * les verdicts par question ({@code questionId → (testCaseId → réussi)}). Lève
      * {@link CodeVerificationUnavailableException} dès qu'une question ne peut pas être évaluée
-     * (service injoignable, réponse incohérente) : la soumission est alors refusée sans rien persister.
+     * (service injoignable, réponse incohérente), ou sa sous-classe
+     * {@link CodeVerificationNoVerdictException} quand le conteneur a tourné sans rendre de verdict :
+     * la tentative pending est alors supprimée, ou gardée « à revoir » (cf. la gestion des échecs
+     * de correction et son plafond).
      */
     private Map<Integer, Map<Integer, Boolean>> runCodeVerification(List<CodeVerificationTask> tasks) {
         Map<Integer, Map<Integer, Boolean>> verdictsByQuestion = new HashMap<>();
         for (CodeVerificationTask task : tasks) {
-            List<Boolean> verdicts = executionClient.evaluate(task.language(), task.code(), task.harnesses());
+            List<Boolean> verdicts =
+                    executionClient.evaluate(task.language(), task.code(), task.harnesses(), task.timeoutMs(),
+                            task.startCode());
             if (verdicts == null || verdicts.size() != task.testCaseIds().size()) {
                 throw new CodeVerificationUnavailableException();
             }
@@ -550,10 +925,16 @@ public class QuizService {
      * ({@code Submission_Test_Case}) à partir des soumissions déjà enregistrées, puis passe la
      * tentative en {@code "done"}. Aucun score n'est stocké : il est recalculé à la lecture
      * ({@link #computeAttemptResult}).
+     *
+     * <p>{@code false} si la tentative n'est plus {@code "pending"} : une autre passe (reprise au
+     * démarrage) l'a déjà finalisée ; rien n'est écrit.
      */
-    private void finalizeAttempt(Integer attemptId, Map<Integer, Map<Integer, Boolean>> codeVerdicts) {
+    private boolean finalizeAttempt(Integer attemptId, Map<Integer, Map<Integer, Boolean>> codeVerdicts) {
         Attempt attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(AttemptNotFoundException::new);
+        if (!"pending".equals(attempt.getStatus())) {
+            return false;
+        }
         for (Submission s : attempt.getSubmissions()) {
             Map<Integer, Boolean> verdicts = codeVerdicts.get(s.getQuestion().getId());
             if (verdicts == null) continue;
@@ -568,12 +949,19 @@ public class QuizService {
             }
         }
         attempt.setStatus("done");
+        attempt.setRegrade(false);
         attemptRepository.save(attempt);
+        // Correction ABOUTIE : les échecs sans verdict passés de l'étudiant sur ce quiz ne
+        // comptent plus (#116, S4) — le plafond vise une série d'échecs, pas un cumul à vie.
+        gradingFailureRepository.deleteById(
+                new GradingFailure.Key(attempt.getQuiz().getId(), attempt.getUser().getId()));
+        return true;
     }
 
     private static int weightOf(TestCase testCase) {
         return testCase.getWeight() != null && testCase.getWeight() > 0 ? testCase.getWeight() : 1;
     }
+
 
     /**
      * Historique des tentatives (résumés). earned/max sont calculés DYNAMIQUEMENT à partir
@@ -588,25 +976,68 @@ public class QuizService {
                 .orElseThrow(UserNotFoundException::new);
         return attemptRepository.findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(quizId, user.getId()).stream()
                 // Les tentatives en cours de correction ("pending") ne font pas partie de l'historique.
-                .filter(a -> "done".equals(a.getStatus()))
+                // Une tentative « à revoir » (#116, S4) en fait partie : elle consomme la tentative
+                // unique, et l'étudiant doit le voir — sans note, puisqu'aucun verdict n'existe.
+                // Pendant une relance de l'enseignant, elle reste « à revoir » pour l'étudiant :
+                // l'exclure lui rendait un formulaire vierge, et sa soumission recevait un 409.
+                .filter(a -> "done".equals(a.getStatus()) || awaitsTeacher(a))
                 .map(a -> {
                     QuizResultDTO r = computeAttemptResult(a);
+                    boolean review = awaitsTeacher(a);
                     return new AttemptSummaryDTO(
                             a.getId(),
                             a.getAttemptNo(),
-                            r.getEarned(),
+                            review ? null : r.getEarned(),
                             r.getMax(),
-                            a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC));
+                            a.getSubmittedAt() == null ? null : a.getSubmittedAt().toInstant(ZoneOffset.UTC),
+                            review ? REVIEW : a.getStatus());
                 })
                 .toList();
     }
 
-    /** Résultat corrigé d'UNE tentative donnée (révision), restreint à son propriétaire. */
+    /**
+     * La tentative attend-elle l'enseignant ? À revoir, ou en cours de relance (elle redevient à
+     * revoir si la relance échoue, cf. {@link #failGrading}). Une tentative relancée n'est jamais
+     * {@code "done"} : finalizeAttempt retire le marqueur en la corrigeant.
+     */
+    private static boolean awaitsTeacher(Attempt attempt) {
+        return REVIEW.equals(attempt.getStatus()) || attempt.isRegrade();
+    }
+
+    /**
+     * Statut d'UNE tentative de l'utilisateur sur CE quiz : {@code "pending"}, {@code "done"} ou
+     * {@code "review"} — une relance en cours vaut {@code "review"}, comme dans l'historique
+     * ({@link #getMyAttempts}) : son verdict n'est pas celui que l'étudiant attend d'un envoi.
+     * 404 ({@link AttemptNotFoundException}) pour une tentative absente ou supprimée (correction
+     * échouée), d'un autre étudiant ou d'un autre quiz, sans distinction : pas de fuite
+     * d'existence. Sert au client qui attend une correction et a pu manquer le verdict WebSocket
+     * — {@link #getAttemptResult} répond 404 aussi bien pendant la correction qu'après une
+     * suppression, et ne permet pas de les distinguer.
+     */
+    @Transactional(readOnly = true)
+    public AttemptStatusDTO getAttemptStatus(Integer quizId, Integer attemptId, String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(UserNotFoundException::new);
+        Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
+                .filter(a -> a.getQuiz().getId().equals(quizId))
+                .orElseThrow(AttemptNotFoundException::new);
+        return new AttemptStatusDTO(awaitsTeacher(attempt) ? REVIEW : attempt.getStatus());
+    }
+
+    /**
+     * Résultat corrigé d'UNE tentative donnée (révision), restreint à son propriétaire, et
+     * seulement une fois CORRIGÉE ({@code "done"}) : le résultat porte le corrigé des questions
+     * sans code (bonnes options, ordre attendu). Lu pendant la correction ({@code "pending"}), il
+     * le livrait avant la note ; et si la correction échouait ensuite, la tentative était supprimée
+     * et l'étudiant resoumettait avec les bonnes réponses (#116). Une tentative « à revoir » n'a
+     * pas de corrigé non plus. 404 dans les deux cas, comme une tentative inconnue.
+     */
     @Transactional(readOnly = true)
     public QuizResultDTO getAttemptResult(Integer attemptId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(UserNotFoundException::new);
         Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
+                .filter(a -> "done".equals(a.getStatus()))
                 .orElseThrow(AttemptNotFoundException::new);
         return maskItemIds(computeAttemptResult(attempt));
     }
@@ -878,6 +1309,31 @@ public class QuizService {
         }
     }
 
+    /**
+     * Taille maximale d'un code soumis, en caractères — miroir de la borne d'execution-service
+     * ({@code EvaluateRequest.code}, {@code @Size(max = 100_000)}).
+     */
+    static final int MAX_CODE_CHARS = 100_000;
+
+    /**
+     * Un code soumis plus long que ce qu'execution-service accepte est refusé ICI (400, tentative
+     * non consommée). Accepté puis transmis, il recevait un 400 du service d'exécution : la
+     * tentative était supprimée sans compter comme un échec sans verdict, un nouvel essai à
+     * volonté sur une question à tentative unique (#116). Toutes les questions sont bornées,
+     * pas seulement celles à harnais : la colonne qui stocke la réponse n'a pas de limite.
+     */
+    private void requireBoundedCode(Quiz quiz, Map<Integer, SubmittedAnswerDTO> byQuestion) {
+        int index = 0;
+        for (Question q : sortedQuestions(quiz)) {
+            index++;
+            SubmittedAnswerDTO answer = byQuestion.get(q.getId());
+            if (answer != null && answer.getCode() != null && answer.getCode().length() > MAX_CODE_CHARS) {
+                throw new InvalidQuizException("Question " + index + " : le code soumis dépasse "
+                        + MAX_CODE_CHARS + " caractères.");
+            }
+        }
+    }
+
     /** Vrai si `submitted` est absent/vide, ou contient chaque élément de la question une seule fois. */
     private static boolean isPermutationOrEmpty(Question question, List<Integer> submitted) {
         if (submitted == null || submitted.isEmpty()) return true;
@@ -971,7 +1427,9 @@ public class QuizService {
             Question q = new Question();
             q.setQuiz(quiz);
             q.setPrompt(qd.getPrompt());
+            requireExecutableSizes(qd, index);
             q.setStartCode(qd.getStartCode());
+            q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
             q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
             q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
             q.setQType(resolveQType(qd));
@@ -997,11 +1455,68 @@ public class QuizService {
                 .orElseThrow(() -> new IllegalArgumentException("Type de question inconnu: " + qd.getQType()));
     }
 
+    /**
+     * Temps limite d'exécution par question : null (défaut du sandbox) si absent ou non positif,
+     * sinon borné au plafond du runner (RunnerExec.MAX_RUN_TIMEOUT_MS = 60 s). Une valeur
+     * aberrante envoyée à l'API ne doit jamais atteindre la base (mur de conteneur négatif,
+     * budgets de lecture faussés).
+     *
+     * <p>Arrondi à la seconde SUPÉRIEURE : le superviseur du runner travaille en secondes
+     * entières ({@code timeout_ms // 1000}). 1 500 ms y devenaient 1 s alors que core et
+     * execution-service budgétaient 1,5 s ; la valeur stockée est maintenant celle qui
+     * s'applique vraiment.
+     */
+    private static Integer normalizeExecTimeout(Integer ms) {
+        if (ms == null || ms <= 0) return null;
+        int capped = Math.min(ms, 60_000);
+        return (capped + 999) / 1000 * 1000;
+    }
+
+    /** Bornes d'execution-service ({@code EvaluateRequest}, {@code TestCaseInput}), en miroir. */
+    static final int MAX_TEST_CASES = 100;
+    static final int MAX_HARNESS_CHARS = 50_000;
+    /**
+     * Nom d'un harnais : la colonne {@code Test_Case.name} (VARCHAR(128)) est plus courte que la
+     * borne d'execution-service (500). Au-delà, la base refusait avec un 409 générique.
+     */
+    static final int MAX_TEST_CASE_NAME_CHARS = 128;
+
+    /**
+     * Refus À L'ÉCRITURE de ce qu'execution-service refuserait à chaque correction : code de
+     * départ (transmis depuis #22), nombre de harnais, taille d'un harnais ou de son nom. Accepté
+     * ici, chaque correction recevait un 400 : la tentative était supprimée avec un « correction
+     * échouée » générique, et plus personne ne pouvait être noté sur ce quiz, sans que
+     * l'enseignant le sache. {@code index} part de 0.
+     */
+    private static void requireExecutableSizes(QuestionDTO qd, int index) {
+        String where = "Question " + (index + 1) + " : ";
+        if (qd.getStartCode() != null && qd.getStartCode().length() > MAX_CODE_CHARS) {
+            throw new InvalidQuizException(where + "le code de départ dépasse " + MAX_CODE_CHARS
+                    + " caractères.");
+        }
+        List<TestCaseDTO> cases = qd.getTestCases() == null ? List.of() : qd.getTestCases();
+        if (cases.size() > MAX_TEST_CASES) {
+            throw new InvalidQuizException(where + "au plus " + MAX_TEST_CASES + " harnais.");
+        }
+        for (TestCaseDTO td : cases) {
+            if (td.getHarnessCode() != null && td.getHarnessCode().length() > MAX_HARNESS_CHARS) {
+                throw new InvalidQuizException(where + "un harnais dépasse " + MAX_HARNESS_CHARS
+                        + " caractères.");
+            }
+            if (td.getName() != null && td.getName().length() > MAX_TEST_CASE_NAME_CHARS) {
+                throw new InvalidQuizException(where + "un nom de harnais dépasse "
+                        + MAX_TEST_CASE_NAME_CHARS + " caractères.");
+            }
+        }
+    }
+
     /** Applique les champs d'un QuestionDTO sur une question (existante ou neuve), en place. */
     private void applyQuestionFields(Question q, QuestionDTO qd, int index, Quiz quiz) {
         q.setQuiz(quiz);
         q.setPrompt(qd.getPrompt());
+        requireExecutableSizes(qd, index);
         q.setStartCode(qd.getStartCode());
+        q.setExecTimeoutMs(normalizeExecTimeout(qd.getExecTimeoutMs()));
         q.setOrderIndex(qd.getOrderIndex() != null ? qd.getOrderIndex() : index);
         q.setTotalScore(qd.getTotalScore() != null ? qd.getTotalScore() : 0.0);
         q.setQType(resolveQType(qd));
@@ -1243,6 +1758,7 @@ public class QuizService {
                         .name(question.getLanguage().getName())
                         .build())
                 .startCode(question.getStartCode())
+                .execTimeoutMs(question.getExecTimeoutMs())
                 .answers(question.getAnswers() == null ? List.of()
                         : question.getAnswers().stream()
                         .map(a -> toAnswerDTO(a, includeCorrection)).toList())

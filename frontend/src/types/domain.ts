@@ -138,6 +138,12 @@ export interface Quiz {
    * La liste affiche `questions?.length ?? questionCount`. Absent dans le détail.
    */
   questionCount?: number;
+  /**
+   * Tentatives « à revoir » du quiz : correction automatique en échec, gardées pour l'enseignant
+   * (#116 ; règle : cf. REVIEW_REASON, QuizView/quizAttempt.ts). Vue ÉDITEUR seulement (absent de
+   * la vue étudiant).
+   */
+  reviewAttemptCount?: number;
 }
 
 /**
@@ -210,6 +216,9 @@ export interface Question {
   language?: Language;
   /** Squelette de code montré à l'étudiant (table Question.start_code). */
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais en ms (table Question.exec_timeout_ms) ; absent → défaut
+   *  du sandbox. Borné côté execution-service (60 s max). */
+  execTimeoutMs?: number;
   /**
    * Harnais de tests CACHÉS (table Test_Case). Présent seulement dans les vues
    * enseignant/éditeur ; jamais renvoyé au répondant.
@@ -241,13 +250,17 @@ export interface DragItem {
 }
 
 /**
- * Cas de test d'une question `coding` (table Test_Case). Contrat minimal : le harnais
- * renvoie un BOOLÉEN (passe/échoue). `weight` donne le crédit partiel. Données cachées.
+ * Cas de test d'une question `coding` (table Test_Case) : un TEST exécutable contre la
+ * soumission. Compilés et Python/JS/TS/PHP : un CORPS qui renvoie un booléen ; Bash : un script
+ * dont le code de sortie 0 vaut réussi ; SQL : un dernier SELECT booléen. Les compilés sont notés
+ * par le runner isolé, où le harnais est compilé dans un programme séparé sous un UID séparé
+ * (#116) — un harnais au format framework (JUnit, NUnit…) est refusé avec un diagnostic.
+ * `weight` donne le crédit partiel. Données cachées à l'étudiant.
  */
 export interface TestCase {
   id: number;
   name: string;
-  /** Code du harnais exécuté contre la soumission (table Test_Case.harness_code). */
+  /** Code du test exécuté contre la soumission (table Test_Case.harness_code). */
   harnessCode: string;
   weight: number;
 }
@@ -436,6 +449,11 @@ export interface QuizResponse {
   allowRetry?: boolean;
   questionCount?: number;
   createdAt?: string;
+  /**
+   * Tentatives « à revoir » (correction en échec gardée pour l'enseignant, cf. REVIEW_REASON), sur
+   * la route `/manage` seulement.
+   */
+  reviewAttemptCount?: number;
 }
 
 /** Cours renvoyé par l'endpoint enrollments (CourseForumsDTO) : forums + quiz embarqués. */
@@ -473,6 +491,8 @@ export interface QuestionResponse {
   /** Langage d'exécution (questions Code) : light (id + name) renvoyé par le backend. */
   language?: Language;
   startCode?: string;
+  /** Temps limite d'exécution d'un harnais (ms) ; absent → défaut du sandbox. */
+  execTimeoutMs?: number;
   answers?: AnswerResponse[];
   dragItems?: DragItemResponse[];
   /** Catégories (zones) d'une association : groupes distincts, exposés même en passation. */

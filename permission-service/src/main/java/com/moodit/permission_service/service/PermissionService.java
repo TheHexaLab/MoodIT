@@ -161,11 +161,22 @@ public class PermissionService {
             // d'autrui » doivent porter une regle explicite renvoyant true (l'identite est deja
             // prouvee par le gateway ; le user est charge donc doit exister).
             //   - /me, /me/settings : l'usager modifie SON propre profil (identite du token).
-            //   - /exec/*           : execution de code en sandbox (ouverte a tout authentifie).
+            //   - /exec/run         : bouton « Executer » de l'etudiant, ouvert a tout authentifie.
             rule("PATCH", "/me", (user, vars, body) -> true),
             rule("PUT", "/me/settings", (user, vars, body) -> true),
-            execRule("POST", "/evaluate", (user, vars, body) -> true),
             execRule("POST", "/run", (user, vars, body) -> true),
+
+            // /exec/evaluate : bouton « Tester » de l'EDITEUR DE QUIZ (cote prof) — le seul
+            // appelant cote frontend (QuestionTestPopup). Depuis #116 un appel y lance un
+            // CONTENEUR de notation (jusqu'a 4 min, 1,5 Go, 2 vCPU) avec le code et jusqu'a
+            // 100 harnais fournis par l'appelant : reserve a ceux qui editent des quiz, sinon
+            // n'importe quel compte authentifie pouvait faire compiler et executer du code
+            // arbitraire en boucle. Les soumissions d'etudiants ne passent PAS par ici (elles
+            // vont a core, qui appelle l'endpoint INTERNE).
+            execRule("POST", "/evaluate", (user, vars, body) ->
+                membershipService.hasGlobalRole(user.getId())
+                    || membershipService.hasRoleInAnyProgram(user.getId(), RoleNames.TEACHER)
+                    || membershipService.hasRoleInAnyProgram(user.getId(), RoleNames.ADMIN)),
 
             // ── Lectures VOLONTAIREMENT ouvertes (tout authentifie) ───────────────────────
             // Depuis le default-DENY sur les lectures aussi (#111), chaque GET doit porter une
@@ -447,6 +458,17 @@ public class PermissionService {
                 "DELETE",
                 "/quizzes/{quizId}",
                 (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
+            // Tentatives « a revoir » (#116, S4) : correction echouee et gardee par core (relance
+            // en echec, ou plafond d'echecs atteint). Les voir et relancer leur correction relevent de la gestion du quiz. La
+            // regle ne porte que sur le quiz : core verifie que la tentative lui appartient (404).
+            rule(
+                "GET",
+                "/quizzes/{quizId}/review-attempts",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
+            rule(
+                "POST",
+                "/quizzes/{quizId}/attempts/{attemptId}/regrade",
+                (user, vars, body) -> canManageQuizContent(user, vars, "quizId")),
 
         // Lire un quiz / soumettre / consulter ses tentatives (quizId dans le PATH) :
         // etre abonne a un programme du cours du quiz. La lecture et la soumission exigent en
@@ -462,6 +484,12 @@ public class PermissionService {
             rule(
             "GET",
             "/quizzes/{quizId}/attempts/{attemptId}",
+            (user, vars, body) -> quizAccess(user, vars)),
+            // Statut d'une de SES tentatives (pending / done / review) : meme regle que
+            // l'historique ; core verifie que la tentative est la sienne et de ce quiz (404 sinon).
+            rule(
+            "GET",
+            "/quizzes/{quizId}/attempts/{attemptId}/status",
             (user, vars, body) -> quizAccess(user, vars)),
 
             // ── MCP (feedback de cours) ───────────────────────────────────────────────

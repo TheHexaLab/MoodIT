@@ -17,7 +17,12 @@ vi.mock('../../helpers/api.ts', () => ({
 }));
 
 import { apiFetch } from '../../helpers/api.ts';
-import { ExecutionBusyError } from '../../components/MainPanel/QuizView/quizAttempt.ts';
+import { QuizSaveRejectedError } from '../../components/QuizEditor/editorTypes.ts';
+import {
+  ExecutionBusyError,
+  SubmissionInProgressError,
+  SubmissionRejectedError,
+} from '../../components/MainPanel/QuizView/quizAttempt.ts';
 import {
   fetchPrograms,
   fetchCourses,
@@ -28,8 +33,11 @@ import {
   fetchQuestionTypes,
   fetchLanguages,
   submitQuiz,
+  fetchAttemptStatus,
   fetchQuizAttempts,
   fetchAttemptResult,
+  fetchReviewAttempts,
+  regradeAttempt,
   evaluateCode,
   runCode,
   createQuiz,
@@ -170,6 +178,7 @@ const quizDetailResponse = {
       orderIndex: 0,
       language: null,
       startCode: null,
+      execTimeoutMs: 5000,
       answers: [{ id: 500, content: 'A', isCorrect: true }],
       dragItems: [{ id: 600, content: 'D', correctOrder: 1, groupName: 'G' }],
       groups: ['G'],
@@ -200,6 +209,7 @@ describe('fetchQuiz', () => {
           orderIndex: 0,
           language: null,
           startCode: null,
+          execTimeoutMs: 5000,
           answers: [{ id: 500, content: 'A', isCorrect: true }],
           dragItems: [{ id: 600, content: 'D', correctOrder: 1, groupName: 'G' }],
           groups: ['G'],
@@ -292,6 +302,17 @@ describe('fetchQuizzes', () => {
     expect(callArgs()[0]).toBe('/api/courses/9/quizzes/manage');
   });
 
+  it('garde le nombre de tentatives à revoir, sans quoi la pastille ne s’affiche jamais', async () => {
+    mockedApiFetch.mockResolvedValueOnce(
+      res([
+        { id: 1, title: 'A', reviewAttemptCount: 2 },
+        { id: 2, title: 'B', reviewAttemptCount: 0 },
+      ])
+    );
+    const out = await fetchQuizzes(9);
+    expect(out.map((q) => q.reviewAttemptCount)).toEqual([2, 0]);
+  });
+
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(fetchQuizzes(9)).rejects.toThrow('Échec chargement des quiz');
@@ -328,6 +349,27 @@ describe('fetchLanguages', () => {
 
 // ── Soumission asynchrone (202) ────────────────────────────────────────────────
 
+describe('fetchAttemptStatus', () => {
+  it.each([
+    ['200 pending', { ok: true, status: 200, json: async () => ({ status: 'pending' }) }, 'pending'],
+    ['200 done', { ok: true, status: 200, json: async () => ({ status: 'done' }) }, 'done'],
+    ['200 review', { ok: true, status: 200, json: async () => ({ status: 'review' }) }, 'review'],
+    ['404 (tentative supprimée)', { ok: false, status: 404, json: async () => ({}) }, 'gone'],
+  ])('%s → %s', async (_case, response, expected) => {
+    mockedApiFetch.mockResolvedValueOnce(response as unknown as Response);
+    expect(await fetchAttemptStatus(5, 9)).toBe(expected);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/attempts/9/status');
+  });
+
+  it.each([
+    ['500', { ok: false, status: 500, json: async () => ({}) }],
+    ['statut inconnu', { ok: true, status: 200, json: async () => ({ status: 'autre' }) }],
+  ])('%s → erreur (l’attente continue)', async (_case, response) => {
+    mockedApiFetch.mockResolvedValueOnce(response as unknown as Response);
+    await expect(fetchAttemptStatus(5, 9)).rejects.toThrow();
+  });
+});
+
 describe('submitQuiz', () => {
   it('POST vers /api/quizzes/:id/submissions et renvoie { attemptId } (202)', async () => {
     mockedApiFetch.mockResolvedValueOnce(res({ attemptId: 42 }, { ok: true, status: 202 }));
@@ -341,10 +383,111 @@ describe('submitQuiz', () => {
   });
 
   it('throw quand la réponse est en erreur', async () => {
-    mockedApiFetch.mockResolvedValueOnce(errRes(409));
+    mockedApiFetch.mockResolvedValueOnce(errRes(500));
     await expect(
       submitQuiz({ quizId: 5, answers: [] })
     ).rejects.toThrow('Échec de la soumission du quiz');
+  });
+
+  it('409 « en_cours » avec attemptId → SubmissionInProgressError portant cet id', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => '{"cause":"en_cours","message":"…","attemptId":6}',
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionInProgressError);
+    expect((error as SubmissionInProgressError).attemptId).toBe(6);
+  });
+
+  it('409 JSON de cause « en_cours » (correction déjà en cours) → SubmissionInProgressError', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => '{"cause":"en_cours","message":"Une correction de ce quiz est déjà en cours."}',
+    } as Response);
+    await expect(submitQuiz({ quizId: 5, answers: [] })).rejects.toBeInstanceOf(
+      SubmissionInProgressError
+    );
+  });
+
+  it('409 JSON de cause « relance » (recorrection par l’enseignant) → refus temporaire, sans attente', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () =>
+        '{"cause":"relance","message":"Votre tentative précédente est en cours de recorrection par votre enseignant. Réessayez plus tard."}',
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect(error).not.toBeInstanceOf(SubmissionInProgressError);
+    expect((error as SubmissionRejectedError).reason).toBe('regrading');
+  });
+
+  it.each([
+    ['texte exact de core', 'Quiz already submitted'],
+    ['texte exact entouré d’espaces et de sauts de ligne', '  Quiz already submitted\n'],
+  ])('409 %s (tentative unique déjà consommée) → refus définitif « déjà soumis », sans attente', async (_case, body) => {
+    mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 409, text: async () => body } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as SubmissionRejectedError).reason).toBe('alreadySubmitted');
+  });
+
+  it.each([
+    // Autre 409 texte de core (GlobalExceptionHandler.handleDataIntegrity) : à réessayer.
+    ['texte d’une contrainte', 'Contrainte non respectée : cette valeur existe déjà ou est invalide.'],
+    ['espaces seuls', '   '],
+    ['JSON tableau', '[]'],
+    ['JSON chaîne', '"x"'],
+    ['JSON nombre', '42'],
+    ['JSON d’une autre cause', '{"cause":"autre"}'],
+    ['JSON illisible', '{pas du json'],
+    ['JSON null', 'null'],
+    ['corps vide', ''],
+  ])('409 %s → échec ordinaire, pas d’attente', async (_case, body) => {
+    mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 409, text: async () => body } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(SubmissionInProgressError);
+    expect((error as Error).message).toBe('Échec de la soumission du quiz');
+  });
+
+  it.each([
+    ['texte brut de core', 'Question 2 : le code soumis dépasse 100000 caractères.\n',
+      'Question 2 : le code soumis dépasse 100000 caractères.'],
+    // Corps JSON = erreur générique de Spring (anglais, technique) : jamais montrée à l'étudiant.
+    ['erreur JSON de Spring', '{"status":400,"detail":"Failed to read request"}', ''],
+    ['JSON illisible', '{pas du json', ''],
+    ['corps vide', '', ''],
+  ])('400 (%s) → SubmissionRejectedError avec le message lisible', async (_case, body, message) => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => body,
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as Error).message).toBe(message);
+  });
+
+  it('413 du gateway (corps trop gros) → SubmissionRejectedError de raison tooLarge', async () => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(413));
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as SubmissionRejectedError).reason).toBe('tooLarge');
+  });
+
+  it('400 dont le corps ne se lit pas → SubmissionRejectedError sans message', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => {
+        throw new Error('flux coupé');
+      },
+    } as unknown as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionRejectedError);
+    expect((error as Error).message).toBe('');
   });
 });
 
@@ -379,6 +522,26 @@ describe('fetchAttemptResult', () => {
   });
 });
 
+describe('tentatives à revoir (#116)', () => {
+  it('fetchReviewAttempts : GET /api/quizzes/:id/review-attempts', async () => {
+    const list = [{ attemptId: 81, attemptNo: 2, studentName: 'Éva', noVerdictFailures: 3 }];
+    mockedApiFetch.mockResolvedValueOnce(res(list));
+    await expect(fetchReviewAttempts(5)).resolves.toEqual(list);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/review-attempts');
+    mockedApiFetch.mockResolvedValueOnce(errRes());
+    await expect(fetchReviewAttempts(5)).rejects.toThrow('Échec chargement des tentatives à revoir');
+  });
+
+  it('regradeAttempt : POST /api/quizzes/:id/attempts/:attemptId/regrade', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res(null, { status: 202 }));
+    await regradeAttempt(5, 81);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/attempts/81/regrade');
+    expect(callArgs()[1]).toMatchObject({ method: 'POST' });
+    mockedApiFetch.mockResolvedValueOnce(errRes());
+    await expect(regradeAttempt(5, 81)).rejects.toThrow('Échec de la relance de la correction');
+  });
+});
+
 // ── Exécution de code ──────────────────────────────────────────────────────────
 
 describe('evaluateCode', () => {
@@ -400,6 +563,32 @@ describe('evaluateCode', () => {
       testCases: [{ name: 't', harnessCode: 'assert', weight: 1 }],
     });
     expect(out).toEqual([{ name: 't', passed: true, weight: 1 }]);
+  });
+
+  it('transmet le temps limite du prof (execTimeoutMs → timeoutMs du corps)', async () => {
+    // Sans cette assertion, retirer timeoutMs du corps ne faisait échouer aucun test :
+    // « Tester » deviendrait silencieusement sourd au temps limite choisi par le prof.
+    mockedApiFetch.mockResolvedValueOnce(res([{ name: 't', passed: true, weight: 1 }]));
+    await evaluateCode({
+      language: 'Python',
+      code: 'print(1)',
+      execTimeoutMs: 5000,
+      testCases: [{ id: 1, name: 't', harnessCode: 'assert', weight: 1 }],
+    });
+    const [, init] = callArgs();
+    expect(JSON.parse(init?.body as string).timeoutMs).toBe(5000);
+  });
+
+  it('transmet le code de départ (startCode), qui dit quel nom l’énoncé impose', async () => {
+    mockedApiFetch.mockResolvedValueOnce(res([{ name: 't', passed: true, weight: 1 }]));
+    await evaluateCode({
+      language: 'Python',
+      code: 'def sum(l): return 6',
+      startCode: 'def sum(l):\n    pass',
+      testCases: [{ id: 1, name: 't', harnessCode: 'return sum([1]) == 6', weight: 1 }],
+    });
+    const [, init] = callArgs();
+    expect(JSON.parse(init?.body as string).startCode).toBe('def sum(l):\n    pass');
   });
 
   it('throw quand la réponse est en erreur', async () => {
@@ -478,6 +667,42 @@ describe('updateQuiz', () => {
   it('throw quand la réponse est en erreur', async () => {
     mockedApiFetch.mockResolvedValueOnce(errRes());
     await expect(updateQuiz(5, {} as never)).rejects.toThrow('Échec modification du quiz');
+  });
+});
+
+describe('createQuiz / updateQuiz — refus métier (400)', () => {
+  const save = [
+    ['createQuiz', () => createQuiz(9, {} as never), 'Échec création du quiz'],
+    ['updateQuiz', () => updateQuiz(5, {} as never), 'Échec modification du quiz'],
+  ] as const;
+
+  it.each(save)('%s : texte brut → QuizSaveRejectedError portant ce texte', async (_n, call) => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => ' Question 2 : un harnais dépasse 50000 caractères.\n',
+    } as Response);
+    const error = await call().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QuizSaveRejectedError);
+    expect((error as Error).message).toBe('Question 2 : un harnais dépasse 50000 caractères.');
+  });
+
+  it.each(save)('%s : 413 du gateway → QuizSaveRejectedError de raison tooLarge', async (_n, call) => {
+    mockedApiFetch.mockResolvedValueOnce(errRes(413));
+    const error = await call().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(QuizSaveRejectedError);
+    expect((error as QuizSaveRejectedError).reason).toBe('tooLarge');
+  });
+
+  it.each(save)('%s : JSON de Spring, corps vide ou illisible → erreur générique', async (_n, call, generic) => {
+    for (const text of [async () => '{"status":400}', async () => '  ', async () => {
+      throw new Error('flux coupé');
+    }]) {
+      mockedApiFetch.mockResolvedValueOnce({ ok: false, status: 400, text } as unknown as Response);
+      const error = await call().catch((e: unknown) => e);
+      expect(error).not.toBeInstanceOf(QuizSaveRejectedError);
+      expect((error as Error).message).toBe(generic);
+    }
   });
 });
 
