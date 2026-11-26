@@ -664,16 +664,30 @@ class RpcGradingIntegrationTest {
     void c_submitted_function_named_like_a_compiler_builtin_is_refused() {
         // Revue #246 : `HUGE_VAL` se développe en `__builtin_huge_val ()`. Une fonction soumise
         // de ce nom était renommée par #define dans le noteur et détournait la constante du
-        // harnais. Déclarée pour de bon, elle est refusée (nom réservé à l'implémentation).
+        // harnais. Le noteur ne renomme plus que les fonctions que le HARNAIS écrit (texte
+        // avant expansion des macros) : une fonction `__builtin_huge_val` que le harnais ne
+        // nomme pas n'y entre pas, HUGE_VAL reste le vrai, et c'est le harnais intact qui juge
+        // la réponse fausse — aucune forge, et aucun refus à tort (revue du 24e tour : une
+        // fonction d'aide `aide__calc` non nommée était refusée avec un motif faux). L'ancienne
+        // variante de ce test (`#define __builtin_huge_val() 42.0` PUIS la fonction) ne
+        // compilait pas seule : « Échec de compilation », juste, mais qui ne prouvait rien.
         String forged = """
-                #define __builtin_huge_val() 42.0
                 double __builtin_huge_val(void) { return 0; }
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
             TestResult r = grade(language, "return divise(1.0, 0.0) == HUGE_VAL;", forged);
             assertThat(r.passed()).as(language).isFalse();
-            assertThat(r.detail()).as(language).contains("réservé").contains("__builtin_huge_val");
+            assertThat(r.detail()).as(language).isEqualTo("Le harnais a renvoyé faux");
+        }
+        // Nommée par le harnais, elle entrerait dans le noteur par #define : refusée, au motif
+        // exact (identifiant réservé au compilateur), avant toute compilation.
+        for (String language : List.of("C", "C++")) {
+            TestResult r = grade(language,
+                    "return divise(1.0, 0.0) == HUGE_VAL || __builtin_huge_val() == 0.0;", forged);
+            assertThat(r.passed()).as(language).isFalse();
+            assertThat(r.detail()).as(language).contains("réservé au compilateur")
+                    .contains("__builtin_huge_val");
         }
         // Cachée sous `#if 0`, elle n'existe pas dans le code compilé : les signatures sont lues
         // sur le code aux directives traitées, aucun bouchon de ce nom n'entre dans le noteur, et

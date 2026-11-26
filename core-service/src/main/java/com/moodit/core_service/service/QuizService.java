@@ -419,13 +419,19 @@ public class QuizService {
             // reprise, une relance concurrente est en pratique inatteignable ici (elle suppose une
             // tentative « à revoir », que le comptage aurait déjà refusée) ; si elle survenait,
             // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
-            // La tentative à attendre est la DERNIÈRE de l'étudiant sur ce quiz, celle de
-            // l'écriture concurrente, pending ou déjà corrigée ; disparue (supprimée entre-temps),
-            // l'id manque et le client retombe sur son repli.
+            // La tentative à attendre est celle de l'écriture concurrente : la DERNIÈRE de
+            // l'étudiant sur ce quiz, pending ou déjà corrigée, à condition que son numéro soit au
+            // moins celui que cette soumission a tenté d'insérer — l'écriture concurrente, passée
+            // le contrôle préalable en même temps, a compté au moins autant de tentatives. Plus
+            // ancienne, ce n'est PAS elle : la concurrente a été supprimée entre-temps (correction
+            // abandonnée), ou c'était une relance d'une ANCIENNE tentative, finie avant la
+            // relecture. Son id ferait ouvrir au client le résultat d'une autre tentative comme
+            // celui de son envoi : il est omis, et le client retombe sur son repli.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
             readTx.setReadOnly(true);
             throw readTx.execute(status -> pendingConflict(quizId, e.userId, e.allowRetry,
                     () -> attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(quizId, e.userId)
+                            .filter(a -> a.getAttemptNo() >= e.attemptNo)   // attempt_no NOT NULL
                             .map(Attempt::getId).orElse(null)));
         }
     }
@@ -451,15 +457,19 @@ public class QuizService {
      * {@code uq_attempt_pending} (écriture concurrente du même étudiant sur le même quiz) :
      * {@link #submitQuiz} répond « correction en cours », sauf relance relue hors de la
      * transaction annulée (cf. {@link #pendingConflict}, d'où {@code allowRetry}).
+     * {@code attemptNo} : le numéro que cette soumission a tenté d'insérer ; seule une tentative
+     * relue de numéro au moins égal peut être celle de l'écriture concurrente.
      */
     private static final class ConcurrentSubmissionException extends RuntimeException {
         private final Integer userId;
         private final boolean allowRetry;
+        private final int attemptNo;
 
-        ConcurrentSubmissionException(Integer userId, boolean allowRetry, Throwable cause) {
+        ConcurrentSubmissionException(Integer userId, boolean allowRetry, int attemptNo, Throwable cause) {
             super(cause);
             this.userId = userId;
             this.allowRetry = allowRetry;
+            this.attemptNo = attemptNo;
         }
     }
 
@@ -526,7 +536,7 @@ public class QuizService {
             // UNIQUE(quiz,user,attempt_no) OU uq_attempt_pending : écriture concurrente. Le 409
             // est décidé hors de cette transaction, désormais inutilisable (cf. submitQuiz).
             throw new ConcurrentSubmissionException(
-                    user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()), e);
+                    user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()), attempt.getAttemptNo(), e);
         }
 
         // Réponses brutes ; les verdicts de code seront ajoutés par la correction async.
@@ -968,6 +978,26 @@ public class QuizService {
      */
     private static boolean awaitsTeacher(Attempt attempt) {
         return REVIEW.equals(attempt.getStatus()) || attempt.isRegrade();
+    }
+
+    /**
+     * Statut d'UNE tentative de l'utilisateur sur CE quiz : {@code "pending"}, {@code "done"} ou
+     * {@code "review"} — une relance en cours vaut {@code "review"}, comme dans l'historique
+     * ({@link #getMyAttempts}) : son verdict n'est pas celui que l'étudiant attend d'un envoi.
+     * 404 ({@link AttemptNotFoundException}) pour une tentative absente ou supprimée (correction
+     * échouée), d'un autre étudiant ou d'un autre quiz, sans distinction : pas de fuite
+     * d'existence. Sert au client qui attend une correction et a pu manquer le verdict WebSocket
+     * — {@link #getAttemptResult} répond 404 aussi bien pendant la correction qu'après une
+     * suppression, et ne permet pas de les distinguer.
+     */
+    @Transactional(readOnly = true)
+    public AttemptStatusDTO getAttemptStatus(Integer quizId, Integer attemptId, String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(UserNotFoundException::new);
+        Attempt attempt = attemptRepository.findByIdAndUser_Id(attemptId, user.getId())
+                .filter(a -> a.getQuiz().getId().equals(quizId))
+                .orElseThrow(AttemptNotFoundException::new);
+        return new AttemptStatusDTO(awaitsTeacher(attempt) ? REVIEW : attempt.getStatus());
     }
 
     /**

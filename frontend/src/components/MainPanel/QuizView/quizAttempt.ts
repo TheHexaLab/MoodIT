@@ -420,6 +420,21 @@ export type FetchAttemptResultHandler = (
 ) => MaybePromise<QuizResult>;
 
 /**
+ * Statut d'une tentative de l'étudiant : en correction (`pending`), corrigée (`done`), à revoir
+ * (`review`), ou `gone` (absente : correction en échec, tentative supprimée — HTTP 404).
+ */
+export type AttemptStatus = 'pending' | 'done' | 'review' | 'gone';
+
+/**
+ * Statut d'UNE tentative (GET …/attempts/{id}/status) : l'historique exclut les tentatives en
+ * correction et ne dit donc rien d'une tentative supprimée dont le verdict a été manqué.
+ */
+export type FetchAttemptStatusHandler = (
+  quizId: number,
+  attemptId: number
+) => MaybePromise<AttemptStatus>;
+
+/**
  * Erreur du contrat de soumission : le backend n'a pas pu vérifier les questions de code
  * (service d'exécution indisponible, HTTP 503). La tentative n'a PAS été enregistrée →
  * l'étudiant peut renvoyer. Distincte d'un échec générique pour afficher un message adapté.

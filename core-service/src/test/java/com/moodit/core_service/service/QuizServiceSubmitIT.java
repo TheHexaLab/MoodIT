@@ -362,10 +362,14 @@ class QuizServiceSubmitIT {
   }
 
   @Test
-  @DisplayName("Deux soumissions de suite, quiz AVEC reprise : la 2e est refusée « en cours », aucune 2e tentative")
+  @DisplayName("Deux soumissions de suite, quiz AVEC reprise : la 2e est refusée « en cours », avec l'id du pending, aucune tentative de plus")
   void secondSubmissionWhileGrading_withRetry_isInProgress() {
     em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
-    // Une tentative déjà corrigée avant : l'id renvoyé est celui du PENDING, pas de la done.
+    // Une tentative déjà corrigée avant (la reprise laisse passer le comptage) : le pending
+    // est la n° 2. Pas un cas discriminant entre « pending » et « dernière tentative » : dans
+    // le modèle, le pending d'une soumission est toujours la dernière (seule une relance, qui
+    // répond « relance », est un pending plus ancien) ; ce filtre est épinglé par les tests
+    // unitaires de QuizServiceSubmissionTest.
     persistAttempt(em.find(Quiz.class, quizId), em.getEntityManager()
         .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
         .setParameter("email", USER_EMAIL).getSingleResult(), 1, "done");

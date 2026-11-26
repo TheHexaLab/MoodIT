@@ -1,6 +1,7 @@
 package com.moodit.core_service.controller;
 
 import com.moodit.core_service.dto.AttemptAcceptedDTO;
+import com.moodit.core_service.dto.AttemptStatusDTO;
 import com.moodit.core_service.dto.AttemptSummaryDTO;
 import com.moodit.core_service.dto.QuizDetailDTO;
 import com.moodit.core_service.dto.QuizResultDTO;
@@ -59,6 +60,23 @@ public class QuizController {
     }
 
     /**
+     * Statut d'une tentative de l'utilisateur courant sur ce quiz : 200
+     * {@code {"status":"pending"|"done"|"review"}}, 404 si elle est absente ou supprimée (correction
+     * échouée), d'un autre étudiant ou d'un autre quiz. Le client qui attend une correction s'en
+     * sert quand il a pu manquer le verdict WebSocket (reconnexion, rechargement) : la route du
+     * résultat répond 404 pendant la correction comme après une suppression. Autorisation en amont
+     * par le permission-service (règle GET /quizzes/{quizId}/attempts/{attemptId}/status, celle de
+     * l'historique) ; la propriété est vérifiée ici.
+     */
+    @GetMapping("/{quizId}/attempts/{attemptId}/status")
+    public ResponseEntity<AttemptStatusDTO> getAttemptStatus(
+            @PathVariable Integer quizId,
+            @PathVariable Integer attemptId,
+            @RequestHeader("X-User-Email") String email) {
+        return ResponseEntity.ok(quizService.getAttemptStatus(quizId, attemptId, email));
+    }
+
+    /**
      * Tentatives « à revoir » du quiz, pour l'enseignant (#116, S4) : leur correction a échoué et
      * QuizService les a gardées (relance, ou plafond atteint). Autorisation par rôle assurée en amont par le permission-service
      * (règle GET /quizzes/{quizId}/review-attempts).
@@ -107,7 +125,9 @@ public class QuizController {
      * Soumet une tentative de façon ASYNCHRONE : le serveur enregistre la tentative et répond
      * <b>202 Accepted</b> avec son id, puis corrige le code en tâche de fond. Le résultat arrive
      * par WebSocket ({@code quiz:attempt-graded} / {@code quiz:attempt-failed}) ; le client le
-     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}}. 409 en JSON
+     * récupère ensuite via {@code GET /quizzes/{quizId}/attempts/{attemptId}} ; s'il a manqué le
+     * verdict, {@code GET …/attempts/{attemptId}/status} dit si la correction est encore en cours
+     * (404 : tentative supprimée, la correction a échoué). 409 en JSON
      * {@code {"cause":"en_cours","message":…,"attemptId":…}} si une correction de ce quiz est déjà
      * en cours (le client rejoint l'attente de {@code attemptId}, omis quand la tentative en
      * conflit a disparu), 409 en JSON {@code {"cause":"relance",…}} si c'est l'enseignant qui

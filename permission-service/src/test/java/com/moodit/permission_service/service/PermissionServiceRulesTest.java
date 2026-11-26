@@ -915,6 +915,35 @@ class PermissionServiceRulesTest {
     }
 
     @Test
+    void attemptStatus_subscriber_allowed() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(true);
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "GET", null)).isTrue();
+    }
+
+    @Test
+    void attemptStatus_nonSubscriber_refused() {
+      loggedIn(user(5));
+      when(membershipService.canAccessQuiz(5, 12)).thenReturn(false);
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "GET", null)).isFalse();
+    }
+
+    @Test
+    void attemptStatus_nonNumericQuizId_refused() {
+      loggedIn(user(5));
+      assertThat(allowed("/api/quizzes/abc/attempts/3/status", "GET", null)).isFalse();
+      verifyNoInteractions(membershipService);
+    }
+
+    @Test
+    void attemptStatus_writeMethod_refused() {
+      // Lecture seule : aucune règle d'écriture sur ce chemin (403 par défaut au gateway), refusé
+      // avant même de charger l'utilisateur.
+      assertThat(allowed("/api/quizzes/12/attempts/3/status", "POST", null)).isFalse();
+      verifyNoInteractions(membershipService);
+    }
+
+    @Test
     void listePubliee_enseignantNonAbonne_autorise() {
       loggedIn(user(5));
       when(membershipService.canAccessCourse(5, 1)).thenReturn(false);

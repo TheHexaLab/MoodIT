@@ -221,10 +221,16 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > (pas de code de départ, code de départ qui ne compile pas seul ou sans fonction aux types
 > transportables, compilation du harnais ou outil de la notation — `javap`, `javac` du serveur
 > RPC Java, sonde des noms réservés — expiré ou tué, harnais qui appelle une fonction absente
-> du code de départ, noteur muet ou qui refuse le format, détail non reconnu : rejouer à la main
-> avec une solution) ou **OK**
+> du code de départ, noteur qui refuse le format ou ne rend aucun verdict (502 `sans_verdict`),
+> détail non reconnu : rejouer à la main avec une solution) ou **OK**
 > (seulement quand le détail PROUVE que le harnais a compilé et tourné ; le classement échoue
-> fermé). Il sort en 1 tant qu'un quiz **publié** porte un BLOQUANT ou un À VÉRIFIER : le
+> fermé). Un noteur **saturé ou injoignable** (429, 502 « indisponible », connexion refusée) est
+> retenté comme le fait core — attente doublée de 1 s à 10 s, `Retry-After` suivi, 2 min au
+> total ; s'il ne répond toujours pas, ou si sa réponse est coupée, son délai dépassé ou le jeton
+> refusé, la question sort **NOTEUR INDISPONIBLE** : rien n'est su d'elle, son quiz n'est
+> **jamais** fermé pour ce motif (même avec `--unpublish`), et le script sort en **3** — contrôle
+> incomplet : vérifier execution-service (`docker logs moodit_execution`, jeton interne) puis
+> relancer. Il sort en 1 tant qu'un quiz **publié** porte un BLOQUANT ou un À VÉRIFIER : le
 > déploiement n'est pas terminé avant une sortie en 0. Pour chaque quiz publié en cause, deux
 > issues : le **corriger**, ou le **fermer** (le dépublier dans l'éditeur) jusqu'à ce que son
 > enseignant le corrige. Une question À VÉRIFIER se corrige en la rejouant à la main avec une
@@ -368,6 +374,10 @@ docker exec moodit_postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-
 > # À VÉRIFIER non acquitté, le temps de les régler dans l'éditeur. Mêmes --ack qu'à l'étape 1.
 > python3 deploy/check-compiled-harnesses.py --unpublish --ack <id>,<id>
 > ```
+>
+> Une sortie en **3** (noteur indisponible pour au moins une question) n'est pas un résultat :
+> les quiz prouvés en cause sont déjà fermés, les autres restent tels quels ; une fois
+> execution-service rétabli, relancer la même commande jusqu'à une sortie en 0 ou 1.
 >
 > Si le script ferme un quiz à cette étape, des étudiants ont pu le soumettre entre la bascule et
 > la fermeture, et recevoir 0 sans faute de leur part. Lister ces tentatives (`<ids>` : les quiz

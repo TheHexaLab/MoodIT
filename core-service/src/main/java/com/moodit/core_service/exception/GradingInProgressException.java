@@ -12,10 +12,13 @@ package com.moodit.core_service.exception;
  * correction en cours au lieu d'afficher « déjà soumis ».
  *
  * <p>{@link #getAttemptId()} : la tentative à attendre — le pending existant, ou après un conflit
- * d'insertion la dernière tentative relue (peut-être déjà corrigée). {@code null} si elle a
- * disparu entre-temps : le champ est alors omis, et le client retombe sur son repli (relecture
- * de l'historique). Le deviner par cette relecture seule l'écartait quand la correction
- * concurrente finissait avant elle.
+ * d'insertion celle de l'écriture concurrente, relue (peut-être déjà corrigée) : la dernière de
+ * l'étudiant, si son numéro atteint celui que la soumission refusée a tenté d'insérer.
+ * {@code null} sinon — la concurrente a disparu entre-temps (correction abandonnée), ou c'était
+ * une relance d'une ancienne tentative, finie avant la relecture : renvoyer l'id d'une ANCIENNE
+ * tentative ferait ouvrir au client son résultat comme celui de l'envoi. Le champ est alors omis,
+ * et le client retombe sur son repli (relecture de l'historique). Deviner la tentative par cette
+ * relecture seule l'écartait quand la correction concurrente finissait avant elle.
  */
 public class GradingInProgressException extends RuntimeException {
 

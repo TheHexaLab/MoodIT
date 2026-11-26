@@ -1682,14 +1682,18 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
         listed = {ident.split()[0] for ident, _ in self.DISPATCHERS}
         self.assertEqual(set(supervisor.RUNNERS), listed)
         # Les écritures sur l'ERREUR standard ne sont pas des réponses : ce sont des diagnostics,
-        # et le noteur ne les lit pas comme telles.
+        # et le noteur ne les lit pas comme telles (`stderr`, `os.Stderr`, `eprintln!`,
+        # `System.err`, `Console.Error`). TOUTES les formes d'écriture sur la sortie standard sont
+        # cherchées, `…ln`/`WriteLine` comprises : limité à `print`/`Write`, le motif laissait
+        # échapper un site réécrit `Console.Out.WriteLine(reponse)` (sans saut de ligne AVANT).
         emitted = _re.compile(
-            r"(?:System[.]out[.]print|fmt[.]Print|\bprint!|Console[.]Out[.]Write|\bprintf"
-            r"|\bmoodit_printf)[(]")
+            r"(?P<call>System[.]out[.]print(?:ln|f)?|fmt[.]F?Print(?:ln|f)?|\bprint(?:ln)?!"
+            r"|\bwrite(?:ln)?!|Console[.](?:Out[.])?Write(?:Line)?"
+            r"|\b(?:moodit_)?(?:printf|puts|fputs|fprintf|putchar|fputc|fwrite))[(]")
         for ident, factory in self.DISPATCHERS:
             source = factory()
             sites = [l.strip() for l in source.splitlines()
-                     if emitted.search(l) and "stderr" not in l and "__asm__" not in l]
+                     if emitted.search(l) and "stderr" not in l.lower() and "__asm__" not in l]
             self.assertTrue(sites, "aucun site de réponse trouvé en " + ident)
             for site in sites:
                 # Le PREMIER argument émis — l'expression entière (`"\n" + reponse + "\n"`) ou la
@@ -1698,7 +1702,12 @@ class TypeAndIdiomGenerationTest(unittest.TestCase):
                 # FINIR par un (la réponse est une ligne entière). Chercher un `\n` dans les
                 # premiers caractères ne voyait pas l'absence du premier : le `\n` final d'un
                 # format court suffisait à rendre le test vert.
-                emitted_arg = self.first_argument(site[emitted.search(site).end():])
+                call = emitted.search(site)
+                # Une forme `…ln`/`WriteLine` ajoute son saut de ligne APRÈS, jamais avant : elle
+                # n'a pas sa place sur un site de réponse (le `"\n"` explicite en tête l'est).
+                self.assertFalse(call.group("call").endswith(("ln", "Line", "ln!")),
+                                 "forme …ln sur un site de réponse en %s : %s" % (ident, site))
+                emitted_arg = self.first_argument(site[call.end():])
                 self.assertTrue(emitted_arg.startswith('"' + chr(92) + "n"),
                                 "réponse sans saut de ligne AVANT en %s : %s" % (ident, site))
                 self.assertTrue(emitted_arg.endswith(chr(92) + 'n"'),
@@ -2753,9 +2762,12 @@ class ReservedNamesTest(unittest.TestCase):
     def test_c_implementation_reserved_names(self):
         # `HUGE_VAL` se developpe en `__builtin_huge_val ()` : une fonction soumise de ce nom,
         # renommee par #define dans le noteur, detournait la constante vers le code note.
-        self.assertEqual(supervisor.c_implementation_reserved(
-            ["__builtin_huge_val", "_Exit", "a__b", "moitie", "_x", "f_", "__builtin_huge_val"]),
-            ["__builtin_huge_val", "_Exit", "a__b"])
+        names = ["__builtin_huge_val", "_Exit", "a__b", "moitie", "_x", "f_", "__builtin_huge_val"]
+        # C : seulement en tête ; C++ : `__` n'importe où dans le nom.
+        self.assertEqual(supervisor.c_implementation_reserved(names),
+                         ["__builtin_huge_val", "_Exit"])
+        self.assertEqual(supervisor.c_implementation_reserved(names, cpp=True),
+                         ["__builtin_huge_val", "_Exit", "a__b"])
 
     def test_c_reserved_names_refuses_implementation_names_without_compiling(self):
         calls = []
@@ -2773,11 +2785,125 @@ class ReservedNamesTest(unittest.TestCase):
                          ["max", "min", "len"])
         self.assertEqual(supervisor.go_reserved_names(["Max", "abs"]), [])
 
+    def test_implementation_reserved_follows_each_language(self):
+        # C : réservé seulement EN TÊTE (`__…`, `_Majuscule…`) ; C++ : aussi tout nom qui
+        # CONTIENT `__`. `aide__calc` est donc libre en C, réservé en C++.
+        names = ["aide__calc", "__x", "_Exit", "_x", "f_", "moitie"]
+        self.assertEqual(["__x", "_Exit"], supervisor.c_implementation_reserved(names))
+        self.assertEqual(["aide__calc", "__x", "_Exit"],
+                         supervisor.c_implementation_reserved(names, cpp=True))
+        message = supervisor.implementation_reserved_message(["aide__calc"], cpp=True)
+        self.assertTrue(message.startswith("Identifiant réservé au compilateur : la fonction « aide__calc »"))
+        self.assertIn("contient « __ »", message)
+        self.assertNotIn("bibliothèque", message)
+        self.assertNotIn("contient", supervisor.implementation_reserved_message(["__x"]))
+        self.assertIn("la classe « _Rect »", supervisor.implementation_reserved_message(
+            ["_Rect"], cpp=True, classes={"_Rect"}))
+
+    def test_implementation_reserved_only_for_names_the_harness_uses(self):
+        # `aide__calc` que le harnais n'appelle pas : le détournement passe par le #define du
+        # noteur, réservé aux noms qu'il emploie. Refusée, elle portait en plus un motif faux
+        # (« fourni par la bibliothèque standard »). Le contrôle porte sur `harness_names`.
+        source = inspect.getsource(supervisor.run_c_rpc)
+        self.assertIn('c_implementation_refusal(harness_names, ext == "cpp", classes)', source)
+        self.assertNotIn("c_implementation_reserved([ident for _, ident, _ in method_list])", source)
+        # Le cas reproduit : C, `int aide__calc(int x)` et `int doubler(int x)`, harnais
+        # `return doubler(3) == 6;` — harness_names ne contient que `doubler`.
+        src = "int aide__calc(int x){return x*2;}\nint doubler(int x){return aide__calc(x);}\n"
+        methods = supervisor.c_signatures(supervisor.blank_code(src))
+        harness = "return doubler(3) == 6;"
+        named = [m[1] for m in methods if supervisor.harness_mentions(harness, m[1])]
+        self.assertEqual(["doubler"], named)
+        self.assertIsNone(supervisor.c_implementation_refusal(named))
+        # Nommé par le harnais : refus au bon motif, selon la règle du langage.
+        self.assertIsNone(supervisor.c_implementation_refusal(["aide__calc"]))          # C
+        self.assertIn("Identifiant réservé au compilateur",
+                      supervisor.c_implementation_refusal(["aide__calc"], cpp=True))    # C++
+        self.assertIn("la fonction « __calc »", supervisor.c_implementation_refusal(["__calc"]))
+        self.assertIn("la classe « _Pile »", supervisor.c_implementation_refusal(
+            ["_Pile"], cpp=True, classes={"_Pile"}))
+        self.assertIn('impl = c_implementation_reserved(names, cpp=compiler != "gcc")',
+                      inspect.getsource(supervisor.c_reserved_names))
+
     def test_message_names_every_offender(self):
         one = supervisor.reserved_name_message(["fabs"], "la bibliothèque standard")
         self.assertIn("« fabs » est déjà fourni au harnais par la bibliothèque standard", one)
         many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
         self.assertIn("« max », « min » sont déjà fournis au harnais", many)
+        # Une CLASSE C++ (bouchon de classe du noteur) n'est pas appelée « fonction ».
+        klass = supervisor.reserved_name_message(["remove"], "la bibliothèque standard",
+                                                 classes={"remove"})
+        self.assertTrue(klass.startswith("Nom de classe réservé : « remove »"))
+        self.assertNotIn("fonction", klass)
+        mixed = supervisor.reserved_name_message(["abs", "time"], "x", classes={"time"})
+        self.assertTrue(mixed.startswith("Noms réservés : "))
+
+
+class CanaryTruthTableTest(unittest.TestCase):
+    """Table de vérité EXHAUSTIVE de canary_verdict : 2 canaris × 7 états × 0 à 2 cas réels
+    (verts ou rouges). Invariants des règles de sa docstring."""
+
+    # États d'un canari : (passed, ran, timed_out, killed, harness_build, skipped).
+    STATES = {
+        "réussi": (True, True, False, False, False, False),
+        "échoué": (False, True, False, False, False, False),
+        "compilation échouée": (False, False, False, False, False, False),
+        "compilation non concluante": (False, False, False, False, True, False),
+        "expiré": (False, True, True, False, False, False),
+        "tué": (False, True, False, True, False, False),
+        "sauté": (False, False, False, False, False, True),
+    }
+
+    @staticmethod
+    def outcome(state):
+        passed, ran, timed_out, killed, harness_build, skipped = state
+        return supervisor.CaseOutcome(passed, None, ran=ran, timed_out=timed_out, skipped=skipped,
+                                      killed=killed, harness_build=harness_build)
+
+    def test_exhaustive_truth_table(self):
+        import itertools
+        reals = [()] + [(g,) for g in (True, False)] + list(itertools.product((True, False), repeat=2))
+        checked = 0
+        for pass_state, fail_state, real in itertools.product(self.STATES, self.STATES, reals):
+            with self.subTest(passe=pass_state, echoue=fail_state, reels=real):
+                supervisor.EVENTS.clear()
+                cases = [{"index": 0, "canary": "pass"}, {"index": 1, "canary": "fail"}]
+                outcomes = {0: self.outcome(self.STATES[pass_state]),
+                            1: self.outcome(self.STATES[fail_state])}
+                for k, green in enumerate(real):
+                    cases.append({"index": 2 + k})
+                    outcomes[2 + k] = supervisor.CaseOutcome(green, None, ran=True)
+                verdict = supervisor.canary_verdict(cases, outcomes)
+                real_green = any(real)
+                # Règle 1 : jamais d'accusation sans cas réel VERT.
+                if not real_green:
+                    self.assertNotEqual("incoherents", verdict)
+                # Confirmation de chaque canari (il a tourné et rendu son attendu).
+                pass_ok = pass_state == "réussi"
+                fail_ok = fail_state in ("échoué", "expiré", "tué")
+                fail_solid = fail_state == "échoué"
+                # Règle 4 : « ok » si et seulement si les deux sont confirmés.
+                self.assertEqual(verdict == "ok", pass_ok and fail_ok)
+                if "sauté" in (pass_state, fail_state):
+                    self.assertNotEqual("ok", verdict)
+                # Règle 2 : une compilation non concluante n'accuse jamais.
+                if (pass_state == "compilation non concluante" and fail_ok) or \
+                        (fail_state == "compilation non concluante" and pass_ok):
+                    self.assertNotEqual("incoherents", verdict)
+                # Règle 3 : un canari qui a tourné mais fini sur une cause non concluante
+                # n'accuse pas quand l'AUTRE est confirmé de façon concluante.
+                if pass_state in ("expiré", "tué") and fail_solid:
+                    self.assertNotEqual("incoherents", verdict)
+                # Détection conservée : cause CONCLUANTE contraire + cas réel vert → accusation.
+                conclusive_miss = (pass_state in ("échoué", "compilation échouée")
+                                   or fail_state in ("réussi", "compilation échouée"))
+                if real_green and conclusive_miss:
+                    self.assertEqual("incoherents", verdict)
+                # Gel des deux (aucune confirmation concluante) + cas réel vert → accusation.
+                if real_green and pass_state in ("expiré", "tué") and fail_state in ("expiré", "tué"):
+                    self.assertEqual("incoherents", verdict)
+                checked += 1
+        self.assertEqual(7 * 7 * 7, checked)
 
 
 class Review246Test(unittest.TestCase):
@@ -5174,7 +5300,9 @@ class PlatformInterruptionTest(unittest.TestCase):
         self.assertNotIn("moodit_protege", supervisor.c_grader_source([], "return 1;", "N"))
         rust = supervisor.rust_grader_source([], "true", "N")
         self.assertLess(rust.index("::std::panic::set_hook("), rust.index("catch_unwind(moodit_harnais)"))
-        # Compilation et exécution RÉELLES, dans l'image qui a le compilateur (sinon ignoré).
+        # Compilation et exécution RÉELLES, avec le g++ et le rustc de la machine qui lance la
+        # suite (le conteneur runner où on la monte, ou l'hôte de CI avant la construction des
+        # images) ; partie IGNORÉE (skipTest, après les vérifications ci-dessus) sans eux.
         work = tempfile.mkdtemp()
         try:
             checks = []
@@ -5192,6 +5320,8 @@ class PlatformInterruptionTest(unittest.TestCase):
                 checks.append(("rustc", "noteur.rs", supervisor.rust_grader_source([], "assert_eq!(1, 2);\ntrue", "NONCE42"),
                                ["rustc", "--edition", "2021", "noteur.rs", "-o", "noteur"],
                                "[MOODIT] harnais: assertion `left == right` failed"))
+            if not checks:
+                self.skipTest("ni g++ ni rustc sur cette machine : relais non exécutés")
             for label, name, source, build, expected in checks:
                 with self.subTest(label=label):
                     with open(os.path.join(work, name), "w", encoding="utf-8") as f:

@@ -414,7 +414,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .thenThrow(new DataIntegrityViolationException("uq_quiz_user_attempt_no"));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
                     .thenReturn(false);
-            // La dernière tentative relue : celle de l'écriture concurrente, déjà corrigée.
+            // La dernière tentative relue : celle de l'écriture concurrente, déjà corrigée, au
+            // n° 3 — celui que cette soumission a tenté d'insérer (borne incluse).
             when(attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(4, 3))
                     .thenReturn(Optional.of(attempt(57, quiz, eva, 3, "done")));
 
@@ -425,6 +426,52 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
                     .extracting(e -> ((GradingInProgressException) e).getAttemptId())
                     .isEqualTo(57);
             verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        /**
+         * Conflit d'insertion sur un quiz AVEC reprise et deux tentatives antérieures (la
+         * soumission tente le n° 3) ; la relecture de la dernière tentative rend {@code reread}.
+         */
+        private Throwable conflictWithLatestAttempt(Attempt reread, String constraint) {
+            quiz.setAllowRetry(true);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(2L);
+            when(attemptRepository.saveAndFlush(any(Attempt.class)))
+                    .thenThrow(new DataIntegrityViolationException(constraint));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(false);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(4, 3))
+                    .thenReturn(Optional.of(reread));
+            return org.assertj.core.api.Assertions.catchThrowable(() -> service.submitQuiz(4, body(), EMAIL));
+        }
+
+        @Test
+        @DisplayName("Insert concurrent, concurrente supprimée avant la relecture : l'ANCIENNE tentative relue n'est pas renvoyée (pas d'id)")
+        void constraintViolation_concurrentDeleted_olderAttemptNotReturned() {
+            // La concurrente (n° 3) a vu sa correction abandonnée et a été supprimée : la dernière
+            // tentative relue est la n° 2, déjà corrigée. Son id ferait ouvrir au client ce
+            // résultat comme celui de son envoi.
+            Throwable thrown = conflictWithLatestAttempt(attempt(41, quiz, eva, 2, "done"),
+                    "uq_quiz_user_attempt_no");
+
+            assertThat(thrown).isInstanceOf(GradingInProgressException.class);
+            assertThat(((GradingInProgressException) thrown).getAttemptId()).isNull();
+        }
+
+        @Test
+        @DisplayName("Insert concurrent avec une relance d'une ANCIENNE tentative, finie avant la relecture → pas d'id")
+        void constraintViolation_regradeFinishedBeforeReread_noId() {
+            // La relance de la n° 1 a fait échouer l'insert (uq_attempt_pending) puis s'est
+            // terminée : plus de pending de relance, et la dernière tentative (n° 2) précède le
+            // n° 3 tenté — ce n'est pas l'écriture concurrente.
+            Throwable thrown = conflictWithLatestAttempt(attempt(42, quiz, eva, 2, "done"),
+                    "uq_attempt_pending");
+
+            assertThat(thrown).isInstanceOf(GradingInProgressException.class);
+            assertThat(((GradingInProgressException) thrown).getAttemptId()).isNull();
         }
 
         @Test
@@ -1154,6 +1201,74 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
 
         assertThatThrownBy(() -> service.getMyAttempts(4, EMAIL))
                 .isInstanceOf(UserNotFoundException.class);
+    }
+
+    // ── getAttemptStatus ────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("getAttemptStatus : statut d'une tentative de l'étudiant sur ce quiz")
+    class AttemptStatus {
+
+        private Quiz quiz;
+
+        @BeforeEach
+        void setUp() {
+            quiz = quiz(4, course(1), question(10, SINGLE, 1.0, 0));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+        }
+
+        private String statusOf(Attempt attempt) {
+            when(attemptRepository.findByIdAndUser_Id(attempt.getId(), 3)).thenReturn(Optional.of(attempt));
+            return service.getAttemptStatus(4, attempt.getId(), EMAIL).getStatus();
+        }
+
+        @Test
+        @DisplayName("pending, done, review : le statut de la tentative")
+        void ownAttempt_returnsItsStatus() {
+            assertThat(statusOf(attempt(70, quiz, eva, 1, "pending"))).isEqualTo("pending");
+            assertThat(statusOf(attempt(71, quiz, eva, 2, "done"))).isEqualTo("done");
+            assertThat(statusOf(attempt(72, quiz, eva, 3, QuizService.REVIEW))).isEqualTo("review");
+        }
+
+        @Test
+        @DisplayName("Relance de l'enseignant en cours (pending marqué relance) → « review », comme l'historique")
+        void regradeInProgress_isReview() {
+            Attempt regraded = attempt(73, quiz, eva, 1, "pending");
+            regraded.setRegrade(true);
+
+            assertThat(statusOf(regraded)).isEqualTo(QuizService.REVIEW);
+        }
+
+        @Test
+        @DisplayName("Absente ou supprimée (correction échouée), ou d'un autre étudiant → 404")
+        void absentOrOtherStudent_notFound() {
+            // La requête est restreinte à l'étudiant connecté : la tentative d'un autre n'y
+            // apparaît pas, exactement comme une tentative supprimée.
+            when(attemptRepository.findByIdAndUser_Id(74, 3)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getAttemptStatus(4, 74, EMAIL))
+                    .isInstanceOf(AttemptNotFoundException.class);
+            verify(attemptRepository).findByIdAndUser_Id(74, 3);
+        }
+
+        @Test
+        @DisplayName("Tentative de l'étudiant sur un AUTRE quiz → 404 (pas de fuite d'existence)")
+        void otherQuiz_notFound() {
+            Attempt elsewhere = attempt(75, quiz(5, course(1), question(11, SINGLE, 1.0, 0)), eva, 1, "pending");
+            when(attemptRepository.findByIdAndUser_Id(75, 3)).thenReturn(Optional.of(elsewhere));
+
+            assertThatThrownBy(() -> service.getAttemptStatus(4, 75, EMAIL))
+                    .isInstanceOf(AttemptNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Utilisateur inconnu → UserNotFoundException")
+        void unknownUser_notFound() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getAttemptStatus(4, 70, EMAIL))
+                    .isInstanceOf(UserNotFoundException.class);
+        }
     }
 
     // ── getCourseQuizStats ──────────────────────────────────────────────────────

@@ -1264,6 +1264,7 @@ export default function Dashboard() {
         onFetchQuiz={api.fetchQuiz}
         onFetchAttempts={api.fetchQuizAttempts}
         onFetchAttemptResult={api.fetchAttemptResult}
+        onFetchAttemptStatus={api.fetchAttemptStatus}
         onSubmitQuiz={api.submitQuiz}
         attemptOutcome={openQuizId != null ? (attemptOutcomes[openQuizId] ?? null) : null}
         onRunCode={api.runCode}

@@ -335,6 +335,29 @@ describe('QuizView — pied de navigation', () => {
     expect(screen.queryByText('Soumission impossible')).toBeNull();
   });
 
+  it('statut de la tentative attendue transmis au hook : tentative supprimée → « vérification impossible »', async () => {
+    // Marqueur d'un envoi expiré (#9) ; son statut, lu via la vue, dit qu'elle a été supprimée.
+    localStorage.setItem(
+      'moodit:quiz-pending-submission:55',
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    const onFetchAttemptStatus = vi.fn(async () => 'gone' as const);
+    render(
+      <QuizView
+        course={course}
+        channel={channel}
+        onFetchQuiz={vi.fn(async () => makeQuiz())}
+        onFetchAttempts={vi.fn(async () => [])}
+        onFetchAttemptStatus={onFetchAttemptStatus}
+        onSubmitQuiz={vi.fn(async () => ({ attemptId: 9 }))}
+      />
+    );
+    await waitFor(() =>
+      expect(screen.getByText('La vérification du code est momentanément indisponible', { exact: false })).toBeTruthy()
+    );
+    expect(onFetchAttemptStatus).toHaveBeenCalledWith(55, 9);
+  });
+
   it('attente non conclue (plafond) : titre « Correction en cours », pas « Soumission impossible »', async () => {
     // Marqueur d'un envoi expiré : l'attente conclut dès le montage.
     localStorage.setItem(

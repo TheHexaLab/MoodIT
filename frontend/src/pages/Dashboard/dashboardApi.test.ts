@@ -33,6 +33,7 @@ import {
   fetchQuestionTypes,
   fetchLanguages,
   submitQuiz,
+  fetchAttemptStatus,
   fetchQuizAttempts,
   fetchAttemptResult,
   fetchReviewAttempts,
@@ -347,6 +348,27 @@ describe('fetchLanguages', () => {
 });
 
 // ── Soumission asynchrone (202) ────────────────────────────────────────────────
+
+describe('fetchAttemptStatus', () => {
+  it.each([
+    ['200 pending', { ok: true, status: 200, json: async () => ({ status: 'pending' }) }, 'pending'],
+    ['200 done', { ok: true, status: 200, json: async () => ({ status: 'done' }) }, 'done'],
+    ['200 review', { ok: true, status: 200, json: async () => ({ status: 'review' }) }, 'review'],
+    ['404 (tentative supprimée)', { ok: false, status: 404, json: async () => ({}) }, 'gone'],
+  ])('%s → %s', async (_case, response, expected) => {
+    mockedApiFetch.mockResolvedValueOnce(response as unknown as Response);
+    expect(await fetchAttemptStatus(5, 9)).toBe(expected);
+    expect(callArgs()[0]).toBe('/api/quizzes/5/attempts/9/status');
+  });
+
+  it.each([
+    ['500', { ok: false, status: 500, json: async () => ({}) }],
+    ['statut inconnu', { ok: true, status: 200, json: async () => ({ status: 'autre' }) }],
+  ])('%s → erreur (l’attente continue)', async (_case, response) => {
+    mockedApiFetch.mockResolvedValueOnce(response as unknown as Response);
+    await expect(fetchAttemptStatus(5, 9)).rejects.toThrow();
+  });
+});
 
 describe('submitQuiz', () => {
   it('POST vers /api/quizzes/:id/submissions et renvoie { attemptId } (202)', async () => {

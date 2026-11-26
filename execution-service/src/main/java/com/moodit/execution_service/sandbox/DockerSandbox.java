@@ -183,7 +183,8 @@ public class DockerSandbox {
      * 128 Mo au plus, et l'écriture BLOQUANTE : en {@code non-blocking}, réglage courant d'un
      * démon, Docker jette des messages quand son tampon est plein et le verdict relu est troué.
      * Taille : le superviseur borne ce qu'il émet (1,2 Mo d'octets LUS par flux en mode exec,
-     * jusqu'à ~3,6 Mo une fois décodés si chaque octet invalide devient U+FFFD ; 64 Kio par cas
+     * jusqu'à ~4,3 Mo une fois décodés et échappés — mélange de caractères de contrôle, 6 octets,
+     * et de U+FFFD, 3 octets, sous le plafond en caractères de bound_json ; 64 Kio par cas
      * en notation, cas plafonnés à 100 : quelques Mio), et l'enveloppe du pilote multiplie au
      * pire par 6 (un caractère de contrôle ou {@code <} devient un échappement Unicode de six
      * caractères) ; 128 Mo laisse

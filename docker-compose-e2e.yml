@@ -2,8 +2,10 @@
 # (images construites par les Dockerfile), mais en PROFIL DEV avec des valeurs bidons.
 #
 #   docker compose -p moodit-e2e -f docker-compose-prod.yml -f docker-compose-e2e.yml \
-#     up -d --build --no-deps --wait postgres mailpit auth-service core-service permission-service \
-#     mcp-service execution-service gateway frontend
+#     up -d --build --no-deps --wait postgres db-migrate mailpit auth-service core-service \
+#     permission-service mcp-service execution-service gateway frontend
+#
+# (Liste de frontend/e2e/core/start-stack.sh : avec --no-deps, sans db-migrate, la base reste vide.)
 #
 # Profil dev : requis par l'endpoint de validation /auth/verify/{username} et par le code 2FA fixe
 # (DEV_FIXED_2FA_CODE, refusé hors dev). `environment:` l'emporte sur le `.env.docker` des services

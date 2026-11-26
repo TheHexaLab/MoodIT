@@ -531,10 +531,8 @@ def canary_verdict(cases, outcomes):
          réel ressort VERT. C'est le critère unique : un forgeage ne rapporte rien si aucun
          cas réel n'est vert, donc aucune détection n'est perdue, et toutes les façons dont un
          code HONNÊTE peut faire échouer ses canaris cessent d'accuser — expiration, mort par
-         signal, mais aussi sortie non nulle sans signal (le serveur de l'étudiant ne participe
-         pas au verdict d'un canari, qui n'appelle aucune fonction soumise ; mais il tourne en
-         même temps, dans le même cgroup, et peut en épuiser la mémoire ou les PID : un noteur
-         JVM ou mono qui ne peut plus allouer ni créer de fil sort alors en 1, sans signal) ;
+         signal, mais aussi sortie non nulle sans signal (la règle accepte toute sortie non
+         nulle sans signal, sans exiger d'en établir le mécanisme) ;
       2. un canari dont la COMPILATION a échoué pour une cause NON CONCLUANTE n'accuse jamais,
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
       3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
@@ -551,8 +549,8 @@ def canary_verdict(cases, outcomes):
          on ne prétend pas non plus avoir tout vérifié.
 
     Cette règle unique remplace quatre conditions accumulées, chacune ayant révélé l'angle
-    mort de la suivante. Elle est validée par table de vérité exhaustive (2 canaris × 7 états
-    × 0-2 cas réels)."""
+    mort de la suivante. Elle est vérifiée par table de vérité exhaustive (2 canaris × 7 états
+    × 0 à 2 cas réels verts ou rouges : CanaryTruthTableTest)."""
     canary_cases = [c for c in cases if c.get("canary")]
     if not canary_cases:
         return "aucun"
@@ -4615,18 +4613,45 @@ def c_probe_source(names, cpp=False):
     return c_grader_header(cpp) + includes + checks
 
 
-# Identifiants RESERVES A L'IMPLEMENTATION (C17 7.1.3, C++ [lex.name]) : tout nom qui commence
-# par `_` suivi d'une majuscule, et tout nom qui contient `__` (en C, seulement en tete ; on
-# applique la regle C++, plus large, aux deux langages). Les macros des en-tetes s'y developpent
-# (`HUGE_VAL` -> `__builtin_huge_val ()`, `isnan` -> `__builtin_isnan`…) : une fonction soumise de
-# ce nom, renommee par #define dans le noteur, detournait ces outils vers le code note. La sonde
-# ne les voit pas, et la signature peut meme venir d'un bloc `#if 0` (lecture du texte brut).
-C_IMPL_RESERVED = re.compile(r"^_[A-Z]|__")
+# Identifiants RÉSERVÉS À L'IMPLÉMENTATION, règle de CHAQUE langage : en C (C17 7.1.3), tout
+# nom qui COMMENCE par `__` ou par `_` suivi d'une majuscule ; en C++ ([lex.name]), aussi tout
+# nom qui CONTIENT `__`. Les macros des en-têtes s'y développent (`HUGE_VAL` ->
+# `__builtin_huge_val ()`, `isnan` -> `__builtin_isnan`…) : une fonction soumise de ce nom,
+# renommée par #define dans le noteur, détournait ces outils vers le code noté. La sonde ne les
+# voit pas, et la signature peut même venir d'un bloc `#if 0` (lecture du texte brut). Seuls les
+# noms que le HARNAIS emploie passent par un #define (ou un bouchon de classe) : les autres
+# fonctions soumises sont libres de porter ces noms (cf. run_c_rpc).
+C_IMPL_RESERVED = re.compile(r"^(?:__|_[A-Z])")
+CPP_IMPL_RESERVED = re.compile(r"^_[A-Z]|__")
 
 
-def c_implementation_reserved(names):
-    """Noms reserves a l'implementation C/C++ parmi `names`. FONCTION PURE (testee)."""
-    return [n for n in dict.fromkeys(names) if C_IMPL_RESERVED.search(n)]
+def c_implementation_reserved(names, cpp=False):
+    """Noms réservés à l'implémentation parmi `names`, selon la règle du C ou du C++. FONCTION
+    PURE (testée)."""
+    pattern = CPP_IMPL_RESERVED if cpp else C_IMPL_RESERVED
+    return [n for n in dict.fromkeys(names) if pattern.search(n)]
+
+
+def c_implementation_refusal(harness_names, cpp=False, classes=()):
+    """Message de refus si un nom que le HARNAIS emploie est réservé au compilateur (règle du C
+    ou du C++), sinon None. FONCTION PURE (testée). `harness_names` : les fonctions et classes
+    soumises que le harnais nomme — les seules qui passent par un #define ou un bouchon de
+    classe dans le noteur."""
+    implementation = c_implementation_reserved(harness_names, cpp=cpp)
+    return implementation_reserved_message(implementation, cpp, classes) if implementation else None
+
+
+def implementation_reserved_message(names, cpp=False, classes=()):
+    """Refus d'un nom que le harnais emploie et que la norme réserve au compilateur. PURE
+    (testée). Le motif est la RÉSERVATION, pas un outil de la bibliothèque : le message ne cite
+    aucun en-tête."""
+    rule = ("qui commence par « __ » ou par « _ » suivi d'une majuscule, ou qui contient « __ »"
+            if cpp else "qui commence par « __ » ou par « _ » suivi d'une majuscule")
+    listed = ", ".join("%s « %s »" % ("la classe" if n in classes else "la fonction", n)
+                       for n in names)
+    return ("Identifiant réservé au compilateur : %s. En %s, un nom %s est réservé à "
+            "l'implémentation, et le harnais l'emploie ; renommez-%s."
+            % (listed, "C++" if cpp else "C", rule, "le" if len(names) == 1 else "les"))
 
 
 def c_reserved_names(names, compiler, std, case_dir, env):
@@ -4638,7 +4663,7 @@ def c_reserved_names(names, compiler, std, case_dir, env):
     sonde groupee (cf. c_probe_plan) : le nombre de compilations est borne quel que soit le
     nombre de noms."""
     names = list(dict.fromkeys(names))
-    impl = c_implementation_reserved(names)
+    impl = c_implementation_reserved(names, cpp=compiler != "gcc")
     names = [n for n in names if n not in impl]
     probe = os.path.join(case_dir, "sonde.c" if compiler == "gcc" else "sonde.cpp")
     # Délai TOTAL des sondes du cas (une, ou jusqu'à C_PROBE_MAX + 2) : chacune avait le délai
@@ -4691,12 +4716,19 @@ def c_probe_plan(names):
     return groups
 
 
-def reserved_name_message(names, origin):
-    """Message de refus d'une soumission qui reutilise un nom fourni au harnais. PURE (testée)."""
-    return ("Nom de fonction réservé : %s %s déjà fourni%s au harnais par %s. Le harnais ne "
-            "pourrait pas distinguer votre fonction de celle-ci ; renommez-la."
-            % (", ".join("« %s »" % n for n in names), "est" if len(names) == 1 else "sont",
-               "" if len(names) == 1 else "s", origin))
+def reserved_name_message(names, origin, classes=()):
+    """Message de refus d'une soumission qui reutilise un nom fourni au harnais. PURE (testée).
+
+    `classes` : ceux des noms qui sont des CLASSES soumises (C++), pour ne pas les appeler
+    « fonction »."""
+    names = list(names)
+    kinds = {"classe" if n in classes else "fonction" for n in names}
+    kind = kinds.pop() if len(kinds) == 1 else None
+    return ("%s : %s %s déjà fourni%s au harnais par %s. Le harnais ne pourrait pas distinguer "
+            "votre %s de celle-ci ; renommez-la."
+            % ("Nom de %s réservé" % kind if kind else "Noms réservés",
+               ", ".join("« %s »" % n for n in names), "est" if len(names) == 1 else "sont",
+               "" if len(names) == 1 else "s", origin, kind or "fonction ou classe"))
 
 
 # Noteur C++ : une exception du HARNAIS (le code du prof) le terminait par std::terminate,
@@ -7262,20 +7294,25 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
     # liaison C++ y heurtait la declaration de liaison C) ; il n'inclut plus aucun en-tete
     # (C_SERVER_RUNTIME), et une fonction d'aide `abs` ou `index` y est du code ordinaire.
     probed = grader_methods
-    # Les noms reserves a l'IMPLEMENTATION (`__x`, `_X`) restent refuses pour TOUTE fonction
-    # soumise, harnais ou pas : controle textuel, sans compilation.
     # Même règle pour les CLASSES (C++) : seules celles que le harnais nomme reçoivent un
     # bouchon, et leur nom est sondé avec ceux des fonctions. Un bouchon `class remove` ou
     # `class time` heurtait la fonction du même nom des en-têtes du noteur — « le harnais ne
     # compile pas », sans que le prof ni l'étudiant puissent en deviner la cause.
     grader_objects = [o for o in obj_list if harness_mentions(harness, o[0])]
-    reserved = c_implementation_reserved([ident for _, ident, _ in method_list])
-    reserved += [n for n in c_reserved_names(
-        [ident for _, ident, _ in probed] + [o[0] for o in grader_objects], compiler, std,
-        case_dir, env) if n not in reserved]
+    harness_names = [ident for _, ident, _ in probed] + [o[0] for o in grader_objects]
+    classes = {o[0] for o in grader_objects}
+    # Noms RÉSERVÉS AU COMPILATEUR (`__…`, `_Majuscule`…) : seulement ceux que le harnais
+    # emploie — le détournement passe par le #define (ou le bouchon de classe) du noteur. Une
+    # fonction d'aide `aide__calc` que le harnais n'appelle pas était refusée, avec un message
+    # qui accusait la bibliothèque standard.
+    refusal = c_implementation_refusal(harness_names, ext == "cpp", classes)
+    if refusal:
+        return None, refusal
+    reserved = c_reserved_names(harness_names, compiler, std, case_dir, env)
     if reserved:
         return None, reserved_name_message(
-            reserved, "la bibliothèque standard (%s)" % ", ".join(c_harness_headers(ext == "cpp")))
+            reserved, "la bibliothèque standard (%s)" % ", ".join(c_harness_headers(ext == "cpp")),
+            classes)
 
     lock_src_dir(case_dir)
     build_area = student_build_dir(case_dir)

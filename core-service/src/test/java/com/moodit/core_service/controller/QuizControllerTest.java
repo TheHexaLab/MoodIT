@@ -40,7 +40,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Contrat HTTP de {@link QuizController} hors soumission (couverte par QuizControllerSubmitTest) :
- * passation, édition, historique, révision d'une tentative, mise à jour et suppression, tentatives
+ * passation, édition, historique, révision et statut d'une tentative, mise à jour et suppression, tentatives
  * « à revoir » (GET /review-attempts) et relance de leur correction (POST …/regrade).
  */
 @WebMvcTest(controllers = QuizController.class,
@@ -150,6 +150,26 @@ class QuizControllerTest {
         when(quizService.getAttemptResult(71, EMAIL)).thenThrow(new AttemptNotFoundException());
 
         mockMvc.perform(get("/api/quizzes/4/attempts/71").header("X-User-Email", EMAIL))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("GET /quizzes/{id}/attempts/{attemptId}/status → 200 {status}, quiz et tentative transmis")
+    void attemptStatus_returnsStatus() throws Exception {
+        when(quizService.getAttemptStatus(4, 70, EMAIL))
+                .thenReturn(new com.moodit.core_service.dto.AttemptStatusDTO("pending"));
+
+        mockMvc.perform(get("/api/quizzes/4/attempts/70/status").header("X-User-Email", EMAIL))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("pending"));
+    }
+
+    @Test
+    @DisplayName("Statut d'une tentative absente, supprimée, d'un autre étudiant ou d'un autre quiz → 404")
+    void attemptStatus_unknown_404() throws Exception {
+        when(quizService.getAttemptStatus(4, 71, EMAIL)).thenThrow(new AttemptNotFoundException());
+
+        mockMvc.perform(get("/api/quizzes/4/attempts/71/status").header("X-User-Email", EMAIL))
                 .andExpect(status().isNotFound());
     }
 

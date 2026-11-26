@@ -27,7 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * elle enregistre la tentative et répond <b>202 Accepted</b> avec son id ; la correction du code
  * (et donc l'éventuelle indisponibilité du sandbox) se fait en tâche de fond et remonte par
  * WebSocket, PLUS via HTTP. Restent les trois 409 : « déjà soumis » (texte), « en_cours » et
- * « relance » (JSON) (cf. GlobalExceptionHandler).
+ * « relance » (JSON) (cf. GlobalExceptionHandler) ; « en_cours » porte {@code attemptId}, la
+ * tentative à attendre, quand elle est connue.
  */
 @WebMvcTest(controllers = QuizController.class,
         excludeAutoConfiguration = SecurityAutoConfiguration.class)

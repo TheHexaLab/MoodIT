@@ -143,6 +143,7 @@ vi.mock('../../components/MainPanel/QuizView/QuizView.tsx', () => ({
       <button type="button" onClick={() => props.onReloadStale?.()}>
         quiz:reload
       </button>
+      {probe(props, 'quiz:status', 'onFetchAttemptStatus', props.channel.id, 9)}
     </>
   ),
 }));
@@ -1445,6 +1446,13 @@ describe('Dashboard — compléments', () => {
         ok: false,
         reason: 'délai dépassé',
       });
+    });
+
+    it('statut d’une tentative attendue : routé vers l’API (attente d’une correction)', async () => {
+      await openGlo();
+      fireEvent.click(screen.getByText('Quiz intro'));
+      fireEvent.click(screen.getByRole('button', { name: 'quiz:status' }));
+      expect(api.fetchAttemptStatus).toHaveBeenCalledWith(7, 9);
     });
 
     it('verdict d’un AUTRE quiz : n’écrase pas celui du quiz ouvert (un verdict par quiz)', async () => {

@@ -3,10 +3,12 @@ import { type Quiz } from '../../../types/domain';
 import {
   type AttemptAnswers,
   type AttemptOutcome,
+  type AttemptStatus,
   type AttemptSummary,
   isAwaitingReview,
   REVIEW_REASON,
   type FetchAttemptResultHandler,
+  type FetchAttemptStatusHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type QuestionAnswer,
@@ -208,6 +210,12 @@ interface UseQuizAttemptParams {
   onFetchAttempts?: FetchAttemptsHandler;
   /** Détail corrigé d'une tentative (API-ready, GET) : révision d'une tentative passée. */
   onFetchAttemptResult?: FetchAttemptResultHandler;
+  /**
+   * Statut d'une tentative attendue (API-ready, GET). Pendant l'attente, quand l'id est connu et
+   * la tentative absente de l'historique : `gone` (supprimée, verdict d'échec manqué) conclut à
+   * l'échec sans attendre le plafond ; `done`/`review` ouvre la tentative.
+   */
+  onFetchAttemptStatus?: FetchAttemptStatusHandler;
   /** Soumission (API-ready). Absent → correction par le grader de prévisualisation. */
   onSubmitQuiz?: SubmitQuizHandler;
   /**
@@ -354,6 +362,7 @@ export function useQuizAttempt({
   onFetchQuiz,
   onFetchAttempts,
   onFetchAttemptResult,
+  onFetchAttemptStatus,
   onSubmitQuiz,
   attemptOutcome,
   loadErrorMessage = 'Impossible de charger le quiz. Réessayez.',
@@ -408,10 +417,12 @@ export function useQuizAttempt({
   const fetchRef = useRef(onFetchQuiz);
   const fetchAttemptsRef = useRef(onFetchAttempts);
   const fetchAttemptResultRef = useRef(onFetchAttemptResult);
+  const fetchAttemptStatusRef = useRef(onFetchAttemptStatus);
   useEffect(() => {
     fetchRef.current = onFetchQuiz;
     fetchAttemptsRef.current = onFetchAttempts;
     fetchAttemptResultRef.current = onFetchAttemptResult;
+    fetchAttemptStatusRef.current = onFetchAttemptStatus;
   });
   useEffect(() => {
     mountedRef.current = true;
@@ -452,8 +463,14 @@ export function useQuizAttempt({
         // confirmée », renvoi possible — sûr, puisqu'un renvoi pendant une correction encore en
         // cours reçoit un 409 « en_cours » et rejoint l'attente. Marqueur d'ANCIEN format (sans
         // date, âge inconnu) : tenu pour expiré. Date dans le futur (horloge qui a reculé) :
-        // ramenée à maintenant, sans quoi l'attente pouvait durer bien plus que le plafond.
-        const started = Math.min(pending.submittedAt ?? 0, Date.now());
+        // ramenée à maintenant ET réécrite dans le marqueur — gardé au plafond avec sa date
+        // future, il relançait toute l'attente à chaque retour.
+        const now = Date.now();
+        if (pending.submittedAt != null && pending.submittedAt > now) {
+          pending = { ...pending, submittedAt: now };
+          writePending(quizId, pending);
+        }
+        const started = pending.submittedAt ?? 0;
         const ceiling = started + RECONCILE_CEILING_MS;
         // Échéance déjà passée au départ (retour tardif sur le quiz) : l'attente conclut aussitôt.
         const expiredAtStart = Date.now() >= ceiling;
@@ -507,6 +524,33 @@ export function useQuizAttempt({
             setSubmitError(codeVerificationUnavailableMessage);
           }
         };
+        // Statut de la tentative attendue, quand son id est connu et qu'elle manque à l'historique
+        // (qui exclut les tentatives en correction) : `gone` — supprimée, son verdict d'échec a été
+        // manqué (onglet fermé…) — conclut à l'échec sans attendre le plafond ; `done`/`review`
+        // ouvre la tentative ; `pending` ou statut illisible (réseau) : l'attente continue.
+        const settledByStatus = async (): Promise<boolean> => {
+          const fetchStatus = fetchAttemptStatusRef.current;
+          if (pending.attemptId == null || !fetchStatus) return false;
+          let status: AttemptStatus;
+          try {
+            status = await fetchStatus(quizId, pending.attemptId);
+          } catch {
+            return false;
+          }
+          if (!mountedRef.current) return true;
+          if (status === 'gone') {
+            // Brouillon gardé : l'étudiant renvoie ses réponses.
+            clearPending(quizId);
+            setReconciling(false);
+            setSubmitError(codeVerificationUnavailableMessage);
+            return true;
+          }
+          if (status === 'done' || status === 'review') {
+            await openSummary(pending.attemptId);
+            return true;
+          }
+          return false;
+        };
         try {
           while (Date.now() < ceiling) {
             // (1) Verdict WS ciblé reçu ? → résolution IMMÉDIATE (prioritaire sur le polling).
@@ -537,6 +581,7 @@ export function useQuizAttempt({
               await openSummary(landed.id);
               return;
             }
+            if (await settledByStatus()) return;
           }
           // Un verdict arrivé pendant la DERNIÈRE lecture de l'historique : l'effet des verdicts
           // tardifs a déjà couru (lateRef encore vide) — on le traite ici, sinon il était perdu.
@@ -545,6 +590,9 @@ export function useQuizAttempt({
             await settle(lastOutcome);
             return;
           }
+          // Avant de conclure « non confirmée » (plafond, ou retour après lui) : une tentative
+          // supprimée ou déjà corrigée se reconnaît à son statut.
+          if (await settledByStatus()) return;
           // Plafond atteint sans verdict : l'attente bloquante cesse, réponses restaurées et renvoi
           // possible. Le verdict, s'il arrive encore, sera consommé (lateRef). Le marqueur, lui,
           // est GARDÉ (expiré) s'il vient d'expirer : effacé, le remontage restaurait le brouillon
@@ -592,7 +640,17 @@ export function useQuizAttempt({
       // reflété par une nouvelle tentative) → restaure les réponses et réconcilie avec le serveur.
       const pending = readPending(initialQuiz.id);
       if (pending && !landedAttempt(pending, history)) {
-        setAnswers(mergeAnswers(fetched, pending.answers));
+        // Marqueur EXPIRÉ (gardé au plafond, ou rétabli après un renvoi en échec) : ses réponses
+        // sont celles de l'envoi d'origine ; un brouillon non vierge, plus récent (réponses
+        // retouchées depuis), l'emporte. Marqueur encore en cours : ses réponses sont les bonnes.
+        const expired = (pending.submittedAt ?? 0) + RECONCILE_CEILING_MS <= Date.now();
+        const newerDraft = expired ? readDraft(initialQuiz.id) : null;
+        setAnswers(
+          mergeAnswers(
+            fetched,
+            newerDraft && !isPristineDraft(newerDraft) ? newerDraft.answers : pending.answers
+          )
+        );
         setAttempts(history);
         setResult(null);
         setCurrentAttemptId(null);
@@ -942,7 +1000,11 @@ export function useQuizAttempt({
       //   cette relecture — sa tentative y est alors déjà, et seul son verdict conclura.
       if (usingServer && e instanceof SubmissionInProgressError) {
         if (!mountedRef.current) return;
-        const inProgressId = e.attemptId ?? late?.pending.attemptId;
+        // Un id que core donnerait pour une tentative CONNUE avant l'envoi ne peut pas être
+        // celui de la correction en cours : ignoré, on retombe sur la voie sans id.
+        const fromServer =
+          e.attemptId != null && !knownAttemptIds.includes(e.attemptId) ? e.attemptId : undefined;
+        const inProgressId = fromServer ?? late?.pending.attemptId;
         let pending: PendingSubmission;
         if (inProgressId != null) {
           // Échéance : depuis ce renvoi (le début de la correction en cours est inconnu).
@@ -973,7 +1035,9 @@ export function useQuizAttempt({
       // et lateRef rétablis, sinon un rechargement rouvrait la passation et un renvoi suivant
       // pouvait créer une seconde tentative.
       if (usingServer) {
-        if (late) writePending(initialQuiz.id, late.pending);
+        // Réponses COURANTES (retouchées depuis l'envoi d'origine) : au remontage, le marqueur ne
+        // doit pas les écraser par les anciennes.
+        if (late) writePending(initialQuiz.id, { ...late.pending, answers });
         else clearPending(initialQuiz.id);
       }
       if (!mountedRef.current) return;

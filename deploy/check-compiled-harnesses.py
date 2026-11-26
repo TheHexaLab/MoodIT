@@ -18,9 +18,13 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
               distingue pas les deux), la compilation du harnais ou un outil de la notation
               (inventaire javap, javac du serveur RPC Java, sonde des noms réservés) a expiré
               ou a été tué, le compilateur n'a rien dit, le harnais appelle une fonction absente du code de
-              départ (squelette à compléter), le noteur n'a pas répondu ou a refusé le format,
-              ou le détail n'est pas reconnu : le script ne peut pas conclure, rejouer à la main
-              avec une solution (« Tester ») ;
+              départ (squelette à compléter), le noteur a refusé le format ou n'a rendu aucun
+              verdict, ou le détail n'est pas reconnu : le script ne peut pas conclure, rejouer
+              à la main avec une solution (« Tester ») ;
+  NOTEUR INDISPONIBLE
+              le noteur n'a pas répondu (saturé, injoignable, réponse coupée, jeton refusé),
+              même après 2 min de nouveaux essais : rien n'est su de la question, son quiz n'est
+              jamais fermé pour ce motif ; relancer le script ;
   OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
@@ -40,7 +44,9 @@ sort À VÉRIFIER : le noteur séparé n'en reçoit pas le type, toute bonne ré
 
 Code de sortie : 0 si aucun quiz PUBLIÉ ne porte de question BLOQUANT ou À VÉRIFIER non
 acquittée, 1 sinon, 2 si l'inventaire est impossible ou VIDE (--allow-empty pour accepter une
-base sans aucune question). Une question d'un quiz NON publié (brouillon, quiz fermé) est listée
+base sans aucune question), 3 si une question au moins est restée sans réponse du noteur
+(contrôle incomplet, à relancer ; les quiz prouvés en cause sont fermés quand même avec
+--unpublish). Une question d'un quiz NON publié (brouillon, quiz fermé) est listée
 sans bloquer : aucun étudiant ne peut la soumettre, et la corriger avant de (ré)ouvrir le quiz
 revient à son enseignant. Corriger ou fermer un quiz publié règlent donc tous deux la sortie.
 Avec --unpublish, les quiz publiés qui portent un BLOQUANT ou un À VÉRIFIER non acquitté sont
@@ -72,6 +78,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 COMPILED_LANGUAGES = ("Java", "C", "C++", "C#", "Go", "Rust")
@@ -232,6 +240,29 @@ HARNESS_RAN = (
 BLOCKING = "BLOQUANT"
 TO_CHECK = "À VÉRIFIER"
 OK = "OK"
+# Le noteur n'a pas répondu (saturé, injoignable, réponse coupée) : rien n'est su de la question.
+# Jamais de fermeture de quiz sur ce seul motif ; la sortie vaut EXIT_UNAVAILABLE, à relancer.
+UNAVAILABLE = "NOTEUR INDISPONIBLE"
+EXIT_UNAVAILABLE = 3
+
+# Nouveaux essais quand le noteur est saturé (429) ou injoignable (connexion refusée, 502
+# « indisponible ») : comme core (ExecutionClient), attente doublée de 1 s à 10 s, pendant
+# 2 min au total (EXEC_UNREACHABLE_RETRY_MS de core) ; un 429 donne son Retry-After.
+RETRY_FIRST_DELAY_S = 1
+RETRY_MAX_DELAY_S = 10
+RETRY_BUDGET_S = 120
+# Cause du 502 d'execution-service (GlobalExceptionHandler : CAUSE, UNAVAILABLE, NO_VERDICT).
+CAUSE = "cause"
+CAUSE_UNAVAILABLE = "indisponible"
+CAUSE_NO_VERDICT = "sans_verdict"
+
+
+class GraderUnavailable(Exception):
+    """Aucune réponse exploitable du noteur, faute du noteur et non de la question."""
+
+
+class GraderNoVerdict(Exception):
+    """502 « sans_verdict » : le conteneur a tourné avec ce code sans rendre de verdict."""
 
 # Même borne que core (ExecutionClient) : un temps limite plus long n'est jamais demandé.
 MAX_TIMEOUT_MS = 60_000
@@ -387,8 +418,10 @@ def classify_proxied(detail, passed):
 
 
 def worst(statuses):
-    """Statut d'une question : le pire de ses cas. FONCTION PURE (testée)."""
-    for status in (BLOCKING, TO_CHECK):
+    """Statut d'une question : le pire de ses cas. FONCTION PURE (testée).
+
+    Une preuve (BLOQUANT, À VÉRIFIER) passe avant l'indisponibilité du noteur."""
+    for status in (BLOCKING, TO_CHECK, UNAVAILABLE):
         if status in statuses:
             return status
     return OK
@@ -482,17 +515,89 @@ def evaluate(base_url, token, question, timeout_s=None):
         return json.loads(response.read().decode("utf-8"))
 
 
+def error_cause(error):
+    """Cause d'un 502 d'execution-service (« indisponible », « sans_verdict »), ou None si le
+    corps est illisible. FONCTION PURE sur l'erreur reçue (testée)."""
+    try:
+        return json.loads(error.read().decode("utf-8")).get(CAUSE)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
+
+
+def retry_after_s(error):
+    """Délai demandé par l'en-tête Retry-After (secondes entières), ou None. FONCTION PURE."""
+    value = ((error.headers or {}).get("Retry-After") or "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def evaluate_with_retry(base_url, token, question, timeout_s=None):
+    """evaluate, retenté tant que le noteur est saturé ou injoignable (RETRY_BUDGET_S au plus).
+
+    Retenté : 429 (en suivant Retry-After), 502 « indisponible » (rien n'a tourné), et l'URLError
+    d'une requête qui n'est pas partie (connexion refusée, hôte introuvable) — comme core, qui ne
+    retente que ce qui n'a pas pu lancer de correction. Lève GraderUnavailable quand le budget est
+    épuisé, ou sans nouvel essai pour une réponse coupée ou un délai de lecture dépassé (la
+    correction a pu tourner : la relancer prendrait une place de plus) et pour un jeton refusé ;
+    GraderNoVerdict sur un 502 « sans_verdict ». Tout autre échec remonte tel quel."""
+    deadline = time.monotonic() + RETRY_BUDGET_S
+    delay = RETRY_FIRST_DELAY_S
+    while True:
+        try:
+            return evaluate(base_url, token, question, timeout_s=timeout_s)
+        except urllib.error.HTTPError as e:
+            # Corps lu puis réponse fermée : une erreur gardée ouverte par essai épuisait les
+            # connexions pendant les 2 min de nouveaux essais.
+            cause = error_cause(e) if e.code == 502 else None
+            e.close()
+            if e.code in (401, 403):
+                raise GraderUnavailable("jeton interne refusé (HTTP %d) : vérifier "
+                                        "INTERNAL_TOKEN" % e.code) from e
+            if e.code == 502:
+                if cause == CAUSE_NO_VERDICT:
+                    raise GraderNoVerdict() from e
+                if cause != CAUSE_UNAVAILABLE:
+                    raise
+                reason, wait = "sandbox indisponible (HTTP 502)", delay
+            elif e.code == 429:
+                reason = "noteur saturé (HTTP 429)"
+                wait = retry_after_s(e)
+                wait = delay if wait is None else wait
+            else:
+                raise
+        except urllib.error.URLError as e:
+            # Levée AVANT l'envoi complet de la requête (urllib n'enveloppe que la connexion et
+            # l'envoi) : aucune correction n'a pu commencer.
+            reason, wait = "noteur injoignable (%s)" % e.reason, delay
+        except (OSError, http.client.HTTPException) as e:
+            # Pendant la LECTURE de la réponse : délai dépassé, connexion coupée, réponse tronquée.
+            raise GraderUnavailable("le noteur n'a pas répondu : %s"
+                                    % (str(e) or type(e).__name__)) from e
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise GraderUnavailable("%s, encore après %d s de nouveaux essais"
+                                    % (reason, RETRY_BUDGET_S))
+        time.sleep(min(wait, remaining))
+        delay = min(delay * 2, RETRY_MAX_DELAY_S)
+
+
 def check_question(base_url, token, question, timeout_s=None):
     """(statut, lignes de détail) d'une question."""
     if not (question.get("start_code") or "").strip():
         return TO_CHECK, ["pas de code de départ : rejouer à la main avec une solution"]
     try:
-        results = evaluate(base_url, token, question, timeout_s=timeout_s)
+        results = evaluate_with_retry(base_url, token, question, timeout_s=timeout_s)
+    except GraderUnavailable as e:
+        # Rien n'est su de la question : ni preuve ni fermeture, la question est à rejouer.
+        return UNAVAILABLE, ["%s : relancer le script" % e]
+    except GraderNoVerdict:
+        # Le conteneur a tourné avec le code de départ sans rendre de verdict : rien ne prouve
+        # que le harnais tourne (même classement qu'avant les nouveaux essais).
+        return TO_CHECK, ["le noteur n'a rendu aucun verdict (HTTP 502 sans_verdict) : rejouer "
+                          "à la main avec une solution"]
     except (OSError, http.client.HTTPException, ValueError) as e:
-        # OSError couvre URLError, le délai dépassé et la connexion coupée PENDANT la lecture de
-        # la réponse (ConnectionResetError), HTTPException une réponse tronquée : sans eux le
+        # Réponse du noteur qui refuse la demande (400, 500…) ou illisible : sans ce filet le
         # script s'arrêtait là, sans rejouer les questions suivantes ni fermer les quiz bloquants.
-        return TO_CHECK, ["le noteur n'a pas répondu : %s" % e]
+        return TO_CHECK, ["le noteur a refusé ou rendu une réponse illisible : %s" % e]
     lines, statuses = [], []
     for case in question["cases"]:
         if tests_an_exception(question["language"], case["harnessCode"]):
@@ -566,7 +671,7 @@ def main():
     timeout_s = read_timeout_s(server_settings(env_lines, os.environ))
     print("%d question(s) à rejouer (attente maximale de %d s par question)."
           % (len(questions), timeout_s))
-    counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0}
+    counts = {BLOCKING: 0, TO_CHECK: 0, OK: 0, UNAVAILABLE: 0}
     # Quiz publiés qui portent une question non réglée : eux seuls bloquent la sortie, et
     # --unpublish les ferme. Un À VÉRIFIER non acquitté en fait partie : un harnais qui teste
     # une exception, ou une fonction aux types non transportables, note 0 à toute bonne réponse.
@@ -584,14 +689,14 @@ def main():
             question["language"]))
         for line in lines:
             print("    " + line)
-        if status != OK:
+        if status in (BLOCKING, TO_CHECK):
             if question["published"]:
                 blocked_published.add(int(question["quiz_id"]))
             else:
                 drafts += 1
 
-    print("\nBilan : %d bloquant(s), %d à vérifier, %d ok." % (
-        counts[BLOCKING], counts[TO_CHECK], counts[OK]))
+    print("\nBilan : %d bloquant(s), %d à vérifier, %d ok, %d sans réponse du noteur." % (
+        counts[BLOCKING], counts[TO_CHECK], counts[OK], counts[UNAVAILABLE]))
     if drafts:
         print("Dont %d dans des quiz non publiés : sans effet sur la sortie, à corriger avant "
               "d'ouvrir leur quiz." % drafts)
@@ -602,6 +707,13 @@ def main():
             print("Quiz fermés (is_published = false) : %s" % ids)
         else:
             print("Quiz publiés à corriger ou fermer : %s (--unpublish pour les fermer)" % ids)
+    if counts[UNAVAILABLE]:
+        # Contrôle INCOMPLET : ces questions n'ont rien prouvé, leur quiz reste tel quel. La
+        # sortie le dit avant tout le reste : le résultat n'est pas définitif.
+        print("%d question(s) non rejouée(s), noteur indisponible : vérifier execution-service "
+              "puis relancer le script (sortie %d)." % (counts[UNAVAILABLE], EXIT_UNAVAILABLE),
+              file=sys.stderr)
+        return EXIT_UNAVAILABLE
     return 1 if blocked_published else 0
 
 

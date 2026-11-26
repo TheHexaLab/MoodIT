@@ -37,6 +37,7 @@ import AnnouncementView, {
 import {
   type AttemptOutcome,
   type FetchAttemptResultHandler,
+  type FetchAttemptStatusHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type RunCodeHandler,
@@ -125,6 +126,8 @@ interface MainPanelProps {
   onFetchAttempts?: FetchAttemptsHandler;
   /** Détail corrigé d'une tentative (API-ready ; voir QuizView). */
   onFetchAttemptResult?: FetchAttemptResultHandler;
+  /** Statut d'une tentative en attente de correction (API-ready ; voir QuizView). */
+  onFetchAttemptStatus?: FetchAttemptStatusHandler;
   /** Soumission d'une tentative de quiz (API-ready ; voir QuizView). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Verdict PUSH (WebSocket) de la correction async d'une tentative ; voir QuizView. */
@@ -185,6 +188,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
   onFetchQuiz,
   onFetchAttempts,
   onFetchAttemptResult,
+  onFetchAttemptStatus,
   onSubmitQuiz,
   attemptOutcome,
   onRunCode,
@@ -308,6 +312,7 @@ const MainPanel: React.FC<MainPanelProps> = ({
             onFetchQuiz={onFetchQuiz}
             onFetchAttempts={onFetchAttempts}
             onFetchAttemptResult={onFetchAttemptResult}
+            onFetchAttemptStatus={onFetchAttemptStatus}
             onSubmitQuiz={onSubmitQuiz}
             attemptOutcome={attemptOutcome}
             onRunCode={onRunCode}

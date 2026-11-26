@@ -71,6 +71,7 @@ import type { DemoProgram } from '../../mocks/dashboardData.ts';
 import { type Language, type QuestionTypeOption, type Quiz } from '../../types/domain.ts';
 import {
   type AttemptAccepted,
+  type AttemptStatus,
   type AttemptSummary,
   type CodeEvaluationInput,
   type CodingTestResult,
@@ -366,6 +367,21 @@ export async function regradeAttempt(quizId: number, attemptId: number): Promise
     method: 'POST',
   });
   if (!res.ok) throw new Error('Échec de la relance de la correction');
+}
+
+/**
+ * Statut d'une tentative de l'étudiant (attente de sa correction) : `pending`, `done`, `review`,
+ * ou `gone` sur un 404 (tentative absente : correction en échec, tentative supprimée).
+ */
+export async function fetchAttemptStatus(quizId: number, attemptId: number): Promise<AttemptStatus> {
+  const res = await apiFetch(`/api/quizzes/${quizId}/attempts/${attemptId}/status`);
+  if (res.status === 404) return 'gone';
+  if (!res.ok) throw new Error('Échec lecture du statut de la tentative');
+  const body = (await res.json()) as { status?: unknown };
+  if (body.status === 'pending' || body.status === 'done' || body.status === 'review') {
+    return body.status;
+  }
+  throw new Error('Statut de tentative inconnu');
 }
 
 /** Détail corrigé d'une tentative donnée (révision d'une tentative passée). */

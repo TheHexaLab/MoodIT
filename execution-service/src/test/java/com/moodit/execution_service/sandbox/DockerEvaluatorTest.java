@@ -181,8 +181,10 @@ class DockerEvaluatorTest {
                 "/* @Test */ return true;")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("rust",
                 "// pas de #[test]\nsolution::f() == 1")).isFalse();
+        // Littéraux qui DÉCLENCHERAIENT le motif sur le texte brut (attribut suivi d'une
+        // déclaration) : seul le blanchiment des chaînes les fait passer pour des données.
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
-                "return Solution.F(\"[Test]\") == 1;")).isFalse();
+                "return Solution.F(\"x;[Test] public void T(\") == 1;")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",
                 "// func TestX(t *testing.T)\nreturn f() == 1")).isFalse();
         // Un indexeur C# n'est pas un attribut, même quand l'indice porte le nom d'un marqueur.
@@ -193,7 +195,8 @@ class DockerEvaluatorTest {
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
                 "return Grille()[0][Test] == 1 && \"abc\"[Test] == 'a';")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("csharp",
-                "var p = @\"C:\\\";\nvar q = @\"\n[Test]\";\nreturn Solution.F(p + q) == 1;")).isFalse();
+                "var p = @\"C:\\\";\nvar q = @\"\n[Test] public void T() { }\";\n"
+                        + "return Solution.F(p + q) == 1;")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",
                 "return f(`func TestX(`) == 1")).isFalse();
         assertThat(DockerEvaluator.frameworkMarkerFound("go",
@@ -301,9 +304,29 @@ class DockerEvaluatorTest {
         List<TestCaseInput> cases = List.of(new TestCaseInput("a", "@Test void t() {}", 1));
         for (String language : new String[] {"Python", "SQL", "cobol"}) {
             assertThat(DockerEvaluator.frameworkHarnessRejection(language, cases)).as(language).isNull();
-            assertThat(DockerEvaluator.reservedNameRejection(language, "class Main {}", cases))
+            assertThat(DockerEvaluator.reservedNameRejection(language, "class MooditX {}", cases))
                     .as(language).isNull();
         }
+    }
+
+    @Test
+    void reserved_class_names_are_a_java_only_rule() {
+        // Seul Java tire le nom du fichier déposé de la classe publique du code soumis :
+        // ailleurs, les noms de fichiers sont fixes, et un nom « réservé » ou très long n'y
+        // gêne rien. Le refuser hors de Java rendrait 0 à une réponse juste.
+        List<TestCaseInput> cases = List.of(new TestCaseInput("a", "return true;", 1));
+        assertThat(DockerEvaluator.reservedNameRejection("C#", "public class MooditCalcul { }", cases))
+                .isNull();
+        assertThat(DockerEvaluator.reservedNameRejection("C++", "class MooditPile {}", cases))
+                .isNull();
+        String longName = "A".repeat(201);
+        assertThat(DockerEvaluator.reservedNameRejection("C++", "class " + longName + " {}", cases))
+                .isNull();
+        assertThat(DockerEvaluator.reservedNameRejection("Go",
+                "package main\ntype " + longName + " struct{}", cases)).isNull();
+        // Témoin : la même règle s'applique bien en Java.
+        assertThat(DockerEvaluator.reservedNameRejection("Java", "public class MooditCalcul { }", cases))
+                .singleElement().satisfies(r -> assertThat(r.detail()).contains("réservé"));
     }
 
     @Test

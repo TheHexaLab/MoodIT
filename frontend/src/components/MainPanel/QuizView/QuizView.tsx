@@ -11,6 +11,7 @@ import { quizAllQuestionTypesMock } from '../../../mocks/dashboardData';
 import {
   type AttemptOutcome,
   type FetchAttemptResultHandler,
+  type FetchAttemptStatusHandler,
   type FetchAttemptsHandler,
   type FetchQuizHandler,
   type RunCodeHandler,
@@ -42,6 +43,8 @@ interface QuizViewProps {
   onFetchAttempts?: FetchAttemptsHandler;
   /** Détail corrigé d'une tentative (API-ready, GET) → révision d'une tentative passée. */
   onFetchAttemptResult?: FetchAttemptResultHandler;
+  /** Statut d'une tentative attendue (API-ready, GET) : détecte une tentative supprimée. */
+  onFetchAttemptStatus?: FetchAttemptStatusHandler;
   /** Soumission de la tentative (API-ready). */
   onSubmitQuiz?: SubmitQuizHandler;
   /** Verdict PUSH (WebSocket) de la correction async, remonté par le Dashboard (room user). */
@@ -68,6 +71,7 @@ const QuizView: React.FC<QuizViewProps> = ({
   onFetchQuiz,
   onFetchAttempts,
   onFetchAttemptResult,
+  onFetchAttemptStatus,
   onSubmitQuiz,
   attemptOutcome,
   onRunCode,
@@ -84,6 +88,7 @@ const QuizView: React.FC<QuizViewProps> = ({
     onFetchQuiz,
     onFetchAttempts,
     onFetchAttemptResult,
+    onFetchAttemptStatus,
     onSubmitQuiz,
     attemptOutcome,
     loadErrorMessage: t.loadError,

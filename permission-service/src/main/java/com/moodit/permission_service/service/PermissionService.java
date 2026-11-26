@@ -485,6 +485,12 @@ public class PermissionService {
             "GET",
             "/quizzes/{quizId}/attempts/{attemptId}",
             (user, vars, body) -> quizAccess(user, vars)),
+            // Statut d'une de SES tentatives (pending / done / review) : meme regle que
+            // l'historique ; core verifie que la tentative est la sienne et de ce quiz (404 sinon).
+            rule(
+            "GET",
+            "/quizzes/{quizId}/attempts/{attemptId}/status",
+            (user, vars, body) -> quizAccess(user, vars)),
 
             // ── MCP (feedback de cours) ───────────────────────────────────────────────
             // GESTION DE CONTENU du cours : Administrateur/Gardien GLOBAL, OU

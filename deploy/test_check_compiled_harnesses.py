@@ -130,24 +130,23 @@ class ClassifyTest(unittest.TestCase):
             prefix + "./noteur.go:9:9: r.largeur undefined (type Rect has no field or method largeur)",
             False, start))
 
-    def test_connection_dropped_during_response_needs_check(self):
+    def test_connection_dropped_during_response_is_unavailable(self):
         # Une coupure en cours de lecture n'est ni une URLError ni un TimeoutError : le script
-        # s'arrêtait, sans rejouer la suite ni fermer les quiz bloquants.
+        # s'arrêtait, sans rejouer la suite ni fermer les quiz bloquants. Revue #246 : « pas de
+        # réponse » ne prouve rien sur la question — NOTEUR INDISPONIBLE, jamais de fermeture,
+        # et pas de nouvel essai (la correction a pu tourner).
         import http.client
         question = {"start_code": "int f(void);", "language": "C", "cases": []}
-        original = chk.evaluate
-        try:
-            for error in (ConnectionResetError("coupée"), http.client.RemoteDisconnected("fermée"),
-                          http.client.IncompleteRead(b"")):
-                def fails(base_url, token, q, timeout_s=None, error=error):
-                    raise error
-                chk.evaluate = fails
-                with self.subTest(error=type(error).__name__):
-                    status, lines = chk.check_question("http://x", "t", question)
-                    self.assertEqual(chk.TO_CHECK, status)
-                    self.assertIn("le noteur n'a pas répondu", lines[0])
-        finally:
-            chk.evaluate = original
+        for error in (ConnectionResetError("coupée"), http.client.RemoteDisconnected("fermée"),
+                      http.client.IncompleteRead(b""), TimeoutError("timed out")):
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(chk, "evaluate", side_effect=error) as evaluate, \
+                    mock.patch.object(chk.time, "sleep",
+                                      side_effect=AssertionError("nouvel essai interdit")):
+                status, lines = chk.check_question("http://x", "t", question)
+                self.assertEqual(chk.UNAVAILABLE, status)
+                self.assertIn("le noteur n'a pas répondu", lines[0])
+                self.assertEqual(1, evaluate.call_count)
 
     def test_missing_from_start_code(self):
         diagnostic = "undefined: Carre\nundefined: Aide"
@@ -683,6 +682,148 @@ class ReadTimeoutTest(unittest.TestCase):
         self.assertEqual(expected, seen["timeout"])
         self.assertGreaterEqual(seen["timeout"],
                                 10 + 1800 + 120 + 60 + 5 + 75 + self.LIFECYCLE_S)
+
+
+def http_error(code, body=None, headers=None):
+    """HTTPError comme urllib la lève, corps JSON facultatif."""
+    import io
+    import urllib.error
+    payload = io.BytesIO(chk.json.dumps(body).encode("utf-8") if body is not None else b"")
+    return urllib.error.HTTPError("http://x/internal/exec/evaluate", code, "erreur",
+                                  headers or {}, payload)
+
+
+def always(make_error):
+    """side_effect qui lève une NOUVELLE erreur à chaque appel (aucune laissée ouverte)."""
+    def fail(*args, **kwargs):
+        raise make_error()
+    return fail
+
+
+class GraderRetryTest(unittest.TestCase):
+    """Revue #246 : un 429, un 502 « indisponible » ou une connexion refusée classaient la
+    question À VÉRIFIER, et --unpublish fermait un quiz juste. Désormais : nouveaux essais
+    bornés, puis NOTEUR INDISPONIBLE (jamais de fermeture, sortie 3)."""
+
+    QUESTION = {"quiz_id": 1, "quiz_title": "Q", "published": True, "question_id": 7,
+                "language": "Java", "start_code": "class S {}", "exec_timeout_ms": None,
+                "cases": [{"id": 1, "name": "c", "harnessCode": "return S.f() == 1;",
+                           "weight": 1}]}
+    VERDICT = [{"passed": True, "detail": None}]
+
+    def setUp(self):
+        # Horloge simulée : chaque attente l'avance d'autant, sans rien attendre pour de bon.
+        self.now = 1000.0
+        self.waits = []
+
+        def sleep(seconds):
+            self.waits.append(seconds)
+            self.now += seconds
+            # Nouveaux essais sans borne : échec immédiat plutôt qu'un test qui ne finit pas.
+            if len(self.waits) > 1000 or seconds < 0:
+                raise AssertionError("nouveaux essais sans borne ou attente négative")
+        patches = (mock.patch.object(chk.time, "monotonic", lambda: self.now),
+                   mock.patch.object(chk.time, "sleep", sleep))
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def check(self, *outcomes):
+        with mock.patch.object(chk, "evaluate", side_effect=list(outcomes)) as evaluate:
+            status, lines = chk.check_question("http://x", "t", self.QUESTION)
+        return status, lines, evaluate.call_count
+
+    def test_429_then_answer_is_ok_after_retry_after(self):
+        status, lines, calls = self.check(http_error(429, headers={"Retry-After": "7"}),
+                                          self.VERDICT)
+        self.assertEqual((chk.OK, [], 2), (status, lines, calls))
+        self.assertEqual([7], self.waits)
+
+    def test_connection_refused_then_answer_is_ok(self):
+        import urllib.error
+        refused = urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+        status, _, calls = self.check(refused, refused, self.VERDICT)
+        self.assertEqual((chk.OK, 3), (status, calls))
+        self.assertEqual([1, 2], self.waits)
+
+    def test_unavailable_502_then_answer_is_ok(self):
+        status, _, calls = self.check(http_error(502, {"cause": "indisponible"}), self.VERDICT)
+        self.assertEqual((chk.OK, 2), (status, calls))
+
+    def test_persistent_unavailability_is_bounded(self):
+        # Durée simulée : attentes doublées de 1 s à 10 s, 2 min au total, puis abandon.
+        unavailable = always(lambda: http_error(502, {"cause": "indisponible"}))
+        with mock.patch.object(chk, "evaluate", side_effect=unavailable) as evaluate:
+            status, lines = chk.check_question("http://x", "t", self.QUESTION)
+        calls = evaluate.call_count
+        self.assertEqual(chk.UNAVAILABLE, status)
+        self.assertIn("relancer le script", lines[0])
+        self.assertEqual([1, 2, 4, 8], self.waits[:4])
+        self.assertTrue(all(wait <= 10 for wait in self.waits))
+        self.assertEqual(120, sum(self.waits))
+        self.assertEqual(len(self.waits) + 1, calls)
+
+    def test_no_verdict_502_stays_to_check_without_retry(self):
+        status, lines, calls = self.check(http_error(502, {"cause": "sans_verdict"}))
+        self.assertEqual((chk.TO_CHECK, 1), (status, calls))
+        self.assertIn("sans_verdict", lines[0])
+        self.assertEqual([], self.waits)
+
+    def test_refused_token_is_unavailable_without_retry(self):
+        status, lines, calls = self.check(http_error(401))
+        self.assertEqual((chk.UNAVAILABLE, 1), (status, calls))
+        self.assertIn("INTERNAL_TOKEN", lines[0])
+
+    def test_other_errors_keep_their_class(self):
+        # Refus du format (400), erreur du noteur (500), 502 au corps illisible : À VÉRIFIER,
+        # comme avant, sans nouvel essai.
+        for error in (http_error(400, {"detail": "format"}), http_error(500),
+                      http_error(502)):
+            with self.subTest(code=error.code):
+                status, _, calls = self.check(error)
+                self.assertEqual((chk.TO_CHECK, 1), (status, calls))
+
+    def test_persistent_429_never_unpublishes_and_exits_3(self):
+        calls = []
+
+        def fake_psql(container, sql):
+            calls.append(sql)
+            return chk.json.dumps([self.QUESTION]) if "json_agg" in sql else ""
+        busy = always(lambda: http_error(429, headers={"Retry-After": "5"}))
+        with mock.patch.object(chk, "psql", side_effect=fake_psql), \
+                mock.patch.object(chk, "container_env", return_value=[]), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk, "evaluate", side_effect=busy), \
+                mock.patch.object(chk.sys, "argv", ["check", "--unpublish"]):
+            self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
+        self.assertEqual([], [sql for sql in calls if sql.startswith("UPDATE")])
+        self.assertEqual(3, chk.EXIT_UNAVAILABLE)
+        self.assertLessEqual(sum(self.waits), 120)
+
+    def test_proven_quiz_still_closed_when_another_is_unavailable(self):
+        # Contrôle incomplet (sortie 3), mais un quiz PROUVÉ en cause est fermé quand même.
+        broken = dict(self.QUESTION, quiz_id=2, question_id=8)
+        calls = []
+
+        def fake_psql(container, sql):
+            calls.append(sql)
+            return chk.json.dumps([self.QUESTION, broken]) if "json_agg" in sql else ""
+        outcomes = [http_error(401),
+                    [{"passed": False, "detail": "Le harnais ne compile pas :\nerreur"}]]
+        with mock.patch.object(chk, "psql", side_effect=fake_psql), \
+                mock.patch.object(chk, "container_env", return_value=[]), \
+                mock.patch.object(chk, "exec_url", return_value="http://x"), \
+                mock.patch.object(chk, "internal_token", return_value="t"), \
+                mock.patch.object(chk, "evaluate", side_effect=outcomes), \
+                mock.patch.object(chk.sys, "argv", ["check", "--unpublish"]):
+            self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
+        self.assertEqual(["UPDATE Quiz SET is_published = false WHERE id IN (2);"],
+                         [sql for sql in calls if sql.startswith("UPDATE")])
+
+    def test_worst_puts_proofs_before_unavailability(self):
+        self.assertEqual(chk.TO_CHECK, chk.worst([chk.UNAVAILABLE, chk.TO_CHECK]))
+        self.assertEqual(chk.UNAVAILABLE, chk.worst([chk.OK, chk.UNAVAILABLE]))
 
 
 class CaseNameTest(unittest.TestCase):
