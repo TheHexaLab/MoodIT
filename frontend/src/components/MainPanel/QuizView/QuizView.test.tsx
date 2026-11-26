@@ -221,6 +221,8 @@ describe('QuizView — pied de navigation', () => {
       fireEvent.click(screen.getByRole('button', { name: /Soumettre/ }));
     });
     await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
+    // Échec de l'envoi : titre par défaut (les attentes non conclues ont le leur).
+    expect(screen.getByText('Soumission impossible')).toBeTruthy();
     expect(Boolean(screen.queryByRole('button', { name: 'Réessayer' }))).toBe(retryOffered);
   });
 

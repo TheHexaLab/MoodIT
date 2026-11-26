@@ -367,6 +367,17 @@ describe('submitQuiz', () => {
     ).rejects.toThrow('Échec de la soumission du quiz');
   });
 
+  it('409 « en_cours » avec attemptId → SubmissionInProgressError portant cet id', async () => {
+    mockedApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => '{"cause":"en_cours","message":"…","attemptId":6}',
+    } as Response);
+    const error = await submitQuiz({ quizId: 5, answers: [] }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SubmissionInProgressError);
+    expect((error as SubmissionInProgressError).attemptId).toBe(6);
+  });
+
   it('409 JSON de cause « en_cours » (correction déjà en cours) → SubmissionInProgressError', async () => {
     mockedApiFetch.mockResolvedValueOnce({
       ok: false,

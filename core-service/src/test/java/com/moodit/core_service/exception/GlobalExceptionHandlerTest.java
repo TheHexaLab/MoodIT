@@ -61,13 +61,20 @@ class GlobalExceptionHandlerTest {
     @Test
     @DisplayName("Correction déjà en cours → 409 en JSON, cause « en_cours » et message français")
     void gradingInProgress_409Json() {
-        ResponseEntity<java.util.Map<String, String>> r =
+        ResponseEntity<java.util.Map<String, Object>> r =
                 handler.handleGradingInProgress(new GradingInProgressException());
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(r.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        // Tentative inconnue : pas de champ attemptId (ni null) — le client retombe sur son repli.
         assertThat(r.getBody()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
                 "cause", "en_cours", "message", "Une correction de ce quiz est déjà en cours."));
+
+        // Tentative connue : son id, que le client attend.
+        assertThat(handler.handleGradingInProgress(new GradingInProgressException(55)).getBody())
+                .containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+                        "cause", "en_cours", "message", "Une correction de ce quiz est déjà en cours.",
+                        "attemptId", 55));
     }
 
     @Test

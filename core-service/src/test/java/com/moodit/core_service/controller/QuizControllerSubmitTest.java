@@ -66,7 +66,24 @@ class QuizControllerSubmitTest {
                 .andExpect(status().isConflict()) // 409
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.cause").value("en_cours"))
-                .andExpect(jsonPath("$.message").value("Une correction de ce quiz est déjà en cours."));
+                .andExpect(jsonPath("$.message").value("Une correction de ce quiz est déjà en cours."))
+                // Tentative en conflit inconnue : pas de champ, le client retombe sur son repli.
+                .andExpect(jsonPath("$.attemptId").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("Correction déjà en cours, tentative connue → 409 en JSON avec son attemptId")
+    void submit_whenGradingInProgress_returns409WithAttemptId() throws Exception {
+        when(quizService.submitQuiz(eq(1), any(QuizSubmissionDTO.class), eq("eva@test.ca")))
+                .thenThrow(new GradingInProgressException(55));
+
+        mockMvc.perform(post("/api/quizzes/1/submissions")
+                        .header("X-User-Email", "eva@test.ca")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(BODY))
+                .andExpect(status().isConflict()) // 409
+                .andExpect(jsonPath("$.cause").value("en_cours"))
+                .andExpect(jsonPath("$.attemptId").value(55));
     }
 
     @Test

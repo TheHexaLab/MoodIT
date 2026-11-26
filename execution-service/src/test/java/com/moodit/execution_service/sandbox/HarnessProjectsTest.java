@@ -29,7 +29,12 @@ class HarnessProjectsTest {
             "C", "MOODIT_TEST(t) { }",
             "C++", "MOODIT_TEST(t) { }");
 
-    /** Un cas dont le harnais est au format FRAMEWORK du langage visé (ancienne disposition). */
+    /**
+     * Un cas pour vérifier la DISPOSITION actuelle des fichiers (code soumis dans son fichier,
+     * harnais marqué à côté). Le texte du harnais n'importe pas ici : {@code HarnessProjects} le
+     * dépose tel quel (le refus d'un harnais au format framework se fait plus tôt, dans
+     * {@code ExecutionService}).
+     */
     private static List<TestCaseInput> oneCase(String language) {
         return List.of(new TestCaseInput("aire du rectangle",
                 FRAMEWORK_HARNESS.getOrDefault(language, "MOODIT_TEST(t) { }"), 2));

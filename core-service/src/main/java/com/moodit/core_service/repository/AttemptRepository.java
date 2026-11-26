@@ -22,16 +22,24 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
     long countByQuiz_IdAndUser_Id(Integer quizId, Integer userId);
 
     /**
-     * Vrai si l'utilisateur a une tentative dans ce statut sur ce quiz : à la soumission, une
+     * Tentative la plus récente de l'utilisateur sur ce quiz dans ce statut : à la soumission, une
      * tentative {@code "pending"} signale une correction encore en cours. 409 « en_cours » si
-     * c'est celle d'une soumission de l'étudiant ; une RELANCE de l'enseignant
-     * ({@link #existsByQuiz_IdAndUser_IdAndStatusAndRegrade}) donne « relance » sur un quiz avec
-     * reprise, « déjà soumis » sans reprise.
+     * c'est celle d'une soumission de l'étudiant, avec son id (le client attend CETTE tentative) ;
+     * une RELANCE de l'enseignant ({@link #existsByQuiz_IdAndUser_IdAndStatusAndRegrade}) donne
+     * « relance » sur un quiz avec reprise, « déjà soumis » sans reprise.
      */
-    boolean existsByQuiz_IdAndUser_IdAndStatus(Integer quizId, Integer userId, String status);
+    Optional<Attempt> findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(
+            Integer quizId, Integer userId, String status);
 
     /**
-     * Comme {@link #existsByQuiz_IdAndUser_IdAndStatus}, restreint au marqueur de relance : un
+     * Dernière tentative de l'utilisateur sur ce quiz (plus grand {@code attempt_no}), quel que
+     * soit son statut : après un conflit d'insertion, c'est celle de l'écriture concurrente — déjà
+     * corrigée peut-être — dont l'id accompagne le 409 « en_cours ».
+     */
+    Optional<Attempt> findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(Integer quizId, Integer userId);
+
+    /**
+     * Vrai s'il existe une tentative dans ce statut, restreint au marqueur de relance : un
      * {@code "pending"} avec {@code regrade = true} est une RELANCE de l'enseignant, pas la
      * correction d'une soumission de l'étudiant (409 « relance » au lieu de « en_cours » sur un
      * quiz avec reprise, « déjà soumis » sans reprise).

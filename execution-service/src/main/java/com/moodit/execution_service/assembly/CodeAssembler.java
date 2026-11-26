@@ -1083,7 +1083,7 @@ public class CodeAssembler {
     /**
      * Phase 2 (mode modification) — NOTEUR ISOLÉ. On recharge l'état final de l'étudiant réduit aux
      * seules {@code CREATE TABLE}/{@code INSERT} des tables de travail (cf. {@link #filterDumpToData},
-     * qui refuse tout dump portant un paramètre) : ni vue, ni déclencheur, ni {@code PRAGMA} — chaque
+     * qui refuse le dump si une instruction GARDÉE porte un paramètre) : ni vue, ni déclencheur, ni {@code PRAGMA} — chaque
      * instruction gardée est UNE instruction pour SQLite, le découpage suivant son tokenizer. Le prof
      * crée ensuite sa référence (à mettre en {@code TEMP}) + son verdict, encadré par les sentinelles
      * au nonce.

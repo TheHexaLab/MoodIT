@@ -90,6 +90,11 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             return QuizSubmissionDTO.builder().quizId(4).answers(List.of(answers)).build();
         }
 
+        /** Tentative pending d'Éva sur ce quiz (id 55), dont la correction est en cours. */
+        private Attempt pendingAttempt() {
+            return attempt(55, quiz, eva, 1, "pending");
+        }
+
         @Test
         @DisplayName("Quiz introuvable → QuizNotFoundException, rien d'enregistré")
         void quizIntrouvable_404() {
@@ -117,7 +122,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             // Aucune correction en cours : la tentative existante est terminée.
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(1L);
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
@@ -131,16 +137,20 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void pendingAttempt_noRetry_inProgress() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.of(pendingAttempt()));
             // Pending ordinaire : la correction d'une soumission de l'étudiant, pas une relance.
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
                     .thenReturn(false);
 
             // Le pending compte aussi parmi les tentatives : vérifié AVANT la tentative unique, il
             // ne retombe pas dans le 409 « déjà soumis ».
+            // Avec l'id du pending : le client attend CETTE tentative, sans la deviner.
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
                     .isInstanceOf(GradingInProgressException.class)
-                    .hasMessage("Une correction de ce quiz est déjà en cours.");
+                    .hasMessage("Une correction de ce quiz est déjà en cours.")
+                    .extracting(e -> ((GradingInProgressException) e).getAttemptId())
+                    .isEqualTo(55);
             // L'ordre est épinglé : le comptage des tentatives (qui lèverait « déjà soumis ») n'a
             // même pas lieu.
             verify(attemptRepository, never()).countByQuiz_IdAndUser_Id(anyInt(), anyInt());
@@ -155,7 +165,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.of(pendingAttempt()));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
                     .thenReturn(true);
 
@@ -175,7 +186,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
         void pendingRegrade_noRetry_alreadySubmitted() {
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.of(pendingAttempt()));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
                     .thenReturn(true);
 
@@ -192,7 +204,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(true);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.of(pendingAttempt()));
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
                     .isInstanceOf(GradingInProgressException.class);
@@ -394,16 +407,47 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             quiz.setAllowRetry(true);
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(2L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_quiz_user_attempt_no"));
             when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
                     .thenReturn(false);
+            // La dernière tentative relue : celle de l'écriture concurrente, déjà corrigée.
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(4, 3))
+                    .thenReturn(Optional.of(attempt(57, quiz, eva, 3, "done")));
+
+            // Son id accompagne le 409 : le client l'attend (son verdict est déjà là) au lieu de
+            // la deviner par une relecture de l'historique qui l'écarterait.
+            assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
+                    .isInstanceOf(GradingInProgressException.class)
+                    .extracting(e -> ((GradingInProgressException) e).getAttemptId())
+                    .isEqualTo(57);
+            verifyNoInteractions(submissionRepository, eventPublisher);
+        }
+
+        @Test
+        @DisplayName("Insert concurrent, tentative concurrente disparue à la relecture → « en cours » sans id (repli du client)")
+        void constraintViolation_otherAttemptGone_inProgressWithoutId() {
+            quiz.setAllowRetry(true);
+            when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
+            when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
+            when(attemptRepository.saveAndFlush(any(Attempt.class)))
+                    .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
+            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(4, 3, "pending", true))
+                    .thenReturn(false);
+            // Supprimée entre-temps (correction abandonnée) : plus aucune tentative.
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(4, 3))
+                    .thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.submitQuiz(4, body(), EMAIL))
-                    .isInstanceOf(GradingInProgressException.class);
-            verifyNoInteractions(submissionRepository, eventPublisher);
+                    .isInstanceOf(GradingInProgressException.class)
+                    .extracting(e -> ((GradingInProgressException) e).getAttemptId())
+                    .isNull();
         }
 
         @Test
@@ -414,7 +458,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
             // Contrôle préalable : rien encore ; l'enseignant relance une tentative « à revoir »
             // entre-temps, et son pending (marqué relance) fait échouer l'insert.
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));
@@ -448,7 +493,8 @@ class QuizServiceSubmissionTest extends QuizServiceTestSupport {
             // comptage aurait refusée) : la règle reste celle du contrôle préalable.
             when(quizRepository.findById(4)).thenReturn(Optional.of(quiz));
             when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(eva));
-            when(attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(4, 3, "pending")).thenReturn(false);
+            when(attemptRepository.findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(4, 3, "pending"))
+                    .thenReturn(Optional.empty());
             when(attemptRepository.countByQuiz_IdAndUser_Id(4, 3)).thenReturn(0L);
             when(attemptRepository.saveAndFlush(any(Attempt.class)))
                     .thenThrow(new DataIntegrityViolationException("uq_attempt_pending"));

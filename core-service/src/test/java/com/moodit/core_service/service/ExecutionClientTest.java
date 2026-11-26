@@ -306,7 +306,8 @@ class ExecutionClientTest {
         assertThat(unlimitedQueue.readTimeoutMs("Python", 1, null)).isEqualTo(httpMax);
 
         // Unités × (unité + file) qui déborde SEUL, l'autre branche du plafond saturée aussi :
-        // c'est la multiplication qui doit saturer, pas devenir négative et gagner le min().
+        // c'est la multiplication qui doit saturer, pas déborder vers une valeur négative ou
+        // minuscule (ici ≈ 58 000 s) qui gagnerait le min().
         ExecutionClient bothHuge = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, Long.MAX_VALUE / 2, Long.MAX_VALUE);
         assertThat(bothHuge.readTimeoutMs("Python", 100, null)).isEqualTo(httpMax);
@@ -315,6 +316,54 @@ class ExecutionClientTest {
         ExecutionClient month = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
                 10_000, 20_000, 15_000, 30L * 24 * 3_600_000);
         assertThat(month.readTimeoutMs("Python", 100_000, null)).isEqualTo(httpMax);
+
+        // per-test-timeout-ms énorme : l'unité elle-même sature (pas de délai négatif).
+        ExecutionClient hugePerTest = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, Long.MAX_VALUE, 15_000, 15 * 60_000);
+        assertThat(hugePerTest.readTimeoutMs("Python", 1, null)).isEqualTo(httpMax);
+    }
+
+    @Test
+    @DisplayName("Réglages négatifs ramenés à 0 : jamais soustraits du miroir ; budget négatif = une unité, comme le serveur")
+    void readTimeout_negativeSettings_flooredAtZero() {
+        // execution-service laisse toujours partir le PREMIER harnais, même avec une échéance
+        // déjà passée : un budget négatif y vaut 0. Soustrait du plafond, il faisait renoncer
+        // core avant la fin de ce harnais (#216). Base et attente de file négatives : 0 aussi.
+        ExecutionClient negative = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                -10_000, 20_000, -5_000, -60_000);
+        long unit = 20_000 + 75_000 + LIFECYCLE;   // sans attente de file ni base
+        assertThat(negative.readTimeoutMs("Python", 100, null)).isEqualTo(unit);
+        // SQL : deux unités de dépassement, sur un budget nul.
+        assertThat(negative.readTimeoutMs("sql", 200, null)).isEqualTo(2 * unit);
+        // Compilé : ni base ni attente de file retranchées du mur.
+        assertThat(negative.readTimeoutMs("Java", 4, null))
+                .isEqualTo(15 * 60_000 + 5_000 + LIFECYCLE);
+    }
+
+    @Test
+    @DisplayName("Nouvel essai « sans fin » (Long.MAX_VALUE) : retente normalement, sans lever d'ArithmeticException")
+    void evaluate_unlimitedUnreachableRetry_retriesWithoutOverflow() throws Exception {
+        // Duration.ofMillis(Long.MAX_VALUE).toNanos() débordait HORS de tout try : chaque
+        // correction échouait aussitôt. Ici, trois pauses (1, 2, 4 s) puis l'arrêt de core.
+        assertThat(ExecutionClient.MAX_UNREACHABLE_RETRY_MS).isEqualTo(Long.MAX_VALUE / 1_000_000);
+        ExecutionClient client = new ExecutionClient("http://localhost:" + closedPort(), TOKEN,
+                2_000, 5_000, 5_000, 0, 60_000, Long.MAX_VALUE);
+        List<Long> pauses = new java.util.ArrayList<>();
+        client.sleeper = millis -> {
+            pauses.add(millis);
+            if (pauses.size() == 3) {
+                throw new InterruptedException();
+            }
+        };
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> client.evaluate("Python", "x", TWO_HARNESSES))
+                    .isInstanceOf(
+                            com.moodit.core_service.exception.GradingInterruptedException.class);
+            assertThat(pauses).containsExactly(1_000L, 2_000L, 4_000L);
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     /** Port local où RIEN n'écoute : connexion refusée, comme execution-service en redémarrage. */

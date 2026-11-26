@@ -283,8 +283,8 @@ const ALREADY_SUBMITTED_BODY = 'Quiz already submitted';
  * 202 + son id ({@link AttemptAccepted}) ; la correction du code tourne ensuite en tâche de fond.
  * Le résultat arrive par WebSocket (`quiz:attempt-graded` / `quiz:attempt-failed`) et se récupère
  * via {@link fetchAttemptResult}. 409 de core, corps JSON `{cause, message}` :
- * - « en_cours » (correction de ce quiz déjà en cours) → `SubmissionInProgressError` : la vue
- *   rejoint l'attente ;
+ * - « en_cours » (correction de ce quiz déjà en cours ; `attemptId` facultatif) →
+ *   `SubmissionInProgressError` portant cet id : la vue rejoint l'attente ;
  * - « relance » (quiz AVEC reprise : l'enseignant relance la correction de la tentative
  *   précédente) → `SubmissionRejectedError` de raison `regrading` : refus temporaire, sans attente
  *   (l'id relancé est déjà connu, son verdict ne conclurait pas cet envoi) ;
@@ -310,13 +310,18 @@ export async function submitQuiz(submission: QuizSubmission): Promise<AttemptAcc
     // Tout autre corps ne vaut ni « en cours » (une longue attente pour rien), ni « relance », ni
     // « déjà soumis » (un conflit de contrainte se réessaie) : échec ordinaire.
     const body = (await res.text().catch(() => '')).trim();
-    let cause: unknown;
+    let parsed: { cause?: unknown; attemptId?: unknown } | null;
     try {
-      cause = (JSON.parse(body) as { cause?: unknown } | null)?.cause;
+      parsed = JSON.parse(body) as { cause?: unknown; attemptId?: unknown } | null;
     } catch {
-      cause = undefined;
+      parsed = null;
     }
-    if (cause === SUBMISSION_IN_PROGRESS_CAUSE) throw new SubmissionInProgressError();
+    const cause = parsed?.cause;
+    if (cause === SUBMISSION_IN_PROGRESS_CAUSE) {
+      // Id de la tentative en correction (facultatif) : l'attente la reconnaît alors à coup sûr.
+      const id = parsed?.attemptId;
+      throw new SubmissionInProgressError(typeof id === 'number' ? id : undefined);
+    }
     if (cause === SUBMISSION_REGRADING_CAUSE) throw new SubmissionRejectedError('', 'regrading');
     if (body === ALREADY_SUBMITTED_BODY) throw new SubmissionRejectedError('', 'alreadySubmitted');
     throw new Error('Échec de la soumission du quiz');

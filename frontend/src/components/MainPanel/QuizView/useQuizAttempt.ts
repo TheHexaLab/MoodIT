@@ -44,6 +44,13 @@ type PendingSubmission = {
   attemptId?: number;
   knownAttemptIds?: number[];
   /**
+   * Tentatives de l'historique RELU au 409 « en_cours » sans id (liste de la vue peut-être
+   * périmée). Elles ne servent qu'à reconnaître la tentative dans l'historique (landedAttempt) ;
+   * les verdicts, eux, se comparent à `knownAttemptIds` (liste d'AVANT l'envoi + dernier verdict
+   * vu) : la correction concurrente a pu finir avant la relecture, et sa tentative y figurer déjà.
+   */
+  landedKnownIds?: number[];
+  /**
    * Instant de l'envoi (ms), écrit AVANT le POST : l'échéance d'attente en part, et non du
    * montage — sinon un marqueur abandonné (correction en échec reçue par personne) relançait
    * toute l'attente (RECONCILE_CEILING_MS) à chaque retour sur le quiz, même des jours plus tard.
@@ -141,7 +148,7 @@ function landedAttempt(
   history: AttemptSummary[]
 ): AttemptSummary | undefined {
   if (pending.attemptId != null) return history.find((a) => a.id === pending.attemptId);
-  const known = pending.knownAttemptIds;
+  const known = pending.landedKnownIds ?? pending.knownAttemptIds;
   if (known) {
     return history
       .filter((a) => !known.includes(a.id))
@@ -923,39 +930,54 @@ export function useQuizAttempt({
     } catch (e) {
       // 409 de cause « en_cours » : une tentative est déjà en correction (renvoi après le plafond,
       // autre onglet). Pas un échec : on rejoint l'attente, qui ouvre le résumé dès que la
-      // tentative apparaît (ou que son verdict est poussé). Seul conclut le verdict d'une
-      // tentative absente de `knownAttemptIds` (tentatives connues + dernier verdict vu à
-      // l'envoi) — y compris celui arrivé PENDANT le POST, qu'il ne faut donc pas jeter.
-      // (« Déjà soumis » et « relance » : autres 409, traités plus bas comme des refus.)
+      // tentative apparaît (ou que son verdict est poussé). (« Déjà soumis » et « relance » :
+      // autres 409, traités plus bas comme des refus.) Reconnaissance de la tentative attendue :
+      // - par son ID, s'il est connu : donné par core dans le 409, ou celui de la soumission
+      //   restée sans conclusion (« Réessayer ») — la seule qui puisse être en correction ;
+      // - sinon, DEUX listes. Les verdicts se comparent à la liste d'AVANT l'envoi + dernier
+      //   verdict vu (`knownAttemptIds`) : tout verdict reçu depuis est postérieur à l'envoi, y
+      //   compris celui arrivé pendant le POST, qu'il ne faut donc pas jeter. L'historique RELU
+      //   (`landedKnownIds`) ne sert qu'à reconnaître la tentative dans l'historique : la liste
+      //   de la vue peut être périmée (autre appareil). La correction concurrente a pu finir avant
+      //   cette relecture — sa tentative y est alors déjà, et seul son verdict conclura.
       if (usingServer && e instanceof SubmissionInProgressError) {
         if (!mountedRef.current) return;
-        // La liste de la vue peut être PÉRIMÉE (autre appareil) : la tentative en correction
-        // n'étant pas dans l'historique, on le relit pour ne compter comme « attendue » que ce qui
-        // y manque encore. Relecture en échec : la liste de la vue, faute de mieux.
-        let fresh: AttemptSummary[] | null;
-        try {
-          fresh = fetchAttemptsRef.current ? await fetchAttemptsRef.current(initialQuiz.id) : null;
-        } catch {
-          fresh = null;
+        const inProgressId = e.attemptId ?? late?.pending.attemptId;
+        let pending: PendingSubmission;
+        if (inProgressId != null) {
+          // Échéance : depuis ce renvoi (le début de la correction en cours est inconnu).
+          pending = { answers, attemptsBefore, attemptId: inProgressId, submittedAt: Date.now() };
+        } else {
+          let fresh: AttemptSummary[] | null;
+          try {
+            fresh = fetchAttemptsRef.current ? await fetchAttemptsRef.current(initialQuiz.id) : null;
+          } catch {
+            fresh = null; // relecture en échec : la liste de la vue, faute de mieux
+          }
+          if (!mountedRef.current) return;
+          pending = {
+            answers,
+            attemptsBefore: fresh ? fresh.length : attemptsBefore,
+            knownAttemptIds,
+            ...(fresh ? { landedKnownIds: fresh.map((a) => a.id) } : {}),
+            submittedAt: Date.now(),
+          };
         }
-        if (!mountedRef.current) return;
-        const known = fresh ? fresh.map((a) => a.id) : knownAttemptIds;
-        if (lastSeen != null && !known.includes(lastSeen)) known.push(lastSeen);
-        // Échéance : depuis ce renvoi (le début de la correction en cours est inconnu).
-        const pending = {
-          answers,
-          attemptsBefore: fresh ? fresh.length : attemptsBefore,
-          knownAttemptIds: known,
-          submittedAt: Date.now(),
-        };
         writePending(initialQuiz.id, pending);
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
         return;
       }
-      // Échec du POST lui-même (refus, réseau, 5xx) : rien « en vol ».
-      if (usingServer) clearPending(initialQuiz.id);
+      // Échec du POST lui-même (refus, réseau, 5xx) : rien « en vol » pour CET envoi. Mais un
+      // « Réessayer » d'une soumission restée sans conclusion : elle reste attendue — marqueur
+      // et lateRef rétablis, sinon un rechargement rouvrait la passation et un renvoi suivant
+      // pouvait créer une seconde tentative.
+      if (usingServer) {
+        if (late) writePending(initialQuiz.id, late.pending);
+        else clearPending(initialQuiz.id);
+      }
       if (!mountedRef.current) return;
+      if (late) lateRef.current = late;
       // Refus (400, 413, 409 « relance » ou « déjà soumis ») : le message dit quoi faire,
       // « réessayez » non. Le brouillon de passation reste en place (rien n'est enregistré par cet
       // envoi) — sauf « déjà soumis », où `reload` le jette pour ouvrir la tentative consommée.

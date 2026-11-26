@@ -1,5 +1,6 @@
 package com.moodit.core_service.exception;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -84,15 +85,23 @@ public class GlobalExceptionHandler {
 
     /**
      * Soumission pendant qu'une correction du même quiz est encore en cours → 409, avec un corps
-     * JSON {@code {"cause":"en_cours","message":…}} : la cause permet au frontend de distinguer ce
-     * cas du 409 « déjà soumis » (corps texte) et de rejoindre l'attente de la correction.
+     * JSON {@code {"cause":"en_cours","message":…,"attemptId":…}} : la cause permet au frontend de
+     * distinguer ce cas du 409 « déjà soumis » (corps texte) et de rejoindre l'attente de la
+     * correction — celle de {@code attemptId}, présent seulement quand la tentative en conflit est
+     * connue (sinon le client retombe sur son repli).
      */
     @ExceptionHandler(GradingInProgressException.class)
-    public ResponseEntity<Map<String, String>> handleGradingInProgress(GradingInProgressException ex) {
+    public ResponseEntity<Map<String, Object>> handleGradingInProgress(GradingInProgressException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("cause", GradingInProgressException.CAUSE);
+        body.put("message", ex.getMessage());
+        if (ex.getAttemptId() != null) {
+            body.put("attemptId", ex.getAttemptId());
+        }
         return ResponseEntity
                 .status(HttpStatus.CONFLICT) //Code 409
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("cause", GradingInProgressException.CAUSE, "message", ex.getMessage()));
+                .body(body);
     }
 
     /**

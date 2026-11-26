@@ -263,6 +263,8 @@ _DEFAULT_INTERPRETED_BUDGET_MS = 900_000  # EXEC_INTERPRETED_BUDGET_MS
 SERVER_SETTINGS = ("EXEC_INTERNAL_QUEUE_WAIT_MS", "EXEC_INTERPRETED_BUDGET_MS")
 # Marge au-delà du pire cas modélisé : surestimer ne coûte que de l'attente.
 _READ_SAFETY_MS = 60_000
+# Plafond du délai, comme core (Integer.MAX_VALUE ms, environ 24,8 jours).
+_MAX_READ_TIMEOUT_MS = 2**31 - 1
 
 
 def _env_ms(environ, name, default):
@@ -310,7 +312,10 @@ def read_timeout_s(environ):
     unit = (queue + max(_PER_TEST_MS, MAX_TIMEOUT_MS + _RUN_MARGIN_MS) + _EXEC_WALL_SLACK_MS
             + _CONTAINER_LIFECYCLE_MS)
     interpreted = _BASE_READ_MS + budget + unit
-    return (max(compiled, interpreted) + _READ_SAFETY_MS) / 1000
+    # Borné comme core (MAX_READ_TIMEOUT_MS) : un budget démesuré (Long.MAX_VALUE) donnait un
+    # délai que socket.settimeout refuse (OverflowError), et le script s'arrêtait dès la première
+    # question.
+    return min(max(compiled, interpreted) + _READ_SAFETY_MS, _MAX_READ_TIMEOUT_MS) / 1000
 
 INVENTORY_SQL = """
 SELECT COALESCE(json_agg(row_to_json(t)), '[]') FROM (

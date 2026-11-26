@@ -531,11 +531,10 @@ def canary_verdict(cases, outcomes):
          réel ressort VERT. C'est le critère unique : un forgeage ne rapporte rien si aucun
          cas réel n'est vert, donc aucune détection n'est perdue, et toutes les façons dont un
          code HONNÊTE peut faire échouer ses canaris cessent d'accuser — expiration, mort par
-         signal, mais aussi sortie non nulle sans signal (une panique Go au chargement sort
-         avec le statut 2 : le canari n'appelle aucune fonction soumise, mais le SERVEUR de
-         l'étudiant tourne à chaque cas, canaris compris, et son init() ou constructeur global
-         peut le faire tomber — le noteur du canari rend alors « processus étudiant
-         terminé ») ;
+         signal, mais aussi sortie non nulle sans signal (le serveur de l'étudiant ne participe
+         pas au verdict d'un canari, qui n'appelle aucune fonction soumise ; mais il tourne en
+         même temps, dans le même cgroup, et peut en épuiser la mémoire ou les PID : un noteur
+         JVM ou mono qui ne peut plus allouer ni créer de fil sort alors en 1, sans signal) ;
       2. un canari dont la COMPILATION a échoué pour une cause NON CONCLUANTE n'accuse jamais,
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
       3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
@@ -4595,6 +4594,15 @@ def c_grader_header(cpp=False):
     return C_GRADER_HEADER + ("#include <exception>\n" if cpp else "")
 
 
+def c_harness_headers(cpp=False):
+    """Noms des en-têtes que voit le harnais C/C++ (ceux de c_grader_header puis de C_RUNTIME),
+    triés, pour le message de refus d'un nom réservé. FONCTION PURE (testée) : dérivés des mêmes
+    lignes que le noteur et la sonde, ils ne peuvent plus oublier `<exception>` en C++."""
+    lines = (c_grader_header(cpp) + C_RUNTIME).splitlines()
+    return sorted({l.split("<", 1)[1].split(">", 1)[0] for l in lines
+                   if l.startswith("#include <")})
+
+
 def c_probe_source(names, cpp=False):
     """Sonde des noms RESERVES du noteur C/C++. FONCTION PURE (testée).
 
@@ -7267,7 +7275,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
         case_dir, env) if n not in reserved]
     if reserved:
         return None, reserved_name_message(
-            reserved, "la bibliothèque standard (math.h, stdbool.h, stdio.h, stdlib.h, string.h)")
+            reserved, "la bibliothèque standard (%s)" % ", ".join(c_harness_headers(ext == "cpp")))
 
     lock_src_dir(case_dir)
     build_area = student_build_dir(case_dir)

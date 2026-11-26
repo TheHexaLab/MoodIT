@@ -20,10 +20,10 @@ _SPEC.loader.exec_module(chk)
 
 class ClassifyTest(unittest.TestCase):
 
-    def test_cas_reussi_ok(self):
+    def test_passed_case_is_ok(self):
         self.assertEqual(chk.OK, chk.classify(None, True))
 
-    def test_harnais_qui_tourne_ok(self):
+    def test_harness_that_ran_is_ok(self):
         for detail in ("Le harnais a renvoyé faux",
                        "[MOODIT] harnais: java.lang.ArithmeticException: / by zero",
                        "[MOODIT] appel refuse par le code soumis",
@@ -32,10 +32,10 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.OK, chk.classify(detail, False))
 
-    def test_harnais_qui_ne_compile_pas_bloquant(self):
+    def test_harness_build_error_is_blocking(self):
         self.assertEqual(chk.BLOCKING, chk.classify("Le harnais ne compile pas :\nerreur", False))
 
-    def test_fonction_ecartee_par_les_bouchons_bloquant(self):
+    def test_function_dropped_by_stubs_is_blocking(self):
         # La fonction EXISTE dans le code de départ, mais aux types non transportables : le
         # générateur de bouchons l'a écartée, la question notera 0 à tout le monde.
         start = "public class Solution { public static int somme(int[] t) { return 0; } }"
@@ -44,7 +44,7 @@ class ClassifyTest(unittest.TestCase):
                   "  symbol:   method somme(int[])\n  location: class Solution")
         self.assertEqual(chk.BLOCKING, chk.classify(detail, False, start))
 
-    def test_compilateur_tue_sous_son_pilote_a_verifier(self):
+    def test_compiler_killed_under_driver_needs_check(self):
         # gcc, g++ et go build SURVIVENT à la mort de leur travailleur (OOM) et sortent en 1 :
         # le superviseur en faisait « Le harnais ne compile pas », que ce script classait
         # BLOQUANT — et --unpublish fermait un quiz juste. Stderr RÉELS, relevés dans les images.
@@ -60,7 +60,7 @@ class ClassifyTest(unittest.TestCase):
             "Le harnais ne compile pas contre le code soumis :\nnoteur.c:3:1: error: expected ';'",
             False, start))
 
-    def test_compilation_du_harnais_expiree_a_verifier(self):
+    def test_harness_build_aborted_needs_check(self):
         # Compilation du noteur expirée ou tuée sur une machine chargée : pas un diagnostic,
         # jamais un quiz fermé par --unpublish. Ce test garde le RÉSULTAT, pas la branche des
         # préfixes : sans elle, le repli final rend aussi À VÉRIFIER (aucun détail ne peut les
@@ -80,14 +80,14 @@ class ClassifyTest(unittest.TestCase):
                 self.assertEqual(chk.TO_CHECK,
                                  chk.classify(tool, False, "int f(int x) { return x; }"))
 
-    def test_diagnostic_vide_a_verifier(self):
+    def test_empty_diagnostic_needs_check(self):
         for detail in ("Le harnais ne compile pas contre le code soumis :\n",
                        "Le harnais ne compile pas contre le code soumis :\n   \n",
                        "Le harnais ne compile pas contre le code soumis"):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, "int f;"))
 
-    def test_fonction_absente_du_code_de_depart_a_verifier(self):
+    def test_function_missing_from_start_code_needs_check(self):
         # Squelette à compléter : le harnais appelle la fonction que l'étudiant doit écrire.
         # Un diagnostic par langage compilé.
         start = "int aide(int x) { return x; }"
@@ -107,7 +107,7 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False, start))
 
-    def test_membre_ou_type_absent_du_code_de_depart_a_verifier(self):
+    def test_member_or_type_missing_from_start_code_needs_check(self):
         # Squelette où l'étudiant doit ajouter une MÉTHODE, un champ ou un type : le compilateur
         # ne dit pas « fonction introuvable » mais « pas de membre ». Sans ces formes, --unpublish
         # fermait un quiz dont le harnais était juste.
@@ -130,7 +130,7 @@ class ClassifyTest(unittest.TestCase):
             prefix + "./noteur.go:9:9: r.largeur undefined (type Rect has no field or method largeur)",
             False, start))
 
-    def test_connexion_coupee_pendant_la_reponse_a_verifier(self):
+    def test_connection_dropped_during_response_needs_check(self):
         # Une coupure en cours de lecture n'est ni une URLError ni un TimeoutError : le script
         # s'arrêtait, sans rejouer la suite ni fermer les quiz bloquants.
         import http.client
@@ -157,7 +157,7 @@ class ClassifyTest(unittest.TestCase):
             "cannot find function `carre` in this scope", "fn carres() {}"))
         self.assertEqual([], chk.missing_from_start_code("erreur de type", "fn f() {}"))
 
-    def test_nom_cite_en_commentaire_seulement_a_verifier(self):
+    def test_name_only_in_comment_needs_check(self):
         # Le code de départ NOMME la fonction à écrire dans un commentaire, sans la déclarer :
         # elle est absente, donc rien ne prouve que le harnais est faux — pas de quiz fermé.
         detail = "Le harnais ne compile pas contre le code soumis :\n./noteur.go:9:9: undefined: carre"
@@ -175,7 +175,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual("a   b", chk.without_comments("a /* x\ny */ b"))
         self.assertEqual("", chk.without_comments(None))
 
-    def test_code_de_depart_sans_fonction_transportable_a_verifier(self):
+    def test_start_code_without_transportable_function_needs_check(self):
         # Même message du superviseur pour un squelette sans aucune fonction (harnais peut-être
         # juste) et pour des types non transportables : jamais BLOQUANT, donc jamais de quiz
         # fermé par --unpublish sur ce seul message.
@@ -186,7 +186,7 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
 
-    def test_messages_sans_preuve_a_verifier(self):
+    def test_messages_without_proof_need_check(self):
         # Messages réels du superviseur et de DockerEvaluator qui passaient OK avant le correctif :
         # le harnais n'a jamais tourné.
         for detail in ("Erreur interne du noteur (serveur RPC)",
@@ -205,7 +205,7 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail):
                 self.assertEqual(chk.TO_CHECK, chk.classify(detail, False))
 
-    def test_nom_reserve_d_une_question_interpretee_bloquant(self):
+    def test_reserved_name_on_proxied_question_is_blocking(self):
         # Refus rendu par CodeAssembler (Python, JavaScript/TypeScript, Bash) pour un symbole
         # que le harnais nomme et qui masque une intégrée. Le code de départ partant avec la
         # demande, ses propres noms n'y sont jamais refusés : ce refus est un garde-fou (noteur
@@ -225,12 +225,12 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(detail=detail, passed=passed):
                 self.assertEqual(chk.OK, chk.classify_proxied(detail, passed))
 
-    def test_inventaire_couvre_compiles_et_interpretes_a_mandataires(self):
+    def test_inventory_covers_compiled_and_proxied_languages(self):
         for name in chk.COMPILED_LANGUAGES + chk.PROXIED_LANGUAGES:
             self.assertIn("'%s'" % name, chk.INVENTORY_SQL)
         self.assertEqual(set(), set(chk.COMPILED_LANGUAGES) & set(chk.PROXIED_LANGUAGES))
 
-    def test_question_interpretee_classee_par_le_seul_nom_reserve(self):
+    def test_proxied_question_classified_by_reserved_name_only(self):
         question = {"language": "Python", "start_code": "def sum(xs):\n    pass\n",
                     "cases": [{"id": 1, "name": "a", "harnessCode": "return sum([1]) == 1",
                                "weight": 1}]}
@@ -249,7 +249,7 @@ class ClassifyTest(unittest.TestCase):
             status, lines = chk.check_question("http://x", "t", question)
         self.assertEqual((chk.OK, []), (status, lines))
 
-    def test_la_demande_porte_le_code_de_depart(self):
+    def test_request_carries_start_code(self):
         # #22 : sans lui, une fonction imposée par l'énoncé sous le nom d'une intégrée (`sum`)
         # serait refusée au rejeu alors que la correction, qui l'envoie, la note.
         question = {"language": "Python", "start_code": "def sum(xs):\n    pass\n",
@@ -278,7 +278,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual("def sum(xs):\n    pass\n", body["startCode"])
         self.assertEqual(body["code"], body["startCode"])
 
-    def test_harnais_sans_fonction_du_code_de_depart_a_verifier(self):
+    def test_harness_without_start_code_function_needs_check(self):
         # L'énoncé impose `max`, le code de départ est le gabarit `solution` : le rejeu passe
         # (aucun nom réservé dans le code de départ), mais l'étudiant qui écrit `def max` sera
         # refusé. Seul ce contrôle statique le signale.
@@ -298,7 +298,7 @@ class ClassifyTest(unittest.TestCase):
             status, _ = chk.check_question("http://x", "t", dict(question, language="Java"))
         self.assertEqual(chk.OK, status)
 
-    def test_declarations_lues_comme_le_noteur(self):
+    def test_declarations_read_like_the_grader(self):
         self.assertEqual({"f", "C"}, chk.declared_names("Python", "async def f():\n    pass\nclass C:\n    pass"))
         self.assertEqual({"a", "b", "K"}, chk.declared_names(
             "TypeScript", "export function a() {}\nconst b = () => 1;\nexport default class K {}"))
@@ -309,7 +309,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertFalse(chk.harness_uses_start_code("JavaScript", "function f() {}", "$f(1)"))
         self.assertTrue(chk.harness_uses_start_code("JavaScript", "function f() {}", "f(1) === 2"))
 
-    def test_formes_de_declaration_reconnues_par_le_noteur(self):
+    def test_declaration_forms_recognized_by_the_grader(self):
         # Revue #246 : formes que CodeAssembler lit (PY_DEF, BASH_FUNC, `\p{L}`) et que le script
         # ratait — le nom imposé n'était pas vu, la question sortait À VÉRIFIER, et --unpublish
         # fermait un quiz juste. Une forme par cas.
@@ -339,7 +339,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual({"_x"}, chk.declared_names("Python", "_x = lambda: 1\n1y = lambda: 2"))
         self.assertEqual(set(), chk.declared_names("Python", "    f = lambda: 1\nlambdas = 3"))
 
-    def test_harnais_qui_teste_une_exception_a_verifier(self):
+    def test_harness_testing_an_exception_needs_check(self):
         # Revue #246 : le rejeu du code de départ (qui ne lève rien) rend « faux » comme pour un
         # harnais normal, donc OK ; après la bascule, toute bonne réponse échoue.
         harness = ("try { Solution.racine(-1); return false; }\n"
@@ -369,7 +369,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(set(), chk.parse_ack(""))
         self.assertEqual(set(), chk.parse_ack(None))
 
-    def test_inventaire_vide_echoue_sauf_allow_empty(self):
+    def test_empty_inventory_fails_unless_allow_empty(self):
         # Un dump non chargé donnait « 0 question », bilan vide, sortie 0 : un faux feu vert.
         with mock.patch.object(chk, "psql", return_value="[]"), \
                 mock.patch.object(chk, "container_env", return_value=[]), \
@@ -384,7 +384,7 @@ class ClassifyTest(unittest.TestCase):
                 mock.patch.object(chk.sys, "argv", ["check", "--allow-empty"]):
             self.assertEqual(0, chk.main())
 
-    def test_sortie_et_unpublish_ne_portent_que_sur_les_quiz_publies(self):
+    def test_exit_code_and_unpublish_only_concern_published_quizzes(self):
         # Revue #246 : fermer un quiz BLOQUANT ne changeait pas la sortie (toutes les questions
         # comptaient, brouillons compris), et --unpublish laissait ouvert un quiz À VÉRIFIER
         # (harnais à exception) qui note 0 à toute bonne réponse.
@@ -424,7 +424,7 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(chk.TO_CHECK, chk.worst([chk.OK, chk.TO_CHECK]))
         self.assertEqual(chk.BLOCKING, chk.worst([chk.TO_CHECK, chk.BLOCKING, chk.OK]))
 
-    def test_exec_port_suit_l_environnement_du_conteneur(self):
+    def test_exec_port_follows_container_environment(self):
         # Le port était en dur : sur un autre port, tout sortait « À VÉRIFIER ».
         self.assertEqual(9191, chk.exec_port(["PATH=/usr/bin", "EXEC_SERVICE_PORT=9191"]))
         self.assertEqual(9191, chk.exec_port(["EXEC_SERVICE_PORT= 9191 "]))
@@ -455,23 +455,23 @@ class SupervisorDriftTest(unittest.TestCase):
         with open(_SUPERVISOR, encoding="utf-8") as f:
             cls.supervisor_source = f.read()
 
-    def test_prefixes_egaux_a_ceux_du_superviseur(self):
+    def test_prefixes_equal_supervisor_ones(self):
         for name in ("HARNESS_BUILD_ERROR", "HARNESS_BUILD_ABORTED", "TOOL_ABORTED"):
             with self.subTest(name=name):
                 self.assertEqual(getattr(self.supervisor, name), getattr(chk, name))
         self.assertEqual(self.supervisor.TOOL_KILLED.pattern, chk.TOOL_KILLED.pattern)
 
-    def test_preuves_d_execution_ecrites_par_le_superviseur(self):
+    def test_run_proofs_written_by_supervisor(self):
         # Chaque préfixe de HARNESS_RAN ouvre un littéral du superviseur (message ou gabarit de
         # noteur) : le guillemet devant interdit un simple fragment de phrase.
         for prefix in chk.HARNESS_RAN:
             with self.subTest(prefix=prefix):
                 self.assertIn('"' + prefix, self.supervisor_source)
 
-    def test_types_acceptes_ecrit_par_le_superviseur(self):
+    def test_accepted_types_written_by_supervisor(self):
         self.assertIn("(" + chk.NO_TRANSPORTABLE_SIGNATURE + " : ", self.supervisor_source)
 
-    def test_nom_reserve_egal_au_prefixe_de_code_assembler(self):
+    def test_reserved_name_equals_code_assembler_prefix(self):
         with open(_CODE_ASSEMBLER, encoding="utf-8") as f:
             source = f.read()
         prefixes = re.findall(r'\bSHADOW_PREFIX\s*=\s*"((?:[^"\\]|\\.)*)"\s*;', source)
@@ -508,14 +508,14 @@ class ExecutionClientDriftTest(unittest.TestCase):
         self.assertEqual(1, len(found), "défaut de %s introuvable ou ambigu" % key)
         return int(found[0])
 
-    def test_constantes_egales_a_celles_de_core(self):
+    def test_constants_equal_core_ones(self):
         for name in ("RUN_MARGIN_MS", "EXEC_WALL_SLACK_MS", "EVAL_MAX_WALL_MS",
                      "DAEMON_RESPONSE_MS", "DAEMON_CONNECT_MS", "LOG_READ_MS",
                      "DAEMON_CALLS_OUTSIDE_WALL"):
             with self.subTest(name=name):
                 self.assertEqual(self.java_constant(name), getattr(chk, "_" + name))
 
-    def test_cycle_de_vie_meme_formule_que_core(self):
+    def test_lifecycle_same_formula_as_core(self):
         formula = "DAEMON_CALLS_OUTSIDE_WALL * (DAEMON_CONNECT_MS + DAEMON_RESPONSE_MS) + LOG_READ_MS"
         found = re.findall(r"\bCONTAINER_LIFECYCLE_MS\s*=\s*([^;]+);", self.source)
         self.assertEqual([formula], [" ".join(f.split()) for f in found])
@@ -525,7 +525,7 @@ class ExecutionClientDriftTest(unittest.TestCase):
             + self.java_constant("LOG_READ_MS"),
             chk._CONTAINER_LIFECYCLE_MS)
 
-    def test_reglages_par_defaut_egaux_a_ceux_de_core(self):
+    def test_default_settings_equal_core_ones(self):
         for key, name in (("app.execution-service.read-timeout-ms", "_BASE_READ_MS"),
                           ("app.execution-service.per-test-timeout-ms", "_PER_TEST_MS"),
                           ("app.execution-service.internal-queue-wait-ms",
@@ -535,7 +535,13 @@ class ExecutionClientDriftTest(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(self.spring_default(key), getattr(chk, name))
 
-    def test_temps_limite_plafonne_comme_core(self):
+    def test_read_timeout_capped_like_core(self):
+        found = re.findall(r"\bstatic\s+final\s+long\s+MAX_READ_TIMEOUT_MS\s*=\s*([^;]+);",
+                           self.source)
+        self.assertEqual(["Integer.MAX_VALUE"], [f.strip() for f in found])
+        self.assertEqual(2**31 - 1, chk._MAX_READ_TIMEOUT_MS)
+
+    def test_time_limit_capped_like_core(self):
         self.assertIn("Math.min(Math.max(execTimeoutMs, 1), %s)" % format(chk.MAX_TIMEOUT_MS, "_"),
                       self.source)
 
@@ -548,7 +554,7 @@ class ReadTimeoutTest(unittest.TestCase):
     # l'ancien terme de 35 s ne couvrait que des appels rapides).
     LIFECYCLE_S = 7 * (5 + 60) + 30
 
-    def test_couvre_le_pire_cas_serveur(self):
+    def test_covers_server_worst_case(self):
         self.assertEqual(485, self.LIFECYCLE_S)
         # Interprété (défauts) : base 10 s + budget 900 s + l'unité déjà partie (attente 120 s +
         # temps limite 60 s + marge 5 s + mur 75 s + cycle de vie 485 s) = 1 655 s.
@@ -557,7 +563,7 @@ class ReadTimeoutTest(unittest.TestCase):
         # Compilé : base 10 s + attente 120 s + mur 900 s + marge 5 s + cycle de vie 485 s.
         self.assertGreaterEqual(chk.read_timeout_s({}), 10 + 120 + 900 + 5 + self.LIFECYCLE_S)
 
-    def test_suit_les_reglages_partages_du_serveur(self):
+    def test_follows_shared_server_settings(self):
         default = chk.read_timeout_s({})
         self.assertGreaterEqual(chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "1800000"}),
                                 default + 900)
@@ -567,7 +573,43 @@ class ReadTimeoutTest(unittest.TestCase):
         self.assertEqual(default, chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "",
                                                       "EXEC_INTERNAL_QUEUE_WAIT_MS": "abc"}))
 
-    def test_reglages_lus_d_abord_dans_le_conteneur(self):
+    def test_huge_budget_capped_like_core(self):
+        # Revue #246 : EXEC_INTERPRETED_BUDGET_MS = Long.MAX_VALUE donnait un délai que
+        # socket.settimeout refuse (OverflowError) : le script s'arrêtait à la 1re question.
+        huge = {"EXEC_INTERPRETED_BUDGET_MS": "9223372036854775807",
+                "EXEC_INTERNAL_QUEUE_WAIT_MS": "9223372036854775807"}
+        timeout = chk.read_timeout_s(huge)
+        self.assertLessEqual(timeout, 2_147_483.647)
+        self.assertEqual((2**31 - 1) / 1000, timeout)
+        # Une vraie requête avec ce délai (serveur local) : urlopen le pose sur son socket.
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"[]")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            question = {"language": "Java", "start_code": "class S {}", "cases": []}
+            self.assertEqual([], chk.evaluate("http://127.0.0.1:%d" % server.server_port, "t",
+                                              question, timeout_s=timeout))
+        finally:
+            server.shutdown()
+            server.server_close()
+        # Sans dépassement, la valeur n'est pas touchée.
+        self.assertLess(chk.read_timeout_s({}), timeout)
+
+    def test_settings_read_from_container_first(self):
         # Revue #246 : sur l'hôte de prod, le shell n'a pas chargé .env.docker ; un budget relevé
         # pour le service ne rallongeait pas l'attente du script, qui renonçait avant le noteur.
         lines = ["PATH=/usr/bin", "EXEC_INTERPRETED_BUDGET_MS=1800000",
@@ -583,7 +625,7 @@ class ReadTimeoutTest(unittest.TestCase):
         self.assertEqual("1", chk.container_setting(["A=0", "AB=2", "B=1"], "B"))
         self.assertIsNone(chk.container_setting(["AB=2"], "A"))
 
-    def test_main_attend_selon_le_conteneur(self):
+    def test_main_waits_per_container_settings(self):
         # Le délai passé à chaque appel suit le conteneur, même quand le shell n'a rien.
         inventory = [{"quiz_id": 1, "quiz_title": "Q", "published": True, "question_id": 1,
                       "language": "Java", "start_code": "class S {}", "exec_timeout_ms": None,
@@ -606,7 +648,7 @@ class ReadTimeoutTest(unittest.TestCase):
         self.assertEqual([chk.read_timeout_s({"EXEC_INTERPRETED_BUDGET_MS": "1800000"})], seen)
         self.assertGreater(seen[0], chk.read_timeout_s({}))
 
-    def test_container_env_vide_sans_conteneur(self):
+    def test_container_env_empty_without_container(self):
         # Étape 1 : service lancé par bootRun, pas de conteneur — ni arrêt ni exception.
         failure = chk.subprocess.CalledProcessError(1, ["docker"])
         for error in (failure, FileNotFoundError("docker")):
@@ -616,7 +658,7 @@ class ReadTimeoutTest(unittest.TestCase):
         with mock.patch.object(chk, "run", return_value="A=1\nB=2\n"):
             self.assertEqual(["A=1", "B=2"], chk.container_env("moodit_execution"))
 
-    def test_la_demande_attend_ce_delai(self):
+    def test_request_waits_that_timeout(self):
         seen = {}
 
         class Response:

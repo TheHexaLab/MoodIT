@@ -348,13 +348,16 @@ class QuizServiceSubmitIT {
   @Test
   @DisplayName("Deux soumissions de suite, quiz sans reprise : la 2e est refusée « en cours », pas « déjà soumis »")
   void secondSubmissionWhileGrading_noRetry_isInProgress() {
-    quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+    Integer firstId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
 
     // Le pending de la 1re compte aussi parmi les tentatives : sans la vérification préalable,
-    // ce serait le 409 « déjà soumis », et le frontend ne rejoindrait pas l'attente.
+    // ce serait le 409 « déjà soumis », et le frontend ne rejoindrait pas l'attente. Le 409
+    // porte l'id de la 1re : le client attend CETTE tentative.
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
-        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class);
+        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class)
+        .extracting(e -> ((com.moodit.core_service.exception.GradingInProgressException) e).getAttemptId())
+        .isEqualTo(firstId);
     assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
   }
 
@@ -362,12 +365,20 @@ class QuizServiceSubmitIT {
   @DisplayName("Deux soumissions de suite, quiz AVEC reprise : la 2e est refusée « en cours », aucune 2e tentative")
   void secondSubmissionWhileGrading_withRetry_isInProgress() {
     em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
-    quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+    // Une tentative déjà corrigée avant : l'id renvoyé est celui du PENDING, pas de la done.
+    persistAttempt(em.find(Quiz.class, quizId), em.getEntityManager()
+        .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
+        .setParameter("email", USER_EMAIL).getSingleResult(), 1, "done");
+    em.flush();
+    em.clear();
+    Integer pendingId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> quizService.submitQuiz(quizId, submissionWithCode("print(2)"), USER_EMAIL))
-        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class);
-    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(1L);
+        .isInstanceOf(com.moodit.core_service.exception.GradingInProgressException.class)
+        .extracting(e -> ((com.moodit.core_service.exception.GradingInProgressException) e).getAttemptId())
+        .isEqualTo(pendingId);
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(2L);
   }
 
   @Test

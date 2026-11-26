@@ -387,7 +387,7 @@ public class DockerEvaluator {
         long wall = Math.min(cap, wallCandidate);
         long strict = wall - perCase - CLOSING_MARGIN_MS;
         // Plancher proportionnel au seul chemin PUBLIC, comme le dit le javadoc : applique aussi
-        // en interne, il l'emportait des 56 s de temps limite en Java (mur plafonne a 15 min) et
+        // en interne, il l'emportait dès 56 s de temps limite en Java (mur plafonne a 15 min) et
         // rompait l'invariant de quelques secondes — sur le seul chemin qui enregistre une note.
         long budget = Math.max(1_000,
                 maxWallMs <= PUBLIC_WALL_MS ? Math.max(strict, wall * 3 / 5) : strict);

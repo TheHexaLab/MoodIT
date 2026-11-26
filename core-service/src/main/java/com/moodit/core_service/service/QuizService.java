@@ -393,7 +393,9 @@ public class QuizService {
      * (risque de timeout proxy) NI une connexion BD (pool partagé). Trois 409 distincts :
      * {@link GradingInProgressException} (corps JSON {@code cause = "en_cours"}) si une correction
      * d'une soumission de l'étudiant sur ce quiz est déjà en cours (tentative {@code "pending"},
-     * index partiel {@code uq_attempt_pending}) — le frontend rejoint alors son attente ;
+     * index partiel {@code uq_attempt_pending}) — le frontend rejoint alors l'attente de la
+     * tentative {@code attemptId} du corps (le pending existant, ou après un conflit d'insertion la
+     * dernière tentative relue ; omis si elle a disparu) ;
      * {@link RegradeInProgressException} ({@code cause = "relance"}) si ce pending est une RELANCE
      * de l'enseignant ({@link Attempt#isRegrade()}) sur un quiz AVEC reprise, dont le verdict
      * n'est pas celui de cette soumission ; sinon {@link AlreadySubmittedException} (corps texte)
@@ -417,22 +419,29 @@ public class QuizService {
             // reprise, une relance concurrente est en pratique inatteignable ici (elle suppose une
             // tentative « à revoir », que le comptage aurait déjà refusée) ; si elle survenait,
             // la même règle que le contrôle préalable s'applique (cf. pendingConflict).
+            // La tentative à attendre est la DERNIÈRE de l'étudiant sur ce quiz, celle de
+            // l'écriture concurrente, pending ou déjà corrigée ; disparue (supprimée entre-temps),
+            // l'id manque et le client retombe sur son repli.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
             readTx.setReadOnly(true);
-            throw readTx.execute(status -> pendingConflict(quizId, e.userId, e.allowRetry));
+            throw readTx.execute(status -> pendingConflict(quizId, e.userId, e.allowRetry,
+                    () -> attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(quizId, e.userId)
+                            .map(Attempt::getId).orElse(null)));
         }
     }
 
     /**
      * 409 d'une soumission face au pending de l'étudiant sur ce quiz : « en_cours » pour la
-     * correction de sa propre soumission ; pour une RELANCE de l'enseignant, « relance » sur un
-     * quiz avec reprise (il pourra resoumettre ensuite), mais « déjà soumis » sur un quiz sans
-     * reprise — la relance porte forcément sur sa tentative unique, « réessayez plus tard » le
-     * mènerait de toute façon à ce refus.
+     * correction de sa propre soumission, avec l'id de la tentative à attendre
+     * ({@code inProgressAttemptId}, lu seulement dans ce cas ; {@code null} si inconnu) ; pour une
+     * RELANCE de l'enseignant, « relance » sur un quiz avec reprise (il pourra resoumettre ensuite),
+     * mais « déjà soumis » sur un quiz sans reprise — la relance porte forcément sur sa tentative
+     * unique, « réessayez plus tard » le mènerait de toute façon à ce refus.
      */
-    private RuntimeException pendingConflict(Integer quizId, Integer userId, boolean allowRetry) {
+    private RuntimeException pendingConflict(Integer quizId, Integer userId, boolean allowRetry,
+            java.util.function.Supplier<Integer> inProgressAttemptId) {
         if (!attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, userId, "pending", true)) {
-            return new GradingInProgressException();
+            return new GradingInProgressException(inProgressAttemptId.get());
         }
         return allowRetry ? new RegradeInProgressException() : new AlreadySubmittedException();
     }
@@ -493,8 +502,12 @@ public class QuizService {
         requireValidOrderings(quiz, byQuestion);
         requireBoundedCode(quiz, byQuestion);
 
-        if (attemptRepository.existsByQuiz_IdAndUser_IdAndStatus(quizId, user.getId(), "pending")) {
-            throw pendingConflict(quizId, user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()));
+        Optional<Attempt> pending = attemptRepository
+                .findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(quizId, user.getId(), "pending");
+        if (pending.isPresent()) {
+            Integer pendingId = pending.get().getId();
+            throw pendingConflict(quizId, user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()),
+                    () -> pendingId);
         }
         long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
         if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {

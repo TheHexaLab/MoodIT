@@ -5214,16 +5214,31 @@ class PlatformInterruptionTest(unittest.TestCase):
         # Le noteur C++ inclut <exception> (relais des exceptions du harnais) : la sonde doit le
         # voir aussi, sinon `offsetof`, `ptrdiff_t`… échappaient au refus nommé et donnaient
         # « Le harnais ne compile pas ». Une seule fonction fournit les deux.
+        def includes(source):
+            return {l.strip() for l in source.splitlines() if l.strip().startswith("#include")}
         for cpp in (False, True):
             with self.subTest(cpp=cpp):
                 header = supervisor.c_grader_header(cpp)
                 self.assertTrue(supervisor.c_probe_source(["f"], cpp=cpp).startswith(header))
                 self.assertTrue(supervisor.c_grader_source([], "return 1;", "N", cpp=cpp)
                                 .startswith(header))
+                # L'ENSEMBLE des #include, et pas seulement le préfixe : un en-tête ajouté
+                # ailleurs dans le noteur (gabarit, CPP_GRADER_GUARD) échapperait à la sonde.
+                self.assertEqual(
+                    includes(supervisor.c_grader_source([], "return 1;", "N", cpp=cpp)),
+                    includes(supervisor.c_probe_source(["f"], cpp=cpp)))
+                # Et le message de refus nomme ces mêmes en-têtes.
+                self.assertEqual(
+                    sorted(l.split("<")[1].rstrip(">") for l in
+                           includes(supervisor.c_probe_source(["f"], cpp=cpp))),
+                    supervisor.c_harness_headers(cpp))
         self.assertIn("<exception>", supervisor.c_grader_header(True))
         self.assertNotIn("<exception>", supervisor.c_grader_header(False))
         self.assertIn('c_probe_source(subset, cpp=compiler != "gcc")',
                       inspect.getsource(supervisor.c_reserved_names))
+        self.assertIn("exception", supervisor.c_harness_headers(True))
+        self.assertNotIn("exception", supervisor.c_harness_headers(False))
+        self.assertIn('c_harness_headers(ext == "cpp")', inspect.getsource(supervisor.run_c_rpc))
         # Compilation réelle : cf. test_c_reserved_names_with_the_real_compilers (`offsetof`).
 
     def test_c_tools_have_short_dedicated_timeouts(self):

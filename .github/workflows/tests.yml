@@ -476,7 +476,7 @@ jobs:
           java-version: '25'
           cache: gradle
 
-      - name: Bundle react-runtime.js (nécessaire aux cas JSX/TSX)
+      - name: Bundles JS (cas JSX/TSX et HTML)
         run: |
           docker build --target jsvendor -t moodit-jsvendor execution-service
           cid=$(docker create moodit-jsvendor)

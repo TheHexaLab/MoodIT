@@ -423,8 +423,9 @@ describe('réconciliation via polling de secours', () => {
     vi.useRealTimers();
   });
 
-  // Quiz AVEC reprise : `reload` n'y jette pas le brouillon de lui-même (seule une tentative
-  // unique consommée le fait) ; c'est donc settleLateOutcome qui doit le jeter avant de recharger.
+  // Quiz AVEC reprise. Le marqueur, gardé au plafond, fait jeter le brouillon par `reload` quand
+  // la tentative apparaît ; le cas SANS marqueur (où settleLateOutcome doit le jeter lui-même)
+  // est couvert par le test « verdict tardif sans marqueur » plus bas.
   it.each([
     ['corrigée (ok)', { ok: true }, summary(9)],
     ['gardée à revoir (review)', { ok: false, reason: 'review' }, { ...summary(9), earned: null, status: 'review' }],
@@ -459,17 +460,21 @@ describe('réconciliation via polling de secours', () => {
       await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
       expect(result.current.phase).toBe('taking');
       expect(result.current.reconciling).toBe(false);
-      // Le brouillon de passation est toujours là (réponses restaurées pour un renvoi).
+      // Le brouillon de passation est toujours là (réponses restaurées pour un renvoi), et le
+      // marqueur aussi (gardé au plafond).
       expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).not.toBeNull();
+      expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).not.toBeNull();
 
       // La correction finit enfin : son verdict poussé est consommé.
       if (landed) history = [landed];
       outcome = { quizId: QUIZ_ID, attemptId: 9, ...verdict };
       rerender();
       if (!landed) {
-        // Tentative supprimée : message de vérification impossible, on reste en passation.
+        // Tentative supprimée : message de vérification impossible, on reste en passation, et le
+        // marqueur n'attend plus rien (sinon un remontage relançait une attente vaine).
         await vi.waitFor(() => expect(result.current.submitError).toBe('CODE_KO'));
         expect(result.current.phase).toBe('taking');
+        expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
       } else {
         // Brouillon jeté, tentative ouverte : résumé, ou message « à revoir ».
         await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
@@ -482,6 +487,226 @@ describe('réconciliation via polling de secours', () => {
       vi.useRealTimers();
     }
   );
+
+  it('verdict tardif SANS marqueur (expiré au montage) : le brouillon touché depuis est jeté, le résumé s’ouvre', async () => {
+    // Marqueur expiré au montage : effacé aussitôt. L'étudiant retouche ses réponses (brouillon),
+    // puis le verdict arrive : sans marqueur, `reload` restaurerait ce brouillon (quiz avec
+    // reprise) — c'est settleLateOutcome qui doit le jeter.
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [];
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async () => makeResult(9)),
+        attemptOutcome: outcome,
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+    act(() => { result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
+    await waitFor(() => expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).not.toBeNull());
+
+    history = [summary(9)];
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('summary'));
+    expect(result.current.result?.attemptId).toBe(9);
+    expect(localStorage.getItem(`moodit:quiz-draft:${QUIZ_ID}`)).toBeNull();
+  });
+
+  it.each([
+    // Relecture illisible juste après le 409 : seule la liste de la vue (#5) sert.
+    ['en échec : liste de la vue seule', true],
+    // Relecture réussie : elle ne sert qu'à reconnaître la tentative dans l'historique.
+    ['réussie : historique relu à part', false],
+  ])('409 « en_cours » sans id, relecture de l’historique %s ; verdicts comparés à la liste d’avant + dernier verdict vu', async (_case, readFails) => {
+    // #12 = dernier verdict vu (tentative supprimée, absente de l'historique) : tentative connue.
+    const stale: AttemptOutcome = { quizId: QUIZ_ID, attemptId: 12, ok: false };
+    let outcome: AttemptOutcome | null = stale;
+    let failNext = false;
+    const onFetchAttempts = vi.fn(async () => {
+      if (failNext) {
+        failNext = false;
+        throw new Error('réseau');
+      }
+      return [summary(5)];
+    });
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts,
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          failNext = readFails;
+          throw new SubmissionInProgressError();
+        }),
+        attemptOutcome: outcome,
+        codeVerificationUnavailableMessage: 'CODE_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(5));
+    act(() => result.current.retry());
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    const marker = JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!);
+    expect(marker.knownAttemptIds).toEqual([5, 12]);
+    expect(marker.landedKnownIds).toEqual(readFails ? undefined : [5]);
+
+    // Le dernier verdict vu (#12, toujours présenté) ne conclut pas ; celui d'une autre tentative, si.
+    outcome = { ...stale };
+    rerender();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(result.current.reconciling).toBe(true);
+    expect(result.current.submitError).toBeNull();
+    outcome = { quizId: QUIZ_ID, attemptId: 6, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(6));
+  });
+
+  it('409 « en_cours » AVEC id : conclut sur cette tentative, même déjà dans l’historique relu', async () => {
+    // La correction concurrente (#6) a fini avant toute relecture, et aucun verdict n'arrive :
+    // seul son id (donné par core) permet de la reconnaître dans l'historique.
+    let history: AttemptSummary[] = [summary(5)];
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          history = [summary(5), summary(6, 2)];
+          throw new SubmissionInProgressError(6);
+        }),
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(5));
+    act(() => result.current.retry());
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!).attemptId).toBe(6);
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(6), { timeout: 3000 });
+  });
+
+  it('409 « en_cours » SANS id, correction finie avant la relecture : son verdict poussé conclut', async () => {
+    // La relecture voit déjà #6 ; comparé à elle, son verdict serait ignoré (45 min de voile).
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [summary(5)];
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          history = [summary(5), summary(6, 2)];
+          throw new SubmissionInProgressError();
+        }),
+        attemptOutcome: outcome,
+      })
+    );
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(5));
+    act(() => result.current.retry());
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    outcome = { quizId: QUIZ_ID, attemptId: 6, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(6));
+  });
+
+  it('deux onglets (marqueur partagé) : le second reçoit un 409 « en_cours » avec l’id du premier, tous deux concluent', async () => {
+    // Aucun verdict poussé (WS manqué) : chacun reconnaît #9 dans l'historique par son id.
+    let history: AttemptSummary[] = [];
+    const common = {
+      initialQuiz,
+      onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+      onFetchAttempts: vi.fn(async () => history),
+      onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+    };
+    const tabA = renderHook(() =>
+      useQuizAttempt({ ...common, onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })) })
+    );
+    const tabB = renderHook(() =>
+      useQuizAttempt({
+        ...common,
+        onSubmitQuiz: vi.fn(async () => {
+          // La correction de #9 (onglet A) finit pendant le POST de B.
+          history = [summary(9)];
+          throw new SubmissionInProgressError(9);
+        }),
+      })
+    );
+    await waitFor(() => expect(tabA.result.current.loading).toBe(false));
+    await waitFor(() => expect(tabB.result.current.loading).toBe(false));
+    await act(async () => { tabA.result.current.submit(); await Promise.resolve(); });
+    await act(async () => { tabB.result.current.submit(); await Promise.resolve(); });
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!).attemptId).toBe(9);
+    await waitFor(() => expect(tabA.result.current.result?.attemptId).toBe(9), { timeout: 3000 });
+    await waitFor(() => expect(tabB.result.current.result?.attemptId).toBe(9), { timeout: 3000 });
+  });
+
+  it('« Réessayer » (id #9 attendu) puis 409 « en_cours » sans id : l’id de la soumission attendue est gardé', async () => {
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    let history: AttemptSummary[] = [];
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          // #9 finit pendant ce POST : la relecture qui suivrait la verrait déjà.
+          history = [summary(9)];
+          throw new SubmissionInProgressError();
+        }),
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!).attemptId).toBe(9);
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(9), { timeout: 3000 });
+  });
+
+  it('« Réessayer » puis POST en échec (réseau) : la soumission d’origine reste attendue (marqueur et verdict tardif)', async () => {
+    const original = { answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 };
+    localStorage.setItem(`moodit:quiz-pending-submission:${QUIZ_ID}`, JSON.stringify(original));
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [];
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          throw new Error('réseau');
+        }),
+        attemptOutcome: outcome,
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+        submitErrorMessage: 'POST_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    await act(async () => { await result.current.submit(); });
+    expect(result.current.submitError).toBe('POST_KO');
+    // Marqueur rétabli : un rechargement réconcilierait encore la soumission d'origine.
+    expect(JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!)).toEqual(original);
+    // Et son verdict, s'il arrive, est encore consommé.
+    history = [summary(9)];
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(9));
+  });
 
   it('renvoi refusé en 409 (correction déjà en cours) → attente, puis verdict de cette correction', async () => {
     // Temps simulé, et un historique qui ne montre JAMAIS la tentative en correction : seul son

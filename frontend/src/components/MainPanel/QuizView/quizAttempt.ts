@@ -485,8 +485,12 @@ export class SubmissionRejectedError extends Error {
  * (tentative unique déjà consommée, relance par l'enseignant) ne passent pas par ici.
  */
 export class SubmissionInProgressError extends Error {
-  constructor() {
+  /** Id de la tentative en correction, quand core le donne (sinon reconnue autrement). */
+  readonly attemptId?: number;
+
+  constructor(attemptId?: number) {
     super('Une tentative est déjà en cours de correction');
     this.name = 'SubmissionInProgressError';
+    this.attemptId = attemptId;
   }
 }

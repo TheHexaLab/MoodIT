@@ -105,12 +105,24 @@ public class ExecutionClient {
         this.baseUrl = baseUrl;
         this.internalToken = internalToken;
         this.connectTimeoutMs = connectTimeoutMs;
-        this.baseReadTimeoutMs = baseReadTimeoutMs;
+        // Réglages NÉGATIFS ramenés à 0 : soustraits du miroir, ils le raccourcissaient sous le
+        // pire cas serveur (#216). 0 est aussi ce qu'en fait execution-service : un budget
+        // interprété négatif y laisse partir le premier harnais (échéance déjà passée), soit
+        // exactement le plafond d'une unité ; une attente de file négative l'empêche de démarrer.
+        // per-test-timeout-ms n'a pas besoin de plancher : il n'entre que dans
+        // max(per-test, temps limite + marge), dont l'autre terme est toujours positif.
+        this.baseReadTimeoutMs = Math.max(0, baseReadTimeoutMs);
         this.perTestReadTimeoutMs = perTestReadTimeoutMs;
-        this.internalQueueWaitMs = internalQueueWaitMs;
-        this.interpretedBudgetMs = interpretedBudgetMs;
-        this.unreachableRetryMs = Math.max(0, unreachableRetryMs);
+        this.internalQueueWaitMs = Math.max(0, internalQueueWaitMs);
+        this.interpretedBudgetMs = Math.max(0, interpretedBudgetMs);
+        // Plafonné à ce que Duration convertit en nanosecondes : au-delà (Long.MAX_VALUE pour
+        // « retenter sans fin »), toNanos() levait une ArithmeticException hors de tout try, et
+        // TOUTE correction échouait. ~292 ans : sans fin en pratique.
+        this.unreachableRetryMs = Math.min(Math.max(0, unreachableRetryMs), MAX_UNREACHABLE_RETRY_MS);
     }
+
+    /** Plus longue durée de nouvel essai représentable en nanosecondes (cf. le constructeur). */
+    static final long MAX_UNREACHABLE_RETRY_MS = Long.MAX_VALUE / 1_000_000;
 
     /**
      * Délai d'attente de la réponse (#31, #216), modélisé sur le PIRE CAS réel du runner (#116) :
@@ -178,8 +190,8 @@ public class ExecutionClient {
         // Interprétés/SQL/vues : UNE place et UN conteneur PAR UNITÉ — chaque unité paie
         // l'attente de file et le mur du runner (75 s, miroir de WALL_OVERHEAD_MS : démarrage
         // du conteneur et compilation exec, tsc compris) en plus de son temps limite.
-        long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS)
-                + EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS;
+        long perUnit = add(Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS),
+                EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS);
         long perUnitWithQueue = add(perUnit, internalQueueWaitMs);
         // Plafonné par le BUDGET GLOBAL du serveur (app.exec.interpreted-budget-ms) : passé son
         // échéance, les harnais restants ne sont plus lancés. Le budget est consulté AVANT
@@ -453,6 +465,8 @@ public class ExecutionClient {
         if (timeout != null) body.put("timeoutMs", timeout);
         if (startCode != null) body.put("startCode", startCode);
         long readTimeout = readTimeoutMs(language, workUnits(language, harnesses.size()), timeout);
+        // Peut déborder pour un réglage géant : l'écart (retryDeadline - nanoTime()) lu plus bas
+        // reste juste, comme toute comparaison de nanoTime par différence.
         long retryDeadline = System.nanoTime() + Duration.ofMillis(unreachableRetryMs).toNanos();
         long delay = RETRY_FIRST_DELAY_MS;
         while (true) {
