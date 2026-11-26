@@ -33,9 +33,10 @@ export type QuizPhase = 'taking' | 'summary' | 'review';
 /**
  * Soumission « en vol » persistée en localStorage : permet de survivre à un RECHARGEMENT de
  * l'onglet pendant la CORRECTION asynchrone (l'état React est perdu, mais le serveur finit la
- * correction et enregistre la tentative). `attemptsBefore` = nb de tentatives avant l'envoi → au
- * remontage, une tentative en plus signale que la correction a abouti. `attemptId` (présent une
- * fois le 202 reçu) permet d'honorer le verdict WS ciblé (`quiz:attempt-*`) pendant l'attente.
+ * correction et enregistre la tentative). `attemptId` (présent une fois le 202 reçu) permet
+ * d'honorer le verdict WS ciblé (`quiz:attempt-*`) pendant l'attente et de lire le statut de la
+ * tentative. `attemptsBefore` (nb de tentatives avant l'envoi) ne sert plus qu'aux marqueurs
+ * d'ANCIEN format, sans id ni tentatives connues (cf. landedAttempt) ; il reste écrit pour eux.
  * Sans lui (renvoi refusé en 409 : correction déjà en cours, id inconnu), `knownAttemptIds` =
  * tentatives déjà connues : tout verdict d'une AUTRE tentative de ce quiz est celui de la
  * correction en cours (une seule à la fois par étudiant et par quiz).
@@ -452,7 +453,7 @@ export function useQuizAttempt({
    * RECONCILE_CEILING_MS) ; un sondage en échec (réseau) n'interrompt pas l'attente.
    */
   const reconcilePending = useCallback(
-    async (quizId: number, pending: PendingSubmission) => {
+    async (quizId: number, pending: PendingSubmission, maxBlockingMs?: number) => {
       waitingRef.current = true;
       try {
         await waitForGrading(quizId, pending);
@@ -476,7 +477,11 @@ export function useQuizAttempt({
           writePending(quizId, pending);
         }
         const started = pending.submittedAt ?? 0;
-        const ceiling = started + RECONCILE_CEILING_MS;
+        // Attente bloquante éventuellement BORNÉE (marqueur sans id relu au remontage, cf. reload).
+        const ceiling =
+          maxBlockingMs != null
+            ? Math.min(started + RECONCILE_CEILING_MS, Date.now() + maxBlockingMs)
+            : started + RECONCILE_CEILING_MS;
         // Échéance déjà passée au départ (retour tardif sur le quiz) : l'attente conclut aussitôt.
         const expiredAtStart = Date.now() >= ceiling;
         const takeOutcome = () => {
@@ -661,7 +666,16 @@ export function useQuizAttempt({
         setCurrentAttemptId(null);
         setPhase('taking');
         setLoading(false);
-        await reconcilePending(initialQuiz.id, pending);
+        // Marqueur SANS id (rechargement pendant le POST : le 202 n'a pas été lu) : son statut ne
+        // peut pas être lu, et une tentative supprimée laisserait le voile jusqu'au plafond.
+        // Attente bloquante bornée (RECONCILE_FAST_MS) puis « non confirmée » : « Réessayer »
+        // relit l'historique, sinon renvoie — un 409 « en_cours » donne l'id et rejoint l'attente,
+        // sans perte.
+        await reconcilePending(
+          initialQuiz.id,
+          pending,
+          pending.attemptId == null ? RECONCILE_FAST_MS : undefined
+        );
         return;
       }
       if (pending) clearPending(initialQuiz.id);
@@ -975,10 +989,16 @@ export function useQuizAttempt({
         // la correction (sandbox) tourne en tâche de fond. On attend le résultat via le push WS
         // (`quiz:attempt-*`) — le polling de l'historique n'est qu'un filet (cf. reconcilePending).
         const accepted = await onSubmitQuiz(toSubmission(quiz, answers));
-        if (!mountedRef.current) return;
-        // On connaît l'id : on peut honorer le verdict WS ciblé (et le rendre robuste au refresh).
+        // On connaît l'id : on peut honorer le verdict WS ciblé et lire le statut de la tentative.
+        // Écrit AVANT le test de montage : vue démontée pendant le POST (changement de canal),
+        // le marqueur sans id ne permettait au retour ni l'un ni l'autre. Seulement si le
+        // marqueur stocké est toujours le nôtre (même `submittedAt`) : un envoi plus récent d'un
+        // autre onglet ne doit pas être écrasé.
         const pending = { answers, attemptsBefore, attemptId: accepted.attemptId, submittedAt };
-        writePending(initialQuiz.id, pending);
+        if (readPending(initialQuiz.id)?.submittedAt === submittedAt) {
+          writePending(initialQuiz.id, pending);
+        }
+        if (!mountedRef.current) return;
         setSubmitting(false);
         await reconcilePending(initialQuiz.id, pending);
       } else {
@@ -1024,7 +1044,7 @@ export function useQuizAttempt({
           if (!mountedRef.current) return;
           pending = {
             answers,
-            attemptsBefore: fresh ? fresh.length : attemptsBefore,
+            attemptsBefore, // marqueurs d'ancien format seulement (cf. PendingSubmission)
             knownAttemptIds,
             ...(fresh ? { landedKnownIds: fresh.map((a) => a.id) } : {}),
             submittedAt: Date.now(),

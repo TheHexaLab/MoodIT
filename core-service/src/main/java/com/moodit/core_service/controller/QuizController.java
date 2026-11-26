@@ -129,8 +129,10 @@ public class QuizController {
      * verdict, {@code GET …/attempts/{attemptId}/status} dit si la correction est encore en cours
      * (404 : tentative supprimée, la correction a échoué). 409 en JSON
      * {@code {"cause":"en_cours","message":…,"attemptId":…}} si une correction de ce quiz est déjà
-     * en cours (le client rejoint l'attente de {@code attemptId}, omis quand la tentative en
-     * conflit a disparu), 409 en JSON {@code {"cause":"relance",…}} si c'est l'enseignant qui
+     * en cours (le client rejoint l'attente de {@code attemptId} : le pending existant, ou après
+     * un conflit d'insertion la dernière tentative relue ; omis si elle a disparu ou si elle est
+     * plus ancienne que le numéro que la soumission a tenté d'insérer — ce n'est alors pas
+     * l'écriture concurrente), 409 en JSON {@code {"cause":"relance",…}} si c'est l'enseignant qui
      * relance la correction d'une tentative de l'étudiant sur un quiz avec reprise, 409 en texte
      * si la tentative unique est déjà consommée (quiz sans reprise, relance en cours comprise).
      * `X-User-Email` injecté par la gateway.

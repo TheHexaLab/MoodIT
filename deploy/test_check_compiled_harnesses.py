@@ -7,6 +7,7 @@ Lancer : python3 deploy/test_check_compiled_harnesses.py
 """
 
 import importlib.util
+import io
 import os
 import re
 import unittest
@@ -871,9 +872,15 @@ class GraderRetryTest(unittest.TestCase):
                 self.assertIn("teste une exception", lines[0])
                 self.assertIn("relancer le script", lines[-1])
                 # Contrôle incomplet (sortie 3), mais le quiz prouvé en cause est fermé.
-                self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+                        mock.patch("sys.stderr", new_callable=io.StringIO):
+                    self.assertEqual(chk.EXIT_UNAVAILABLE, chk.main())
                 self.assertEqual(["UPDATE Quiz SET is_published = false WHERE id IN (1);"],
                                  [sql for sql in calls if sql.startswith("UPDATE")])
+                # Le bilan compte ce qui décide de la sortie 3 : la question À VÉRIFIER restée
+                # sans verdict du noteur (il affichait « 0 sans réponse du noteur »).
+                self.assertIn("0 bloquant(s), 1 à vérifier, 0 ok, 1 sans verdict du noteur.",
+                              out.getvalue())
 
     def test_unreachable_grader_skips_following_questions(self):
         # Revue #246 : service arrêté → 2 min de nouveaux essais PAR question avant la sortie 3.

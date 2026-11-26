@@ -692,11 +692,11 @@ class RpcGradingIntegrationTest {
                     .contains("__builtin_huge_val");
         }
         // Cachée sous `#if 0`, elle n'existe pas dans le code compilé : les signatures sont lues
-        // sur le code aux directives traitées, aucun bouchon de ce nom n'entre dans le noteur, et
-        // c'est le harnais intact qui juge la réponse fausse (42 n'est pas HUGE_VAL). Lue sur le
-        // texte brut, la signature cachée ferait entrer un bouchon `__builtin_huge_val` dans le
-        // noteur : HUGE_VAL y deviendrait un appel au code soumis, qui rend 42.0 (par la macro
-        // comme par la fonction cachée), et le harnais rendrait VRAI.
+        // sur le code AUX DIRECTIVES TRAITÉES. Le harnais la NOMME (seul un nom que le harnais
+        // emploie peut recevoir un bouchon) : lue aux directives traitées, elle n'est pas
+        // extraite, le harnais appelle le vrai builtin (l'infini, ni 42 ni 0) et rend FAUX.
+        // Lue sur le texte brut, elle serait extraite puis refusée « réservé au compilateur » :
+        // un refus à tort d'une fonction qui n'existe pas, que l'égalité exigée ci-dessous voit.
         String hidden = """
                 #define __builtin_huge_val() 42.0
                 #if 0
@@ -705,7 +705,8 @@ class RpcGradingIntegrationTest {
                 double divise(double a, double b) { return 42.0; }
                 """;
         for (String language : List.of("C", "C++")) {
-            TestResult r = grade(language, "return divise(1.0, 0.0) == HUGE_VAL;", hidden);
+            TestResult r = grade(language,
+                    "return divise(1.0, 0.0) == HUGE_VAL || __builtin_huge_val() == 0.0;", hidden);
             assertThat(r.passed()).as(language).isFalse();
             assertThat(r.detail()).as(language).isEqualTo("Le harnais a renvoyé faux");
         }

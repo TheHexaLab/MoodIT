@@ -344,39 +344,81 @@ test("API : une remise en ordre qui n'est pas une permutation est refusée sans 
 
       // Aucune tentative enregistrée : la soumission valide (permutation, même fausse) passe.
       expect((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).toHaveLength(0);
-      const accepted = await submit([ids[2], ids[0], ids[1]]);
-      expect(accepted.status()).toBe(202);
-      const { attemptId } = (await accepted.json()) as { attemptId: number };
-      // Statut de la tentative (route réelle, à travers gateway et permissions) : en correction ou
-      // déjà corrigée — la correction d'une remise en ordre est rapide.
-      const status = (id: number, as = student) => as.get(`/api/quizzes/${quizId}/attempts/${id}/status`);
-      const early = await status(attemptId);
-      expect(early.status()).toBe(200);
-      expect(['pending', 'done']).toContain(((await early.json()) as { status: string }).status);
+      expect((await submit([ids[2], ids[0], ids[1]])).status()).toBe(202);
       // Et la tentative unique s'applique toujours ensuite. Une fois la correction TERMINÉE :
       // pendant qu'elle tourne, le refus serait « correction en cours » (JSON, cause en_cours),
       // pas la règle de tentative unique.
       await expect
         .poll(async () => ((await (await student.get(`/api/quizzes/${quizId}/attempts`)).json()) as unknown[]).length)
         .toBe(1);
-      const done = await status(attemptId);
-      expect(done.status()).toBe(200);
-      expect(((await done.json()) as { status: string }).status).toBe('done');
       const again = await submit([...ids]);
       expect(again.status()).toBe(409);
       expect(await again.text()).toBe(ALREADY_SUBMITTED);
-
-      // Statut d'une tentative d'un AUTRE étudiant, ou inexistante : 404 (aucune fuite).
-      expect((await status(2147483647)).status()).toBe(404);
-      const { storageState: otherState } = await createEnrolledUser(baseURL!);
-      const other = await request.newContext({ baseURL, storageState: otherState });
-      try {
-        expect((await status(attemptId, other)).status()).toBe(404);
-      } finally {
-        await other.dispose();
-      }
     } finally {
       await student.dispose();
+    }
+  } finally {
+    await deleteQuizzesMatching(api, marker, baseURL);
+    await api.dispose();
+  }
+});
+
+// Route lue par la vue pendant l'attente d'une correction (#116) : elle reconnaît une tentative
+// supprimée (404) ou déjà corrigée sans attendre son verdict poussé. À travers gateway et
+// permissions, et sans fuite : la tentative d'un autre étudiant est introuvable comme une absente.
+test("API : statut d'une tentative — 200 pending/done au propriétaire, 404 pour un id absent ou la tentative d'un autre étudiant", async ({
+  baseURL,
+}) => {
+  const { api } = await profSession(baseURL!);
+  const marker = '[e2e-statut]';
+  await deleteQuizzesMatching(api, marker);
+  const title = `${marker} ${uniqueSuffix()}`;
+  try {
+    const quizId = await createQuizApi(api, {
+      title,
+      questions: [
+        {
+          qType: 'true_false',
+          prompt: 'Le ciel est bleu.',
+          totalScore: 1,
+          answers: [
+            { content: 'Vrai', isCorrect: true },
+            { content: 'Faux', isCorrect: false },
+          ],
+        },
+      ],
+    });
+    const { storageState } = await createEnrolledUser(baseURL!);
+    const student = await request.newContext({ baseURL, storageState });
+    const { storageState: otherState } = await createEnrolledUser(baseURL!);
+    const other = await request.newContext({ baseURL, storageState: otherState });
+    try {
+      const quiz = (await (await student.get(`/api/quizzes/${quizId}`)).json()) as {
+        questions: { id: number; answers: { id: number }[] }[];
+      };
+      const q = quiz.questions[0];
+      const accepted = await student.post(`/api/quizzes/${quizId}/submissions`, {
+        data: { quizId, answers: [{ questionId: q.id, answerIds: [q.answers[0].id] }] },
+      });
+      expect(accepted.status()).toBe(202);
+      const { attemptId } = (await accepted.json()) as { attemptId: number };
+      const status = (id: number, as = student) => as.get(`/api/quizzes/${quizId}/attempts/${id}/status`);
+
+      // Propriétaire : en correction ou déjà corrigée (sans code, la correction est rapide)…
+      const early = await status(attemptId);
+      expect(early.status()).toBe(200);
+      expect(['pending', 'done']).toContain(((await early.json()) as { status: string }).status);
+      // … puis corrigée.
+      await expect
+        .poll(async () => ((await (await status(attemptId)).json()) as { status: string }).status)
+        .toBe('done');
+
+      // Id absent, ou tentative d'un autre étudiant : 404.
+      expect((await status(2147483647)).status()).toBe(404);
+      expect((await status(attemptId, other)).status()).toBe(404);
+    } finally {
+      await student.dispose();
+      await other.dispose();
     }
   } finally {
     await deleteQuizzesMatching(api, marker, baseURL);

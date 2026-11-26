@@ -97,7 +97,15 @@ fichier que le code soumis puisse atteindre : il n'y a rien à surveiller. La ca
 n'est plus accordée au conteneur et `strace` a quitté les images — elles ne servaient qu'à repérer
 une lecture du harnais, nécessaire quand il vivait dans un fichier ouvrable. Les événements
 restants portent sur l'infrastructure (`budget_depasse`, `espace_sature`, `erreur_superviseur`) et
-sur les canaris, qui vérifient que la chaîne tranche encore dans les deux sens.
+sur les canaris (`canari_incoherent`). Deux canaris, au résultat connu du seul superviseur (l'un
+doit réussir, l'autre échouer) et à une position mélangée, vérifient que la chaîne tranche encore
+dans les deux sens et attrapent un forgeage AVEUGLE, qui finit par rendre vert le canari qui doit
+échouer, ou un gel sélectif (les deux canaris gelés pendant qu'un cas réel passe) : un canari
+contredit, ou les deux gelés, avec un cas réel vert donnent le verdict `incoherents` —
+falsification probable, cas verts mis à zéro (« Incohérence détectée ») ; un canari seul expiré ou
+tué par signal, l'autre confirmé, n'accuse pas. Un canari non jugé (sauté, compilation
+non concluante, cas interrompu) laisse le verdict `indetermines` : jamais une accusation. Règles
+exactes : `canary_verdict` (`supervisor.py`).
 
 Modèle de menace complet, statut par langage, limites assumées, protocole et suivis ouverts :
 `docker/runners/README.md`. Filets d'intégration : `RpcGradingIntegrationTest` (notation) et

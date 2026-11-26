@@ -2828,7 +2828,7 @@ class ReservedNamesTest(unittest.TestCase):
     def test_message_names_every_offender(self):
         one = supervisor.reserved_name_message(["fabs"], "la bibliothèque standard")
         self.assertIn("« fabs » est déjà fourni au harnais par la bibliothèque standard", one)
-        many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
+        many = supervisor.reserved_name_message(["max", "min"], "x")
         self.assertIn("« max », « min » sont déjà fournis au harnais", many)
         # Une CLASSE C++ (bouchon de classe du noteur) n'est pas appelée « fonction ».
         klass = supervisor.reserved_name_message(["remove"], "la bibliothèque standard",
@@ -2844,7 +2844,7 @@ class ReservedNamesTest(unittest.TestCase):
         one = supervisor.reserved_name_message(["fabs"], "la bibliothèque standard")
         self.assertTrue(one.startswith("Nom de fonction réservé : « fabs » est déjà fourni"))
         self.assertIn("votre fonction de celle-ci ; renommez-la.", one)
-        many = supervisor.reserved_name_message(["max", "min"], "le langage Go")
+        many = supervisor.reserved_name_message(["max", "min"], "x")
         self.assertTrue(many.startswith("Noms de fonctions réservés : « max », « min » sont déjà fournis"))
         self.assertIn("vos fonctions de celles-ci ; renommez-les.", many)
         classes = supervisor.reserved_name_message(["remove", "time"], "x", classes={"remove", "time"})
@@ -2859,11 +2859,51 @@ class ReservedNamesTest(unittest.TestCase):
         self.assertTrue(plural.startswith(
             "Identifiants réservés au compilateur : la fonction « __x », la classe « _Y »"))
         self.assertIn("le harnais les emploie ; renommez-les.", plural)
+        # Nom NEUTRE (pas forcément une fonction) et destinataire : le programme de correction.
+        neutral_one = supervisor.reserved_name_message(
+            ["stdout"], "la bibliothèque standard", neutral=True,
+            recipient="programme de correction")
+        self.assertEqual("Nom réservé : « stdout » est déjà fourni au programme de correction par "
+                         "la bibliothèque standard. Le programme de correction ne pourrait pas "
+                         "le distinguer du vôtre ; renommez-le.", neutral_one)
+        neutral_many = supervisor.reserved_name_message(
+            ["string", "true"], "le langage Go (identifiant prédéclaré)", neutral=True,
+            recipient="programme de correction")
+        self.assertEqual("Noms réservés : « string », « true » sont déjà fournis au programme de "
+                         "correction par le langage Go (identifiant prédéclaré). Le programme de "
+                         "correction ne pourrait pas les distinguer des vôtres ; renommez-les.",
+                         neutral_many)
+        self.assertTrue(supervisor.reserved_name_message(["strings"], "p", neutral=True)
+                        .startswith("Nom réservé : « strings » est déjà fourni au harnais par p."))
+        # Appelants réels : types et constantes Go, données de la libc lues par nm.
+        go = supervisor.go_predeclared_message(supervisor.go_server_hidden(
+            "package main\n\ntype string struct{}\nconst true = 1\n"))
+        self.assertTrue(go.startswith("Noms réservés : « string », « true » sont déjà fournis au "
+                                      "programme de correction par le langage Go"), go)
+        self.assertNotIn("fonction", go)
+        linked = supervisor.c_linked_symbols_message(supervisor.c_symbols_defined_in_binary(
+            ["0000000000404040 B stdout\n"]))
+        self.assertTrue(linked.startswith("Nom réservé : « stdout » est déjà fourni au programme "
+                                          "de correction par la bibliothèque standard."), linked)
+        self.assertNotIn("fonction", linked)
+        self.assertNotIn("harnais", linked)
+        package = supervisor.go_package_message(["strings"])
+        self.assertTrue(package.startswith("Nom réservé : « strings » est déjà fourni au harnais "
+                                           "par un paquet Go importé pour le harnais."), package)
+        # Java (classes de java.lang employées par le harnais) : même accord.
+        java_one = supervisor.java_shadowed_message(["Math"])
+        self.assertEqual("Nom de classe réservé : « Math » est déjà fourni au harnais par "
+                         "java.lang. Le harnais ne pourrait pas distinguer votre classe de "
+                         "celle-ci ; renommez-la.", java_one)
+        java_many = supervisor.java_shadowed_message(["Math", "StringBuffer"])
+        self.assertEqual("Noms de classes réservés : « Math », « StringBuffer » sont déjà fournis "
+                         "au harnais par java.lang. Le harnais ne pourrait pas distinguer vos "
+                         "classes de celles-ci ; renommez-les.", java_many)
 
 
 class CanaryTruthTableTest(unittest.TestCase):
     """ORACLE explicite de canary_verdict : pour chaque paire d'états (canari « pass », canari
-    « fail ») parmi 8, le verdict attendu SANS cas réel vert puis AVEC un cas réel vert, vérifié
+    « fail ») parmi 9, le verdict attendu SANS cas réel vert puis AVEC un cas réel vert, vérifié
     sur 0 à 2 cas réels verts ou rouges. O = ok, I = incoherents, D = indetermines."""
 
     # États d'un canari : arguments de CaseOutcome.
@@ -2876,6 +2916,9 @@ class CanaryTruthTableTest(unittest.TestCase):
         "expiré": dict(passed=False, ran=True, timed_out=True),
         "tué": dict(passed=False, ran=True, killed=True),
         "sauté": dict(passed=False, skipped=True),
+        # Sauté APRÈS avoir tourné : sortie perdue (tmpfs saturé) ou noteur sorti en 0 sans
+        # jeton (execute_case pose ran=True ET skipped=True). Pas jugé : comme « sauté ».
+        "tourné puis sauté": dict(passed=False, ran=True, skipped=True),
     }
     # Ligne : canari « pass » ; colonne : canari « fail », dans l'ordre de STATES. Chaque
     # cellule : verdict sans cas réel vert, puis avec. Lecture :
@@ -2885,18 +2928,20 @@ class CanaryTruthTableTest(unittest.TestCase):
     #  - règle 4 : O seulement si « pass » réussi et « fail » échoué, expiré ou tué ;
     #  - règle 3 : « pass » expiré ou tué n'accuse qu'avec un « fail » lui aussi expiré ou tué
     #    (gel sélectif) — pas si le « fail » a échoué de façon concluante, ni s'il n'a pas été
-    #    jugé (compilation non concluante, interrompu, sauté) : hôte chargé, jamais accusé ;
+    #    jugé (compilation non concluante, interrompu, sauté avant ou après avoir tourné) :
+    #    hôte chargé, jamais accusé ;
     #  - règle 2 et non imputables : compilation non concluante, interrompu, sauté → D.
     ORACLE = """
-                  réussi échoué compil  compil? interr  expiré  tué     sauté
-    réussi        DI     OO     DI      DD      DD      OO      OO      DD
-    échoué        DI     DI     DI      DI      DI      DI      DI      DI
-    compil        DI     DI     DI      DI      DI      DI      DI      DI
-    compil?       DI     DD     DI      DD      DD      DD      DD      DD
-    interr        DI     DD     DI      DD      DD      DD      DD      DD
-    expiré        DI     DD     DI      DD      DD      DI      DI      DD
-    tué           DI     DD     DI      DD      DD      DI      DI      DD
-    sauté         DI     DD     DI      DD      DD      DD      DD      DD
+                  réussi échoué compil  compil? interr  expiré  tué     sauté   t.sauté
+    réussi        DI     OO     DI      DD      DD      OO      OO      DD      DD
+    échoué        DI     DI     DI      DI      DI      DI      DI      DI      DI
+    compil        DI     DI     DI      DI      DI      DI      DI      DI      DI
+    compil?       DI     DD     DI      DD      DD      DD      DD      DD      DD
+    interr        DI     DD     DI      DD      DD      DD      DD      DD      DD
+    expiré        DI     DD     DI      DD      DD      DI      DI      DD      DD
+    tué           DI     DD     DI      DD      DD      DI      DI      DD      DD
+    sauté         DI     DD     DI      DD      DD      DD      DD      DD      DD
+    t.sauté       DI     DD     DI      DD      DD      DD      DD      DD      DD
     """
     VERDICTS = {"O": "ok", "I": "incoherents", "D": "indetermines"}
 
@@ -2917,7 +2962,7 @@ class CanaryTruthTableTest(unittest.TestCase):
 
     def test_oracle_covers_every_pair(self):
         table = self.expected()
-        self.assertEqual(64, len(table))
+        self.assertEqual(81, len(table))
         self.assertTrue(all(len(cell) == 2 and set(cell) <= set(self.VERDICTS)
                             for cell in table.values()))
         # Règle 1 lisible dans l'oracle lui-même : aucune accusation sans cas réel vert.
@@ -2941,7 +2986,7 @@ class CanaryTruthTableTest(unittest.TestCase):
                     verdict = supervisor.canary_verdict(cases, outcomes)
                     self.assertEqual(self.VERDICTS[cell[1 if any(real) else 0]], verdict)
                     checked += 1
-        self.assertEqual(8 * 8 * 7, checked)
+        self.assertEqual(9 * 9 * 7, checked)
 
     def test_slow_pass_canary_with_skipped_fail_is_not_an_accusation(self):
         # Hôte chargé : un cas réel vert, le canari « pass » expire, le « fail » saute faute de
@@ -2950,6 +2995,9 @@ class CanaryTruthTableTest(unittest.TestCase):
         outcomes = {0: supervisor.CaseOutcome(False, None, ran=True, timed_out=True),
                     1: supervisor.CaseOutcome(False, None, skipped=True, cause="budget"),
                     2: supervisor.CaseOutcome(True, None, ran=True)}
+        self.assertEqual("indetermines", supervisor.canary_verdict(cases, outcomes))
+        # Idem si le « fail » a tourné mais que sa sortie a été perdue (/box saturé).
+        outcomes[1] = supervisor.CaseOutcome(False, None, ran=True, skipped=True)
         self.assertEqual("indetermines", supervisor.canary_verdict(cases, outcomes))
 
 

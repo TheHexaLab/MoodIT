@@ -84,6 +84,13 @@ abstract class QuizServiceTestSupport {
                 submissionRepository, submissionTestCaseRepository, attemptRepository, userRepository,
                 objectMapper, realtimePublisher, executionClient, transactionManager, eventPublisher,
                 auditLogService, obfuscator, gradingFailureRepository);
+        // Contrôle préalable d'une soumission, par défaut : aucune tentative (ce que rendaient
+        // implicitement les anciennes lectures séparées, comptage 0 et pas de pending). Lenient :
+        // la plupart des tests ne soumettent pas ; ceux qui le font le surchargent au besoin.
+        org.mockito.Mockito.lenient()
+                .when(attemptRepository.snapshotForSubmission(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.moodit.core_service.repository.AttemptSnapshot(0L, 0, null, 0));
     }
 
     /** Id PUBLIC (passation) d'un élément déplaçable. */

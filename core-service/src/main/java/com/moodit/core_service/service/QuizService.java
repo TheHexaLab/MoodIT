@@ -17,6 +17,7 @@ import com.moodit.core_service.exception.RegradeInProgressException;
 import com.moodit.core_service.exception.UserNotFoundException;
 import com.moodit.core_service.model.*;
 import com.moodit.core_service.repository.AttemptRepository;
+import com.moodit.core_service.repository.AttemptSnapshot;
 import com.moodit.core_service.repository.CourseRepository;
 import com.moodit.core_service.repository.GradingFailureRepository;
 import com.moodit.core_service.repository.LanguageRepository;
@@ -432,7 +433,9 @@ public class QuizService {
             // celui de son envoi : il est omis, et le client retombe sur son repli.
             TransactionTemplate readTx = new TransactionTemplate(transactionManager);
             readTx.setReadOnly(true);
-            throw readTx.execute(status -> pendingConflict(quizId, e.userId, e.allowRetry,
+            throw readTx.execute(status -> pendingConflict(
+                    attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, e.userId, "pending", true),
+                    e.allowRetry,
                     () -> attemptRepository.findFirstByQuiz_IdAndUser_IdOrderByAttemptNoDesc(quizId, e.userId)
                             .filter(a -> a.getAttemptNo() >= e.attemptNo)   // attempt_no NOT NULL
                             .map(Attempt::getId).orElse(null)));
@@ -447,9 +450,9 @@ public class QuizService {
      * mais « déjà soumis » sur un quiz sans reprise — la relance porte forcément sur sa tentative
      * unique, « réessayez plus tard » le mènerait de toute façon à ce refus.
      */
-    private RuntimeException pendingConflict(Integer quizId, Integer userId, boolean allowRetry,
+    private static RuntimeException pendingConflict(boolean regrade, boolean allowRetry,
             java.util.function.Supplier<Integer> inProgressAttemptId) {
-        if (!attemptRepository.existsByQuiz_IdAndUser_IdAndStatusAndRegrade(quizId, userId, "pending", true)) {
+        if (!regrade) {
             return new GradingInProgressException(inProgressAttemptId.get());
         }
         return allowRetry ? new RegradeInProgressException() : new AlreadySubmittedException();
@@ -489,9 +492,11 @@ public class QuizService {
      * (tx écriture) Crée la tentative {@code "pending"} + une {@link Submission} brute par question
      * (réponses, SANS verdicts encore) et déclenche la correction async après commit.
      *
-     * <p>Une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
+     * <p>Contrôle préalable sur UN instantané ({@link AttemptRepository#snapshotForSubmission}) :
+     * une tentative {@code "pending"} déjà là (correction en cours) est refusée AVANT le
      * contrôle de tentative unique : sur un quiz sans reprise, elle compte aussi parmi les
-     * tentatives et donnerait sinon le 409 « déjà soumis » à tort. Le 409 suit
+     * tentatives et donnerait sinon le 409 « déjà soumis » à tort. Le numéro de la nouvelle
+     * tentative est le plus grand + 1 (une tentative supprimée laisse un trou, sans collision). Le 409 suit
      * {@link #pendingConflict} : {@link GradingInProgressException} pour sa propre correction ;
      * pour une relance de l'enseignant, {@link RegradeInProgressException} avec reprise,
      * {@link AlreadySubmittedException} sans reprise.
@@ -515,30 +520,33 @@ public class QuizService {
         requireValidOrderings(quiz, byQuestion);
         requireBoundedCode(quiz, byQuestion);
 
-        // ORDRE : compter, PUIS chercher le pending, PUIS la tentative unique. En READ COMMITTED,
-        // chaque SELECT voit les validations faites avant lui. Cherché AVANT le comptage, un
-        // pending concurrent validé entre les deux échappait à la recherche mais entrait dans le
-        // compte : numéro tenté trop grand (avec reprise, le conflit écartait ensuite la tentative
-        // concurrente comme trop ancienne — 409 sans id) ou « déjà soumis » au lieu de « en
-        // cours » (sans reprise). Dans cet ordre, une soumission concurrente validée avant ou
-        // pendant est vue par la recherche ; validée après, elle a le même numéro que celui tenté
-        // ici, et le conflit d'insertion la retrouve (cf. submitQuiz).
-        long existing = attemptRepository.countByQuiz_IdAndUser_Id(quizId, user.getId());
-        Optional<Attempt> pending = attemptRepository
-                .findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(quizId, user.getId(), "pending");
-        if (pending.isPresent()) {
-            Integer pendingId = pending.get().getId();
-            throw pendingConflict(quizId, user.getId(), Boolean.TRUE.equals(quiz.getAllowRetry()),
+        // Comptage, plus grand numéro et pending lus en UNE requête, donc un seul instantané
+        // (READ COMMITTED : chaque SELECT voit les validations faites avant lui). En deux
+        // lectures, un pending validé entre elles était compté sans être vu — « déjà soumis » au
+        // lieu de « en cours », ou un numéro trop grand qui faisait écarter la concurrente au
+        // conflit — et un pending SUPPRIMÉ entre elles (correction échouée) était compté puis
+        // introuvable — « déjà soumis » à tort, ou un trou de numérotation. Ici, une soumission
+        // concurrente validée avant la lecture y est vue ; validée après, elle porte le même
+        // numéro que celui tenté ici, et le conflit d'insertion la retrouve (cf. submitQuiz).
+        AttemptSnapshot snapshot = attemptRepository.snapshotForSubmission(quizId, user.getId());
+        if (snapshot.hasPending()) {
+            Integer pendingId = snapshot.pendingAttemptId();
+            throw pendingConflict(snapshot.pendingIsRegrade(), Boolean.TRUE.equals(quiz.getAllowRetry()),
                     () -> pendingId);
         }
-        if (existing > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
+        if (snapshot.count() > 0 && !Boolean.TRUE.equals(quiz.getAllowRetry())) {
             throw new AlreadySubmittedException();
         }
 
         Attempt attempt = new Attempt();
         attempt.setQuiz(quiz);
         attempt.setUser(user);
-        attempt.setAttemptNo((int) existing + 1);
+        // Numéro = plus grand + 1, et non comptage + 1 : une tentative supprimée (correction
+        // échouée) au milieu laisse un TROU, et compter redonnait alors un numéro déjà pris —
+        // collision sur UNIQUE(quiz,user,attempt_no) à CHAQUE soumission suivante, que le
+        // conflit lisait comme une correction concurrente en cours : l'étudiant ne pouvait plus
+        // soumettre. Un trou dans la numérotation est sans effet (l'affichage montre « #n »).
+        attempt.setAttemptNo(snapshot.maxAttemptNo() + 1);
         attempt.setStatus("pending");
         Attempt saved;
         try {

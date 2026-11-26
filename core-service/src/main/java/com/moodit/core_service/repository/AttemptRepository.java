@@ -18,18 +18,23 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
     /** Tentatives d'un utilisateur sur un quiz, dans l'ordre (1, 2, …). */
     List<Attempt> findByQuiz_IdAndUser_IdOrderByAttemptNoAsc(Integer quizId, Integer userId);
 
-    /** Nombre de tentatives déjà faites (→ numéro de la prochaine, et garde tentative unique). */
-    long countByQuiz_IdAndUser_Id(Integer quizId, Integer userId);
-
     /**
-     * Tentative la plus récente de l'utilisateur sur ce quiz dans ce statut : à la soumission, une
-     * tentative {@code "pending"} signale une correction encore en cours. 409 « en_cours » si
-     * c'est celle d'une soumission de l'étudiant, avec son id (le client attend CETTE tentative) ;
-     * une RELANCE de l'enseignant ({@link #existsByQuiz_IdAndUser_IdAndStatusAndRegrade}) donne
-     * « relance » sur un quiz avec reprise, « déjà soumis » sans reprise.
+     * Contrôle préalable d'une soumission, en UNE requête — donc un seul instantané en READ
+     * COMMITTED : nombre de tentatives (tentative unique), plus grand {@code attempt_no} (numéro
+     * de la prochaine : max + 1) et pending éventuel avec son marqueur de relance (409
+     * « en_cours » avec son id, ou « relance » / « déjà soumis »). Lus en plusieurs requêtes, un
+     * pending validé ou SUPPRIMÉ entre deux lectures était compté sans être vu (ou l'inverse) :
+     * « déjà soumis » à tort, ou un trou de numérotation qui, avec un numéro calculé sur le
+     * comptage, faisait collisionner chaque soumission suivante sur
+     * {@code UNIQUE(quiz,user,attempt_no)} — l'étudiant ne pouvait plus jamais soumettre.
+     * Une ligne d'agrégats, toujours une, même sans tentative.
      */
-    Optional<Attempt> findFirstByQuiz_IdAndUser_IdAndStatusOrderByAttemptNoDesc(
-            Integer quizId, Integer userId, String status);
+    @Query("SELECT new com.moodit.core_service.repository.AttemptSnapshot("
+            + "COUNT(a), COALESCE(MAX(a.attemptNo), 0), "
+            + "MAX(CASE WHEN a.status = 'pending' THEN a.id END), "
+            + "COALESCE(MAX(CASE WHEN a.status = 'pending' AND a.regrade = true THEN 1 ELSE 0 END), 0)) "
+            + "FROM Attempt a WHERE a.quiz.id = :quizId AND a.user.id = :userId")
+    AttemptSnapshot snapshotForSubmission(@Param("quizId") Integer quizId, @Param("userId") Integer userId);
 
     /**
      * Dernière tentative de l'utilisateur sur ce quiz (plus grand {@code attempt_no}), quel que
@@ -45,7 +50,8 @@ public interface AttemptRepository extends JpaRepository<Attempt, Integer> {
      * Vrai s'il existe une tentative dans ce statut, restreint au marqueur de relance : un
      * {@code "pending"} avec {@code regrade = true} est une RELANCE de l'enseignant, pas la
      * correction d'une soumission de l'étudiant (409 « relance » au lieu de « en_cours » sur un
-     * quiz avec reprise, « déjà soumis » sans reprise).
+     * quiz avec reprise, « déjà soumis » sans reprise). Relu après un conflit d'insertion ; le
+     * contrôle préalable, lui, le lit dans {@link #snapshotForSubmission}.
      */
     boolean existsByQuiz_IdAndUser_IdAndStatusAndRegrade(
             Integer quizId, Integer userId, String status, boolean regrade);

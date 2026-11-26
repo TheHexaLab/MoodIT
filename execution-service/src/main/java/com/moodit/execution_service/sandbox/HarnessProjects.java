@@ -26,9 +26,16 @@ import java.util.regex.Pattern;
  *
  * <p>Deux CANARIS sont ajoutés en fin de liste (indices N et N+1) : des cas dont le harnais est
  * un gabarit {@code __MOODIT_A__ == __MOODIT_B__} que le superviseur instancie à l'exécution
- * avec des valeurs tirées au sort — l'un doit réussir, l'autre échouer. Ils ne détectent plus
- * une falsification (il n'y a plus rien à falsifier) : ils vérifient que la chaîne de notation
- * tranche encore dans les DEUX sens, et qu'un cas ne peut pas réussir par accident.
+ * avec des valeurs tirées au sort — l'un doit réussir, l'autre échouer —, à une position
+ * mélangée parmi les cas réels. Ils vérifient que la chaîne de notation tranche encore dans les
+ * DEUX sens, et ils attrapent un forgeage AVEUGLE (un code soumis qui ne distingue pas un canari
+ * d'un cas réel finit par rendre vert celui qui doit échouer) ou un GEL sélectif (les deux
+ * canaris gelés pendant qu'un cas réel passe) : un canari contredit, ou les deux gelés, avec un
+ * cas réel vert donnent le verdict {@code incoherents} (falsification probable, cas verts mis à
+ * zéro par {@code DockerEvaluator}) ; un canari seul expiré ou tué par signal, l'autre confirmé,
+ * n'accuse pas. Un canari non jugé (sauté, compilation non concluante, cas
+ * interrompu) laisse le verdict {@code indetermines} : jamais une accusation. Règles exactes :
+ * {@code canary_verdict}, supervisor.py.
  *
  * <p>Le protocole miroir vit dans {@code docker/runners/common/supervisor.py} ; garder en phase.
  */
@@ -158,15 +165,15 @@ public final class HarnessProjects {
 
     // ── canaris par langage — un corps booléen dont les deux valeurs (__MOODIT_A__ et
     //    __MOODIT_B__) sont tirées au sort par le superviseur à l'exécution : l'un doit réussir,
-    //    l'autre échouer. Ils ne détectent plus une falsification, il n'y a plus rien à
-    //    falsifier : ils vérifient que la chaîne tranche encore dans les DEUX sens ──
+    //    l'autre échouer. Ils vérifient que la chaîne tranche encore dans les DEUX sens et
+    //    attrapent un forgeage aveugle ou un gel sélectif (cf. javadoc de la classe) ──
 
     private static String canaryHarness(String lang) {
         // Forme BOOLÉENNE, comme tous les harnais : une comparaison de deux valeurs tirées au
         // sort. L'un des deux canaris les reçoit égales (il doit réussir), l'autre différentes
-        // (il doit échouer). Leur rôle n'est plus d'attraper un forgeage — il n'y a plus rien à
-        // forger — mais de vérifier que la chaîne de notation tranche encore dans les deux sens :
-        // si elle rendait tout vert, le canari qui doit échouer le dirait.
+        // (il doit échouer). Si la chaîne de notation rendait tout vert — par défaut, ou parce
+        // qu'un code soumis forge à l'aveugle, sans pouvoir distinguer un canari d'un cas
+        // réel —, le canari qui doit échouer le dirait (cf. javadoc de la classe).
         return switch (lang) {
             case "go" -> "return __MOODIT_A__ == __MOODIT_B__\n";
             case "rust" -> "__MOODIT_A__ == __MOODIT_B__\n";

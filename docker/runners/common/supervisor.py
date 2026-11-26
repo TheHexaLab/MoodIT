@@ -544,8 +544,8 @@ def canary_verdict(cases, outcomes):
          ne distinguant pas le canari « pass » du canari « fail », un gel VOLONTAIRE les gèle
          tous les deux — et un canari « fail » gelé ne confirme rien : la détection du gel
          sélectif (les deux canaris gelés, un cas réel vert) est conservée. Si l'autre n'a
-         pas été JUGÉ (sauté faute de budget ou d'espace, compilation non concluante, cas
-         interrompu), le verdict est « indetermines » : un hôte chargé où un canari lent expire
+         pas été JUGÉ (sauté faute de budget ou d'espace, avant ou après avoir tourné — sortie
+         perdue —, compilation non concluante, cas interrompu), le verdict est « indetermines » : un hôte chargé où un canari lent expire
          et fait sauter le second en est la cause honnête (cf. canary_reserve_seconds), et un
          faussaire n'y gagne rien — un canari « fail » sauté donne DÉJÀ « indetermines » quand
          le canari « pass » réussit, ce qu'un forgeage obtient sans rien geler ;
@@ -555,7 +555,7 @@ def canary_verdict(cases, outcomes):
 
     Cette règle unique remplace quatre conditions accumulées, chacune ayant révélé l'angle
     mort de la suivante. Elle est vérifiée par un ORACLE explicite (verdict attendu pour chacune des
-    8 × 8 paires d'états des deux canaris, sans puis avec cas réel vert), sur 0 à 2 cas réels
+    9 × 9 paires d'états des deux canaris, sans puis avec cas réel vert), sur 0 à 2 cas réels
     verts ou rouges : CanaryTruthTableTest."""
     canary_cases = [c for c in cases if c.get("canary")]
     if not canary_cases:
@@ -585,8 +585,12 @@ def canary_verdict(cases, outcomes):
     # façon concluante). Si l'autre n'a pas été JUGÉ — sauté (budget, espace), compilation non
     # concluante, cas interrompu —, un canari expiré ou tué sur un hôte chargé est exactement
     # ce que produit une soumission honnête : pas d'accusation (cf. canary_reserve_seconds).
-    all_ran = all(outcomes[c["index"]].ran for c in canary_cases)
-    if not solid and all_ran:
+    # « Tourné » ne suffit pas : un canari SAUTÉ APRÈS AVOIR TOURNÉ (sortie perdue sur un
+    # tmpfs saturé, noteur sorti en 0 sans jeton : ran=True ET skipped=True) n'a pas été jugé
+    # non plus, et le compter accusait une soumission honnête qui remplit /box sur hôte chargé.
+    all_judged = all(outcomes[c["index"]].ran and not outcomes[c["index"]].skipped
+                     for c in canary_cases)
+    if not solid and all_judged:
         # Aucune confirmation concluante : le gel peut être voulu, la règle 1 s'applique.
         accusable += doubtful
 
@@ -1596,7 +1600,9 @@ class CaseOutcome:
         self.detail = detail
         self.ran = ran  # le run a eu lieu (≠ échec de compilation) — utilisé par les canaris
         self.timed_out = timed_out  # temps limite dépassé — utilisé par le verdict des canaris
-        self.skipped = skipped  # cas SAUTÉ faute de budget global (ni tenté, ni fautif)
+        # cas NON JUGÉ (budget, espace, sortie perdue, erreur du noteur) : il a pu TOURNER
+        # avant (ran=True) ; canary_verdict ne le juge pas pour autant.
+        self.skipped = skipped
         self.killed = killed  # mort PAR SIGNAL (OOM, SIGSEGV) — cause non concluante
 
 
@@ -4671,6 +4677,13 @@ def c_implementation_refusal(harness_names, cpp=False, classes=()):
     return implementation_reserved_message(implementation, cpp, classes) if implementation else None
 
 
+def java_shadowed_message(shadowed):
+    """Refus d'une classe soumise qui porte le nom d'un type de java.lang employé par le
+    harnais. PURE (testée). Même texte, accordé en nombre, que les autres langages : il restait
+    au singulier (« Nom de classe réservé », « renommez-la ») avec plusieurs classes."""
+    return reserved_name_message(shadowed, "java.lang", classes=set(shadowed))
+
+
 def implementation_reserved_message(names, cpp=False, classes=()):
     """Refus d'un nom que le harnais emploie et que la norme réserve au compilateur. PURE
     (testée). Le motif est la RÉSERVATION, pas un outil de la bibliothèque : le message ne cite
@@ -4750,15 +4763,25 @@ def c_probe_plan(names):
     return groups
 
 
-def reserved_name_message(names, origin, classes=()):
+def reserved_name_message(names, origin, classes=(), neutral=False, recipient="harnais"):
     """Message de refus d'une soumission qui reutilise un nom fourni au harnais. PURE (testée).
 
     `classes` : ceux des noms qui sont des CLASSES soumises (C++), pour ne pas les appeler
-    « fonction »."""
+    « fonction ». `neutral` : les noms ne sont pas forcément des fonctions (types, variables,
+    constantes Go ; données de la libc comme `stdout` lues par nm) — on dit « nom ».
+    `recipient` : qui en souffre — le « harnais », ou le « programme de correction » quand
+    c'est le serveur généré qui ne compilerait pas ou se lierait mal."""
     names = list(names)
+    listed = ", ".join("« %s »" % n for n in names)
+    if neutral:
+        if len(names) == 1:
+            return ("Nom réservé : %s est déjà fourni au %s par %s. Le %s ne pourrait pas le "
+                    "distinguer du vôtre ; renommez-le."
+                    % (listed, recipient, origin, recipient))
+        return ("Noms réservés : %s sont déjà fournis au %s par %s. Le %s ne pourrait pas les "
+                "distinguer des vôtres ; renommez-les." % (listed, recipient, origin, recipient))
     kinds = {"classe" if n in classes else "fonction" for n in names}
     kind = kinds.pop() if len(kinds) == 1 else None
-    listed = ", ".join("« %s »" % n for n in names)
     if len(names) == 1:
         return ("Nom de %s réservé : %s est déjà fourni au harnais par %s. Le harnais ne "
                 "pourrait pas distinguer votre %s de celle-ci ; renommez-la."
@@ -4767,6 +4790,28 @@ def reserved_name_message(names, origin, classes=()):
     ours = "vos %ss" % kind if kind else "vos fonctions et classes"
     return ("%s : %s sont déjà fournis au harnais par %s. Le harnais ne pourrait pas distinguer "
             "%s de celles-ci ; renommez-les." % (title, listed, origin, ours))
+
+
+def c_linked_symbols_message(linked):
+    """Refus d'un code qui redéfinit un symbole de la libc lu par nm. PURE (testée). Fonctions
+    OU données (`stdout`, `stdin`) : nom neutre ; c'est le programme de correction (le serveur
+    lié au code soumis) qui se lierait mal, pas le harnais."""
+    return reserved_name_message(linked, "la bibliothèque standard", neutral=True,
+                                 recipient="programme de correction")
+
+
+def go_predeclared_message(reserved):
+    """Refus d'un nom de paquet Go qui masque un identifiant prédéclaré. PURE (testée).
+    Fonction, type, variable ou constante (`type string struct{}`, `const true = 1`), qui
+    empêche le noteur ou le serveur généré de compiler : nom neutre, programme de correction."""
+    return reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)",
+                                 neutral=True, recipient="programme de correction")
+
+
+def go_package_message(packages):
+    """Refus d'un nom soumis égal à un paquet que le harnais importe. PURE (testée). Fonction
+    ou type : nom neutre ; c'est le harnais qui ne verrait plus le paquet."""
+    return reserved_name_message(packages, "un paquet Go importé pour le harnais", neutral=True)
 
 
 # Noteur C++ : une exception du HARNAIS (le code du prof) le terminait par std::terminate,
@@ -6906,12 +6951,7 @@ def run_java_rpc(case_dir, env, timeout_s, case_index):
     shadowed = java_shadowed_names(
         [klass] + [name for name, _, _ in obj_list if "." not in name], harness)
     if shadowed:
-        return None, ("Nom de classe réservé : %s %s déjà fourni%s au harnais par java.lang. "
-                      "Le harnais ne pourrait pas distinguer votre classe de celle-ci ; "
-                      "renommez-la."
-                      % (", ".join("« %s »" % n for n in shadowed),
-                         "est" if len(shadowed) == 1 else "sont",
-                         "" if len(shadowed) == 1 else "s"))
+        return None, java_shadowed_message(shadowed)
     write_private(os.path.join(grader_src, klass + ".java"),
                  java_stub_source(klass, method_list, java_grader_objects(obj_list, harness),
                                   own_ctors, own_instance, class_statics))
@@ -7405,8 +7445,7 @@ def run_c_rpc(case_dir, env, timeout_s, case_index, compiler, std, ext):
                                          preexec_c)
             linked = c_binary_linked_symbols(code, expired, nm_out)
             if linked:
-                return None, reserved_name_message(
-                    linked, "la bibliothèque standard, dont le programme de correction se sert")
+                return None, c_linked_symbols_message(linked)
 
     return finish_rpc_pair(case_dir, env, timeout_s, case_index,
                            grader_src, grader_bin, student_src, student_bin)
@@ -7490,9 +7529,9 @@ def run_go_rpc(case_dir, env, timeout_s, case_index):
     # bouchon : variables, constantes, types sans méthode, fonctions non transportables.
     reserved = list(dict.fromkeys(reserved + go_server_hidden(extraction)))
     if reserved:
-        return None, reserved_name_message(reserved, "le langage Go (identifiant prédéclaré)")
+        return None, go_predeclared_message(reserved)
     if packages:
-        return None, reserved_name_message(packages, "un paquet Go importé pour le harnais")
+        return None, go_package_message(packages)
     grader_methods, grader_objects = go_without_hidden(method_list, obj_list, hidden)
 
     # Deux modules Go indépendants : le harnais n'est NI compilé avec le code étudiant, NI

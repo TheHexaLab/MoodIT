@@ -22,9 +22,14 @@ l'endpoint interne d'execution-service (le chemin de la correction), puis classe
               verdict, ou le détail n'est pas reconnu : le script ne peut pas conclure, rejouer
               à la main avec une solution (« Tester ») ;
   NOTEUR INDISPONIBLE
-              le noteur n'a pas répondu (saturé, injoignable, réponse coupée, jeton refusé),
-              même après 2 min de nouveaux essais : rien n'est su de la question, son quiz n'est
-              jamais fermé pour ce motif ; relancer le script ;
+              le noteur n'a pas donné de verdict : saturé (429, 502 « indisponible ») ou
+              injoignable (connexion refusée ou non établie en 10 s) encore après 2 min de
+              nouveaux essais comptées depuis le premier échec, ou, sans nouvel essai, jeton
+              refusé (401/403), réponse coupée ou délai de lecture dépassé. Après une connexion
+              impossible jusqu'au bout du budget, les questions suivantes ne sont plus tentées.
+              Son quiz n'est jamais fermé pour ce seul motif : un contrôle statique qui met déjà
+              la question en cause la garde À VÉRIFIER (et son quiz est fermé). Contrôle
+              incomplet, sortie 3 : relancer le script ;
   OK          le harnais a compilé et tourné (qu'il passe ou non contre le code de départ
               incomplet), prouvé par le verdict ou par un détail de la liste blanche HARNESS_RAN.
 
@@ -44,7 +49,7 @@ sort À VÉRIFIER : le noteur séparé n'en reçoit pas le type, toute bonne ré
 
 Code de sortie : 0 si aucun quiz PUBLIÉ ne porte de question BLOQUANT ou À VÉRIFIER non
 acquittée, 1 sinon, 2 si l'inventaire est impossible ou VIDE (--allow-empty pour accepter une
-base sans aucune question), 3 si une question au moins est restée sans réponse du noteur
+base sans aucune question), 3 si une question au moins est restée sans verdict du noteur
 (contrôle incomplet, à relancer ; les quiz prouvés en cause sont fermés quand même avec
 --unpublish). Une question d'un quiz NON publié (brouillon, quiz fermé) est listée
 sans bloquer : aucun étudiant ne peut la soumettre, et la corriger avant de (ré)ouvrir le quiz
@@ -776,8 +781,10 @@ def main():
             else:
                 drafts += 1
 
-    print("\nBilan : %d bloquant(s), %d à vérifier, %d ok, %d sans réponse du noteur." % (
-        counts[BLOCKING], counts[TO_CHECK], counts[OK], counts[UNAVAILABLE]))
+    # « sans verdict du noteur » : le compte qui décide de la sortie 3, questions À VÉRIFIER par
+    # un contrôle statique comprises (counts[UNAVAILABLE] les oubliait).
+    print("\nBilan : %d bloquant(s), %d à vérifier, %d ok, %d sans verdict du noteur." % (
+        counts[BLOCKING], counts[TO_CHECK], counts[OK], grader["incomplete"]))
     if drafts:
         print("Dont %d dans des quiz non publiés : sans effet sur la sortie, à corriger avant "
               "d'ouvrir leur quiz." % drafts)

@@ -64,7 +64,7 @@ un compte **neuf**.
 | `auth`, `account`, `profile`, `navigation` | compte, réglages, barre latérale |
 | `subscription`, `course-admin`, `sections`, `establishments`, `roles`, `audit` | gestion (abonnements, cours, programmes, rôles, journal) |
 | `chat`, `forum`, `mcp` | temps réel, forum complet, analyse MCP |
-| `quiz`, `quiz-editor`, `quiz-review` | quiz côté étudiant (6 types, runner Docker) et éditeur ; tentatives « à revoir » (#116 : réponses simulées par `page.route`, audit axe, routes réelles 200/404/403) |
+| `quiz`, `quiz-editor`, `quiz-review` | quiz côté étudiant (6 types, runner Docker ; route de statut d'une tentative : 200 pending/done, 404) et éditeur ; tentatives « à revoir » (#116 : réponses simulées par `page.route`, audit axe, routes réelles 200/404/403) |
 | `errors` | chaque action sous panne serveur (500) puis réseau (`abort`) : message, saisie conservée, reprise |
 | `scrolling`, `details` | défilements infinis ; Markdown complet, validations, longueurs max, quiz du jour, hors-ligne |
 | `a11y`, `keyboard`, `focus-visible` | audit axe (WCAG 2.1 AA, clair + sombre), navigation clavier, indicateur de focus |

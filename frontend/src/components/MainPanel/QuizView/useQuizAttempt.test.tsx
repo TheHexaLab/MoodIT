@@ -1070,6 +1070,59 @@ describe('réconciliation via polling de secours', () => {
     expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
   });
 
+  it.each([
+    // Vue démontée pendant le POST : l'id du 202 est quand même écrit (statut lisible au retour).
+    ['marqueur toujours le nôtre → id écrit', false, 9],
+    // Un autre onglet a écrit un envoi plus récent pendant ce POST : il n'est pas écrasé.
+    ['marqueur d’un envoi plus récent (autre onglet) → laissé tel quel', true, 77],
+  ])('202 reçu vue démontée : %s', async (_case, otherTab, expectedId) => {
+    let resolvePost!: (v: { attemptId: number }) => void;
+    const { result, unmount } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        onSubmitQuiz: vi.fn(() => new Promise<{ attemptId: number }>((r) => { resolvePost = r; })),
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { void result.current.submit(); });
+    unmount();
+    if (otherTab) {
+      localStorage.setItem(
+        `moodit:quiz-pending-submission:${QUIZ_ID}`,
+        JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 77, submittedAt: Date.now() + 1 })
+      );
+    }
+    await act(async () => { resolvePost({ attemptId: 9 }); });
+    const marker = JSON.parse(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)!);
+    expect(marker.attemptId).toBe(expectedId);
+  });
+
+  it('marqueur SANS id relu au remontage (rechargement pendant le POST) : attente bornée, puis « non confirmée »', async () => {
+    // Son statut ne peut pas être lu : sans borne, une tentative supprimée gardait le voile 45 min.
+    vi.useFakeTimers();
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, knownAttemptIds: [], submittedAt: Date.now() })
+    );
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => [] as AttemptSummary[]),
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(result.current.reconciling).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+    expect(result.current.submitError).toBe('NOT_CONFIRMED');
+    expect(result.current.reconciling).toBe(false);
+    vi.useRealTimers();
+  });
+
   it('verdict de la NOUVELLE tentative reçu vue fermée (échec) : consommé au retour', async () => {
     // Changement de canal pendant le POST (marqueur sans id), la correction échoue pendant
     // l'absence : le Dashboard garde ce verdict et le représente au montage. C'est le sien

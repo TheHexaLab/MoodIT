@@ -386,6 +386,32 @@ class QuizServiceSubmitIT {
   }
 
   @Test
+  @DisplayName("Trou de numérotation (tentatives 1 et 3) : la soumission suivante prend le n° 4, sans collision")
+  void attemptNumberingGap_nextSubmissionTakesMaxPlusOne() {
+    // Une tentative supprimée (correction échouée) laisse un trou : numéroter sur le comptage
+    // (2 + 1 = 3) heurtait UNIQUE(quiz,user,attempt_no) à chaque soumission suivante. Lu ici par
+    // la VRAIE requête d'agrégats du contrôle préalable (comptage, plus grand n°, pending).
+    em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
+    Quiz quiz = em.find(Quiz.class, quizId);
+    User user = em.getEntityManager()
+        .createQuery("SELECT u FROM User u WHERE u.email = :email", User.class)
+        .setParameter("email", USER_EMAIL).getSingleResult();
+    persistAttempt(quiz, user, 1, "done");
+    persistAttempt(quiz, user, 3, "done");
+    em.flush();
+    em.clear();
+
+    Integer newId = quizService.submitQuiz(quizId, submissionWithCode("print(1)"), USER_EMAIL);
+
+    assertThat(attemptRepository.findById(newId)).get()
+        .satisfies(a -> {
+          assertThat(a.getAttemptNo()).isEqualTo(4);
+          assertThat(a.getStatus()).isEqualTo("pending");
+        });
+    assertThat(count("SELECT count(*) FROM attempt")).isEqualTo(3L);
+  }
+
+  @Test
   @DisplayName("Soumission pendant une RELANCE de l'enseignant, quiz AVEC reprise : refusée « relance », pas « en cours »")
   void submissionDuringTeacherRegrade_withRetry_isRegradeInProgress() {
     em.getEntityManager().createNativeQuery("UPDATE quiz SET allow_retry = TRUE").executeUpdate();
