@@ -294,7 +294,7 @@ public class DockerSandbox {
      * répondait 502. Une fois le nombre de CPU de l'hôte (NCPU) connu, la valeur configurée y
      * est plafonnée : limite effective — tout l'hôte —, au lieu d'un refus.
      *
-     * <p>Tant que NCPU est INCONNU (lecture en cours par une autre exécution, ou dans les
+     * <p>Tant que NCPU est INCONNU (lecture en cours — préchauffage ou autre exécution —, ou dans les
      * {@link #CPU_READ_RETRY} qui suivent un échec), la valeur rendue est
      * {@code min(SANDBOX_CPUS, 1 CPU)} : toujours acceptée par le démon, et toujours une borne,
      * seulement plus stricte. Rendre la valeur configurée faisait échouer en 502 les
@@ -317,7 +317,7 @@ public class DockerSandbox {
             return unknown;   // échec récent : pas de nouvelle tentative avant l'échéance
         }
         if (!cpuReadInFlight.compareAndSet(false, true)) {
-            return unknown;   // une autre exécution lit déjà : ne pas l'attendre
+            return unknown;   // lecture déjà en cours (préchauffage ou autre exécution) : ne pas l'attendre
         }
         try {
             return readUnderFlag(docker, unknown);

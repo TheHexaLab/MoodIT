@@ -532,8 +532,10 @@ def canary_verdict(cases, outcomes):
          cas réel n'est vert, donc aucune détection n'est perdue, et toutes les façons dont un
          code HONNÊTE peut faire échouer ses canaris cessent d'accuser — expiration, mort par
          signal, mais aussi sortie non nulle sans signal (une panique Go au chargement sort
-         avec le statut 2 ; en Go et C/C++ le code étudiant partage l'unité de compilation du
-         canari, donc son init()/constructeur global y tourne aussi) ;
+         avec le statut 2 : le canari n'appelle aucune fonction soumise, mais le SERVEUR de
+         l'étudiant tourne à chaque cas, canaris compris, et son init() ou constructeur global
+         peut le faire tomber — le noteur du canari rend alors « processus étudiant
+         terminé ») ;
       2. un canari dont la COMPILATION a échoué pour une cause NON CONCLUANTE n'accuse jamais,
          même avec un cas réel vert : il n'a pas été saboté, il n'a pas pu être compilé ;
       3. un canari qui a TOURNÉ mais fini sur une cause NON CONCLUANTE (expiré, noteur tué par
@@ -4583,16 +4585,26 @@ static const char *moodit_valeur(const char *id) {
 C_GRADER_HEADER = "#include <math.h>\n#include <stdbool.h>\n"
 
 
-def c_probe_source(names):
+def c_grader_header(cpp=False):
+    """En-têtes propres au NOTEUR C/C++, avant C_RUNTIME. FONCTION PURE (testée). SEULE source
+    des en-têtes du noteur ET de la sonde des noms réservés : en C++, le noteur inclut aussi
+    `<exception>` (relais des exceptions du harnais, CPP_GRADER_GUARD), qui déclare à son tour
+    `offsetof`, `ptrdiff_t`, `max_align_t`, `nullptr_t`… — absente de la sonde, une fonction
+    soumise de ce nom que le harnais emploie donnait « Le harnais ne compile pas » au lieu du
+    refus qui la nomme."""
+    return C_GRADER_HEADER + ("#include <exception>\n" if cpp else "")
+
+
+def c_probe_source(names, cpp=False):
     """Sonde des noms RESERVES du noteur C/C++. FONCTION PURE (testée).
 
-    Reprend exactement les en-tetes que voit le harnais (C_GRADER_HEADER, puis ceux de
+    Reprend exactement les en-tetes que voit le harnais (c_grader_header, puis ceux de
     C_RUNTIME) et declare chaque nom comme une VARIABLE : la sonde compile si et seulement si
     aucun de ces en-tetes ne declare deja ce nom (fonction, surcharge C++ ou mot-cle), et le
     #ifdef attrape les macros (`isnan`, `true` en C), qu'une variable ne heurterait pas."""
     includes = "".join(l + "\n" for l in C_RUNTIME.splitlines() if l.startswith("#include"))
     checks = "".join("#ifdef %s\n#error moodit_reserve\n#endif\nint %s;\n" % (n, n) for n in names)
-    return C_GRADER_HEADER + includes + checks
+    return c_grader_header(cpp) + includes + checks
 
 
 # Identifiants RESERVES A L'IMPLEMENTATION (C17 7.1.3, C++ [lex.name]) : tout nom qui commence
@@ -4631,7 +4643,7 @@ def c_reserved_names(names, compiler, std, case_dir, env):
         remaining = deadline - time.monotonic()
         code, expired = None, True
         if remaining > 0:
-            write_private(probe, c_probe_source(subset))
+            write_private(probe, c_probe_source(subset, cpp=compiler != "gcc"))
             code, expired = run_proc([compiler, std, "-fno-builtin", "-fsyntax-only", probe],
                                      case_dir, env, remaining,
                                      os.path.join(case_dir, "sonde.out"),
@@ -4731,7 +4743,7 @@ def c_grader_source(methods, harness_code, nonce, cpp=False, obj_list=()):
     # (c_reserved_names). Sinon le #define detournait vers le code note les `fabs`, `sqrt`,
     # `isnan`… que le harnais utilise comme OUTILS, et une `fabs` soumise qui renvoie 0
     # faisait passer `fabs(f(x) - attendu) < 1e-9` quel que soit f.
-    header = C_GRADER_HEADER + ("#include <exception>\n" if cpp else "")
+    header = c_grader_header(cpp)
     renames = "".join("#define %s moodit_f_%s\n" % (n, n)
                          for n in dict.fromkeys(ident for _, ident, _ in methods))
     return header + C_RUNTIME + (CPP_GRADER_GUARD if cpp else "") + r'''
@@ -6649,9 +6661,10 @@ def javap_aborted_message(klass):
 
 
 # Refus d'un `package …;` dans le code soumis Java (cf. run_java_rpc), tel que l'étudiant le lit.
-JAVA_PACKAGE_REFUSAL = ("Retirez la ligne « package … ; » en tête du fichier : la notation attend "
-                        "la classe dans le paquet par défaut. (Le bouton « Exécuter » l'accepte, "
-                        "pas la notation.)")
+# Le bouton « Exécuter » ne l'accepte pas davantage : il lance `java Solution.java` à plat, et le
+# JDK refuse (« end of path to source file does not match its package name »).
+JAVA_PACKAGE_REFUSAL = ("Retirez la ligne « package … ; » en tête du fichier : la notation, comme "
+                        "le bouton « Exécuter », attend la classe dans le paquet par défaut.")
 
 
 def java_class_count_refusal(count):

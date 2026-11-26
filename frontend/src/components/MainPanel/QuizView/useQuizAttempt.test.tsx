@@ -524,8 +524,9 @@ describe('réconciliation via polling de secours', () => {
     await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(6));
     expect(result.current.phase).toBe('summary');
     expect(result.current.submitError).toBeNull();
-    // Aucun sondage (premier prévu à 1,5 s) : seule la lecture du résumé a relu l'historique.
-    expect(onFetchAttempts.mock.calls.length).toBe(callsBefore + 1);
+    // Aucun sondage (premier prévu à 1,5 s) : seules la relecture au 409 (liste peut-être
+    // périmée) et la lecture du résumé ont relu l'historique.
+    expect(onFetchAttempts.mock.calls.length).toBe(callsBefore + 2);
     vi.useRealTimers();
   });
 
@@ -638,8 +639,11 @@ describe('réconciliation via polling de secours', () => {
     }
     await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
     expect(result.current.reconciling).toBe(false);
-    // Marqueur effacé : rien ne relancera cette attente.
-    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+    // Expiré dès le montage : marqueur effacé, rien ne relancera cette attente. Expiré PENDANT
+    // l'attente : gardé, pour qu'un remontage ouvre le résultat plutôt que la passation.
+    const marker = localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`);
+    if (waits) expect(marker).not.toBeNull();
+    else expect(marker).toBeNull();
     vi.useRealTimers();
   });
 
@@ -754,10 +758,13 @@ describe('réconciliation via polling de secours', () => {
 
   it.each([
     // La correction a fini après le plafond, verdict manqué : « Réessayer » ouvre son résumé.
-    ['apparue (corrigée) → résumé ouvert, aucun renvoi', true],
+    ['apparue (corrigée) → résumé ouvert, aucun renvoi', [summary(9)], true],
     // Toujours absente : seulement alors on renvoie ; 409 « en_cours » → reprise de l'attente.
-    ['absente → renvoi, puis attente sur 409 « en_cours »', false],
-  ])('« Réessayer » après le plafond, tentative %s', async (_case, landed) => {
+    ['absente → renvoi, puis attente sur 409 « en_cours »', [] as AttemptSummary[], false],
+    // Seule une AUTRE tentative (#10, autre onglet) est apparue : ce n'est pas la nôtre (#9,
+    // id connu) — renvoi, et #10 n'est pas ouverte à sa place.
+    ['absente, une autre (autre onglet) apparue → renvoi', [summary(10)], false],
+  ])('« Réessayer » après le plafond, tentative %s', async (_case, after, landed) => {
     vi.useFakeTimers();
     let history: AttemptSummary[] = [];
     const onSubmitQuiz = vi
@@ -781,7 +788,7 @@ describe('réconciliation via polling de secours', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(46 * 60_000); });
     await vi.waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
 
-    if (landed) history = [summary(9)];
+    history = after;
     await act(async () => { await result.current.submit(); await vi.advanceTimersByTimeAsync(0); });
     if (landed) {
       await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
@@ -791,6 +798,7 @@ describe('réconciliation via polling de secours', () => {
       expect(onSubmitQuiz).toHaveBeenCalledTimes(2);
       expect(result.current.reconciling).toBe(true);
       expect(result.current.submitError).toBeNull();
+      expect(result.current.phase).toBe('taking');
     }
     vi.useRealTimers();
   });
@@ -799,7 +807,9 @@ describe('réconciliation via polling de secours', () => {
     // Marqueur d'un envoi dont la vue n'a jamais reçu l'id (démontée pendant le POST), expiré.
     localStorage.setItem(
       `moodit:quiz-pending-submission:${QUIZ_ID}`,
-      JSON.stringify({ answers: {}, attemptsBefore: 1, knownAttemptIds: [5], submittedAt: Date.now() - 50 * 60_000 })
+      // 12 = dernier verdict vu à l'envoi (tentative supprimée, absente de l'historique) : le
+      // compte « une de plus qu'avant » (2) ne verrait pas la nouvelle tentative #6.
+      JSON.stringify({ answers: {}, attemptsBefore: 2, knownAttemptIds: [5, 12], submittedAt: Date.now() - 50 * 60_000 })
     );
     let history: AttemptSummary[] = [summary(5)];
     const onSubmitQuiz = vi.fn(async () => ({ attemptId: 99 }));
@@ -820,9 +830,46 @@ describe('réconciliation via polling de secours', () => {
     expect(onSubmitQuiz).not.toHaveBeenCalled();
   });
 
+  it('« Réessayer » avec un historique illisible : aucun renvoi, message rétabli, puis relecture', async () => {
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    let history: AttemptSummary[] = [];
+    let failNext = false;
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 99 }));
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => {
+          if (failNext) {
+            failNext = false;
+            throw new Error('réseau');
+          }
+          return history;
+        }),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz,
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    failNext = true;
+    await act(async () => { await result.current.submit(); });
+    expect(onSubmitQuiz).not.toHaveBeenCalled();
+    expect(result.current.submitError).toBe('NOT_CONFIRMED');
+    // La soumission reste attendue : le « Réessayer » suivant la relit et l'ouvre.
+    history = [summary(9)];
+    await act(async () => { await result.current.submit(); });
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(9));
+    expect(onSubmitQuiz).not.toHaveBeenCalled();
+  });
+
   it('verdict reçu mais résultat illisible : libellé dédié, puis « Réessayer » l’ouvre sans renvoi', async () => {
     let outcome: AttemptOutcome | null = null;
     let history: AttemptSummary[] = [];
+    let failNext = false;
     const onFetchAttemptResult = vi
       .fn<(quizId: number, attemptId: number) => Promise<ReturnType<typeof makeResult>>>()
       .mockRejectedValueOnce(new Error('réseau'))
@@ -832,7 +879,13 @@ describe('réconciliation via polling de secours', () => {
       useQuizAttempt({
         initialQuiz,
         onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
-        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttempts: vi.fn(async () => {
+          if (failNext) {
+            failNext = false;
+            throw new Error('réseau');
+          }
+          return history;
+        }),
         onFetchAttemptResult,
         onSubmitQuiz,
         attemptOutcome: outcome,
@@ -847,10 +900,164 @@ describe('réconciliation via polling de secours', () => {
     await waitFor(() => expect(result.current.submitError).toBe('RESULT_KO'));
     expect(result.current.phase).toBe('taking');
 
+    // « Réessayer » avec un historique illisible : le message d'ORIGINE est rétabli.
+    failNext = true;
+    await act(async () => { await result.current.submit(); });
+    expect(result.current.submitError).toBe('RESULT_KO');
+    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+
     await act(async () => { await result.current.submit(); });
     await waitFor(() => expect(result.current.result?.attemptId).toBe(9));
     expect(result.current.phase).toBe('summary');
     expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+  });
+
+  it('quiz SANS reprise, résultat illisible après le verdict : « Soumettre » n’est pas grisé, « Réessayer » ouvre le résumé', async () => {
+    // `attempts` posé avant la lecture du résultat grisait « Soumettre » (« déjà soumis ») : plus
+    // rien ne menait au résultat une fois le message fermé.
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [];
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 9 }));
+    // Espion STABLE : recréé à chaque rendu, il rejetterait à chaque nouvelle instance.
+    const onFetchAttemptResult = vi
+      .fn<(quizId: number, attemptId: number) => Promise<ReturnType<typeof makeResult>>>()
+      .mockRejectedValueOnce(new Error('réseau'))
+      .mockResolvedValue(makeResult(9));
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: false })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult,
+        onSubmitQuiz,
+        attemptOutcome: outcome,
+        resultUnavailableMessage: 'RESULT_KO',
+      })
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { result.current.submit(); await Promise.resolve(); });
+    history = [summary(9)];
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    await waitFor(() => expect(result.current.submitError).toBe('RESULT_KO'));
+    expect(result.current.alreadySubmitted).toBe(false);
+    await act(async () => { await result.current.submit(); });
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(9));
+    expect(onSubmitQuiz).toHaveBeenCalledTimes(1);
+  });
+
+  it('« Réessayer » : verdict poussé PENDANT la relecture de l’historique → conclut, aucun renvoi', async () => {
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    let outcome: AttemptOutcome | null = null;
+    let history: AttemptSummary[] = [];
+    let releaseRead: ((h: AttemptSummary[]) => void) | null = null;
+    const onFetchAttempts = vi.fn(async () => history);
+    const onSubmitQuiz = vi.fn(async () => ({ attemptId: 99 }));
+    const { result, rerender } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts,
+        onFetchAttemptResult: vi.fn(async () => makeResult(9)),
+        onSubmitQuiz,
+        attemptOutcome: outcome,
+        submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+      })
+    );
+    await waitFor(() => expect(result.current.submitError).toBe('NOT_CONFIRMED'));
+    onFetchAttempts.mockImplementationOnce(() => new Promise((r) => { releaseRead = r; }));
+    act(() => { void result.current.submit(); });
+    await waitFor(() => expect(releaseRead).not.toBeNull());
+    // Le verdict arrive pendant la relecture, qui répond ensuite sans la tentative.
+    outcome = { quizId: QUIZ_ID, attemptId: 9, ok: true };
+    rerender();
+    history = [summary(9)];
+    await act(async () => { releaseRead!([]); });
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(9));
+    expect(onSubmitQuiz).not.toHaveBeenCalled();
+  });
+
+  it('plafond atteint pendant l’attente : marqueur gardé, le remontage ouvre le résultat (pas la passation)', async () => {
+    vi.useFakeTimers();
+    let history: AttemptSummary[] = [];
+    const params = {
+      initialQuiz,
+      onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+      onFetchAttempts: vi.fn(async () => history),
+      onFetchAttemptResult: vi.fn(async () => makeResult(9)),
+      onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })),
+      submissionNotConfirmedMessage: 'NOT_CONFIRMED',
+    };
+    const first = renderHook(() => useQuizAttempt(params));
+    await vi.waitFor(() => expect(first.result.current.loading).toBe(false));
+    act(() => { first.result.current.setAnswer(101, { kind: 'choice', answerIds: [1] }); });
+    act(() => { void first.result.current.submit(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(46 * 60_000); });
+    await vi.waitFor(() => expect(first.result.current.submitError).toBe('NOT_CONFIRMED'));
+    first.unmount();
+    // Effacé, le marqueur laissait le brouillon rouvrir la passation (et « Soumettre » créer une
+    // seconde tentative) alors que la correction a abouti entre-temps.
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).not.toBeNull();
+    history = [summary(9)];
+    const { result } = renderHook(() => useQuizAttempt(params));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await vi.waitFor(() => expect(result.current.phase).toBe('summary'));
+    expect(result.current.result?.attemptId).toBe(9);
+    expect(localStorage.getItem(`moodit:quiz-pending-submission:${QUIZ_ID}`)).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('409 « en_cours » avec une liste périmée (autre appareil) : l’historique est relu, la bonne tentative s’ouvre', async () => {
+    // La vue ne connaît que #1 ; le serveur a déjà #2 (autre appareil), et #3 est en correction.
+    vi.useFakeTimers();
+    let history: AttemptSummary[] = [summary(1)];
+    const onFetchAttempts = vi.fn(async () => history);
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts,
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+        onSubmitQuiz: vi.fn(async () => {
+          throw new SubmissionInProgressError();
+        }),
+      })
+    );
+    await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(1));
+    act(() => result.current.retry());
+    history = [summary(1), summary(2, 2)];
+    await act(async () => { result.current.submit(); await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.reconciling).toBe(true);
+    // Sondage : #2 seule n'est pas la tentative attendue…
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+    expect(result.current.reconciling).toBe(true);
+    // … #3, si.
+    history = [summary(1), summary(2, 2), summary(3, 3)];
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+    await vi.waitFor(() => expect(result.current.result?.attemptId).toBe(3));
+    vi.useRealTimers();
+  });
+
+  it('plusieurs tentatives inconnues : la PLUS RÉCENTE est l’attendue', async () => {
+    localStorage.setItem(
+      `moodit:quiz-pending-submission:${QUIZ_ID}`,
+      JSON.stringify({ answers: {}, attemptsBefore: 1, knownAttemptIds: [1], submittedAt: Date.now() })
+    );
+    let history: AttemptSummary[] = [summary(1)];
+    const { result } = renderHook(() =>
+      useQuizAttempt({
+        initialQuiz,
+        onFetchQuiz: vi.fn(async () => makeQuiz({ allowRetry: true })),
+        onFetchAttempts: vi.fn(async () => history),
+        onFetchAttemptResult: vi.fn(async (_q: number, id: number) => makeResult(id)),
+      })
+    );
+    await waitFor(() => expect(result.current.reconciling).toBe(true));
+    history = [summary(1), summary(2, 2), summary(3, 3)];
+    await waitFor(() => expect(result.current.result?.attemptId).toBe(3), { timeout: 3000 });
   });
 
   it('envoi pendant l’attente lancée au REMONTAGE (marqueur en vol) : ignoré, marqueur intact', async () => {

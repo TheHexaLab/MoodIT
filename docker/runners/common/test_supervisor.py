@@ -2716,7 +2716,12 @@ class ReservedNamesTest(unittest.TestCase):
 
     def test_c_probe_uses_the_grader_headers_and_catches_macros(self):
         probe = supervisor.c_probe_source(["fabs", "isnan"])
-        self.assertTrue(probe.startswith(supervisor.C_GRADER_HEADER))
+        self.assertTrue(probe.startswith(supervisor.c_grader_header(False)))
+        self.assertNotIn("<exception>", probe)
+        # En C++, l'en-tête que le NOTEUR ajoute (<exception>) est sondé lui aussi.
+        cpp_probe = supervisor.c_probe_source(["offsetof"], cpp=True)
+        self.assertTrue(cpp_probe.startswith(supervisor.c_grader_header(True)))
+        self.assertIn("#include <exception>", cpp_probe)
         for header in ("<stdio.h>", "<stdlib.h>", "<string.h>"):
             self.assertIn("#include " + header, probe)
         self.assertIn("#ifdef isnan\n#error moodit_reserve\n#endif\nint isnan;\n", probe)
@@ -2739,6 +2744,11 @@ class ReservedNamesTest(unittest.TestCase):
                 self.assertEqual(found, ["fabs", "sqrt", "isnan", "abs", "true"])
                 self.assertEqual(supervisor.c_reserved_names(["moitie", "f"], compiler, std, d,
                                                              dict(os.environ)), [])
+                # `offsetof` (macro de <cstddef>, qu'apporte le <exception> du noteur C++) :
+                # refusé en C++, où le harnais le voit ; libre en C, où il ne le voit pas.
+                self.assertEqual(supervisor.c_reserved_names(["offsetof"], compiler, std, d,
+                                                             dict(os.environ)),
+                                 ["offsetof"] if compiler == "g++" else [])
 
     def test_c_implementation_reserved_names(self):
         # `HUGE_VAL` se developpe en `__builtin_huge_val ()` : une fonction soumise de ce nom,
@@ -4971,8 +4981,11 @@ class PlatformInterruptionTest(unittest.TestCase):
         # Message lu par l'étudiant : accents, vouvoiement, « Exécuter » comme dans l'interface.
         message = supervisor.JAVA_PACKAGE_REFUSAL
         self.assertTrue(message.startswith("Retirez la ligne « package … ; » en tête du fichier"))
-        for word in ("par défaut", "« Exécuter »", "l'accepte"):
+        for word in ("par défaut", "« Exécuter »"):
             self.assertIn(word, message)
+        # « Exécuter » ne l'accepte PAS (java <Classe>.java à plat : « end of path to source file
+        # does not match its package name ») : le message ne doit pas promettre le contraire.
+        self.assertNotIn("accepte", message)
         self.assertIn("return None, JAVA_PACKAGE_REFUSAL", inspect.getsource(supervisor.run_java_rpc))
 
     def test_java_rpc_server_compile_abort_is_interrupted(self):
@@ -5196,6 +5209,22 @@ class PlatformInterruptionTest(unittest.TestCase):
                     self.assertTrue(detail.startswith("[MOODIT] harnais: "), detail)
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    def test_probe_sees_exactly_the_grader_headers(self):
+        # Le noteur C++ inclut <exception> (relais des exceptions du harnais) : la sonde doit le
+        # voir aussi, sinon `offsetof`, `ptrdiff_t`… échappaient au refus nommé et donnaient
+        # « Le harnais ne compile pas ». Une seule fonction fournit les deux.
+        for cpp in (False, True):
+            with self.subTest(cpp=cpp):
+                header = supervisor.c_grader_header(cpp)
+                self.assertTrue(supervisor.c_probe_source(["f"], cpp=cpp).startswith(header))
+                self.assertTrue(supervisor.c_grader_source([], "return 1;", "N", cpp=cpp)
+                                .startswith(header))
+        self.assertIn("<exception>", supervisor.c_grader_header(True))
+        self.assertNotIn("<exception>", supervisor.c_grader_header(False))
+        self.assertIn('c_probe_source(subset, cpp=compiler != "gcc")',
+                      inspect.getsource(supervisor.c_reserved_names))
+        # Compilation réelle : cf. test_c_reserved_names_with_the_real_compilers (`offsetof`).
 
     def test_c_tools_have_short_dedicated_timeouts(self):
         # Mirroir de DockerEvaluator.toolsPerCaseMs/toolsPerJobMs (et de core) : 20 s de sondes

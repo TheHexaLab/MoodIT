@@ -65,6 +65,10 @@ export interface QuizViewLabels {
   reviewGraded: string;
   /** Titre du popup d'erreur de soumission. */
   errorTitle: string;
+  /** Titre du popup quand la correction n'est pas encore confirmée (`submissionNotConfirmed`). */
+  pendingTitle: string;
+  /** Titre du popup quand la tentative est enregistrée mais son résultat illisible. */
+  resultUnavailableTitle: string;
   /** Bouton « réessayer » (erreur de chargement). */
   retry: string;
   /** Quiz sans question. */
@@ -119,6 +123,8 @@ export const defaultQuizViewLabels: QuizViewLabels = {
     "La correction automatique de votre code n'a pas abouti. Votre tentative est enregistrée et votre enseignant va relancer sa correction : vous recevrez votre résultat ici.",
   reviewGraded: 'Votre tentative a été corrigée : son résultat est affiché.',
   errorTitle: 'Soumission impossible',
+  pendingTitle: 'Correction en cours',
+  resultUnavailableTitle: 'Résultat indisponible',
   retry: 'Réessayer',
   empty: 'Ce quiz ne contient pas encore de question.',
   toDashboard: 'Tableau de bord',

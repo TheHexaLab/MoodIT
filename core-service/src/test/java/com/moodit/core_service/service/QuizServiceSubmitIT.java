@@ -70,7 +70,9 @@ import org.springframework.test.context.transaction.TestTransaction;
       "spring.datasource.driver-class-name=org.h2.Driver",
       "spring.datasource.username=sa",
       "spring.datasource.password=",
-      "spring.jpa.hibernate.ddl-auto=create-drop"
+      "spring.jpa.hibernate.ddl-auto=create-drop",
+      // Les scénarios du plafond comptent trois échecs : le figer, quel que soit le .env local.
+      "app.quiz.grading.max-no-verdict-failures=3"
     })
 class QuizServiceSubmitIT {
 

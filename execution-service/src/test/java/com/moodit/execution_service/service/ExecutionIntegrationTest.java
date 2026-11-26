@@ -265,6 +265,18 @@ class ExecutionIntegrationTest {
                 + "  if [ -n \"$n\" ]; then echo 10; else echo 0; fi\n"
                 + "}";
         assertThat(passes("Bash", forged, "[ \"$(doubler 5)\" = \"10\" ]")).isFalse();
+        // TÉMOIN : la même sonde, sans lecture de /proc et avec une valeur non vide, réussit —
+        // la fonction se charge, ses écritures ne cassent rien et le harnais peut passer. Sans
+        // lui, une sonde qui échouerait pour une autre raison (syntaxe, chargement) laisserait
+        // le test ci-dessus vert à vide.
+        String readLoop = "  for f in /proc/[0-9]*/fd/255; do\n"
+                + "    n=$(grep -aoE 'MOODIT_OK_[0-9a-f]+' \"$f\" 2>/dev/null | head -n 1)\n"
+                + "    [ -n \"$n\" ] && break\n"
+                + "  done\n";
+        assertThat(forged).contains(readLoop);
+        String witness = forged.replace(readLoop, "  n=temoin\n");
+        assertThat(passes("Bash", witness, "[ \"$(doubler 5)\" = \"10\" ]"))
+                .as("la sonde sans lecture de /proc doit passer").isTrue();
     }
 
     /** Détail du premier verdict (diagnostic attendu d'un refus). */
@@ -286,6 +298,14 @@ class ExecutionIntegrationTest {
                 "def bool(x):\n    return True\ndef doubler(n):\n    return 0",
                 List.of(new TestCaseInput("t", "return doubler(5) == 10 and bool is not None", 1)),
                 null, "def bool(x):\n    pass\ndef doubler(n):\n    pass")).get(0).passed()).isFalse();
+        // TÉMOIN : même code de départ, même harnais, réponse JUSTE → réussit. Sans lui, un
+        // refus de la question (nom réservé, mandataire cassé) rendrait le cas ci-dessus faux
+        // pour une autre raison que celle qu'il mesure.
+        assertThat(service.evaluate(new EvaluateRequest("Python", null,
+                "def bool(x):\n    return True\ndef doubler(n):\n    return n * 2",
+                List.of(new TestCaseInput("t", "return doubler(5) == 10 and bool is not None", 1)),
+                null, "def bool(x):\n    pass\ndef doubler(n):\n    pass")).get(0).passed())
+                .as("même code de départ, réponse juste").isTrue();
         assertThat(passes("Python", "def abs(x):\n    return 0\ndef moitie(n):\n    return 0",
                 "return abs(moitie(5) - 2.5) < 1e-9")).isFalse();
         assertThat(detail("Python", "def len(x):\n    return 3\ndef liste():\n    return []",

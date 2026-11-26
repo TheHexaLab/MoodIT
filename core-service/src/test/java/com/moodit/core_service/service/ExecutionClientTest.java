@@ -228,7 +228,7 @@ class ExecutionClientTest {
                 .isEqualTo(10_000 + 15_000 + cWall + 5_000 + LIFECYCLE);
         assertThat(client.readTimeoutMs(" c ", 4, 10_000))
                 .isEqualTo(10_000 + 15_000 + cWall + 5_000 + LIFECYCLE);
-        // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus ~3 h.
+        // Plafonné par le mur du serveur (15 min) : 100 harnais ne donnent plus plusieurs heures.
         assertThat(client.readTimeoutMs("Java", 202, 60_000))
                 .isEqualTo(10_000 + 15_000 + 15 * 60_000 + 5_000 + LIFECYCLE);
         // TypeScript : unité exec ordinaire — les 75 s de mur couvrent la transpilation (60 s).
@@ -242,7 +242,7 @@ class ExecutionClientTest {
         ExecutionClient client = client("http://localhost:1", 10_000, 20_000, 15_000);
 
         // Symétrique du plafond compilé : le chemin interprété lance un conteneur PAR unité, donc
-        // son budget croissait linéairement (100 harnais Python ≈ 7 h avec les défauts de prod).
+        // son budget croissait linéairement (100 harnais Python : de l'ordre d'une journée avec les défauts de prod).
         // execution-service borne désormais la boucle (app.exec.interpreted-budget-ms, 15 min) :
         // au-delà, les harnais restants ne sont plus lancés. Le client plafonne au même budget,
         // PLUS une unité — l'échéance est consultée avant chaque harnais, donc celui qui vient de
@@ -277,6 +277,44 @@ class ExecutionClientTest {
                 10_000, 20_000, 15_000, 5 * 60_000);
         assertThat(tight.readTimeoutMs("Python", 100, null))
                 .isEqualTo(10_000 + 5 * 60_000 + PER_UNIT);
+    }
+
+    @Test
+    @DisplayName("Réglages serveur énormes (jusqu'à Long.MAX_VALUE) : délai saturé au plus long délai HTTP, jamais négatif ni tronqué")
+    void readTimeout_hugeServerSettings_saturateAtHttpMaximum() {
+        // execution-service accepte un budget interprété ou une attente de file de Long.MAX_VALUE
+        // (« illimité »). Sans saturation, les additions débordaient (délai négatif) ; sans borne,
+        // le délai dépassait l'int de HttpURLConnection et la conversion le TRONQUAIT à quelques
+        // minutes — core renonçait pendant une correction encore en cours (#216).
+        long httpMax = Integer.MAX_VALUE;
+        assertThat(ExecutionClient.MAX_READ_TIMEOUT_MS).isEqualTo(httpMax);
+
+        // Budget interprété illimité : budget + unité de dépassement déborde. Le plafond ne mord
+        // plus, le délai suit le nombre d'unités : 100 unités restent 100 × l'unité…
+        ExecutionClient unlimitedBudget = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, Long.MAX_VALUE);
+        assertThat(unlimitedBudget.readTimeoutMs("Python", 100, null))
+                .isEqualTo(10_000 + 100 * PER_UNIT);
+        // … et au-delà de l'int (10 000 unités ≈ 69 jours), le délai est borné, jamais négatif.
+        assertThat(unlimitedBudget.readTimeoutMs("Python", 10_000, null)).isEqualTo(httpMax);
+        assertThat(unlimitedBudget.readTimeoutMs("sql", 10_000, null)).isEqualTo(httpMax);
+
+        // Attente de file illimitée : chemin compilé (base + file) et interprété (unité + file).
+        ExecutionClient unlimitedQueue = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, Long.MAX_VALUE, 15 * 60_000);
+        assertThat(unlimitedQueue.readTimeoutMs("Java", 4, null)).isEqualTo(httpMax);
+        assertThat(unlimitedQueue.readTimeoutMs("Python", 1, null)).isEqualTo(httpMax);
+
+        // Unités × (unité + file) qui déborde SEUL, l'autre branche du plafond saturée aussi :
+        // c'est la multiplication qui doit saturer, pas devenir négative et gagner le min().
+        ExecutionClient bothHuge = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, Long.MAX_VALUE / 2, Long.MAX_VALUE);
+        assertThat(bothHuge.readTimeoutMs("Python", 100, null)).isEqualTo(httpMax);
+
+        // Au-delà de l'int mais sans débordement (budget de 30 jours) : borné, pas tronqué.
+        ExecutionClient month = new ExecutionClient("http://localhost:1", TOKEN, 2_000,
+                10_000, 20_000, 15_000, 30L * 24 * 3_600_000);
+        assertThat(month.readTimeoutMs("Python", 100_000, null)).isEqualTo(httpMax);
     }
 
     /** Port local où RIEN n'écoute : connexion refusée, comme execution-service en redémarrage. */

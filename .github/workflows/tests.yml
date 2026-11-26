@@ -534,7 +534,7 @@ jobs:
       - name: Tests d'intégration
         working-directory: execution-service
         env:
-          APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX s'exécutent aussi
+          APP_VENDOR_DIR: ${{ github.workspace }}/vendor-ci   # → les cas JSX/TSX et HTML s'exécutent aussi
           # En CI, une précondition manquante (bundle vendor absent, démon Docker ou images runner
           # absents) doit FAIRE ÉCHOUER le job, pas l'ignorer : sinon un runner qui ne construit pas
           # laisserait ce gate de sécurité passer au vert sans avoir rien exécuté. (En local,

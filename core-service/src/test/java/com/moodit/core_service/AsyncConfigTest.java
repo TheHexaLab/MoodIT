@@ -117,7 +117,7 @@ class AsyncConfigTest {
   @Test
   void executors_keepRunningUntilDestroyed() throws Exception {
     // Fermeture du contexte pendant une correction : l'arrêt coordonné du cycle de vie n'attend
-    // pas la fin de la correction (jusqu'à 15 min), l'executor reste actif et accepte puis
+    // pas la fin de la correction (plusieurs dizaines de minutes, cf. ExecutionClient#readTimeoutMs), l'executor reste actif et accepte puis
     // exécute encore une soumission (ou une relance) qui commit pendant l'arrêt gracieux du
     // serveur web. La correction en cours sera interrompue à la destruction et restera pending
     // pour la reprise au démarrage.

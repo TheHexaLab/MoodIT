@@ -214,7 +214,17 @@ const QuizView: React.FC<QuizViewProps> = ({
           onClose={attempt.dismissSubmitError}
           // Refus du serveur : renvoyer les mêmes réponses serait refusé de nouveau.
           onRetry={attempt.submitRejected ? undefined : attempt.submit}
-          labels={{ title: t.errorTitle }}
+          // Un titre par cas : « Soumission impossible » coiffait aussi une attente non conclue
+          // et un résultat illisible, qui ne sont pas des échecs de la soumission. Les messages
+          // viennent de ces mêmes libellés (passés au hook), d'où la comparaison.
+          labels={{
+            title:
+              attempt.submitError === t.submissionNotConfirmed
+                ? t.pendingTitle
+                : attempt.submitError === t.resultUnavailable
+                  ? t.resultUnavailableTitle
+                  : t.errorTitle,
+          }}
         />
       )}
 

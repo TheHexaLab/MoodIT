@@ -153,7 +153,7 @@ public class ExecutionClient {
             long perRun = vmLanguage(language) ? Math.max(run, VM_FLOOR_MS) : run;
             // Plafonné par le MUR du serveur (DockerEvaluator.MAX_WALL_MS) : au-delà, le
             // conteneur est tué de toute façon. Sans ce miroir, 100 harnais donnaient un délai
-            // de ~3 h pendant lesquelles un fil de correction serait resté épinglé si le démon se
+            // de plusieurs heures pendant lesquelles un fil de correction serait resté épinglé si le démon se
             // bloquait sans fermer la socket.
             // Nombre de COMPILATIONS par cas : le chemin NON FALSIFIABLE (#116, harnais booléen)
             // compile le noteur ET le code soumis séparément, et trois fois en Java, où les
@@ -172,27 +172,66 @@ public class ExecutionClient {
             long serverWall = Math.min(EVAL_BASE_MS + (cTools ? C_PREPROCESS_SLACK_MS : 0)
                     + cases * (perRun + EVAL_CASE_MARGIN_MS + compiles * COMPILE_SLACK_MS
                     + LIST_SLACK_MS + (cTools ? C_TOOLS_SLACK_MS : 0)), EVAL_MAX_WALL_MS);
-            return baseReadTimeoutMs + internalQueueWaitMs + serverWall + RUN_MARGIN_MS
-                    + CONTAINER_LIFECYCLE_MS;
+            return httpReadTimeout(add(add(baseReadTimeoutMs, internalQueueWaitMs),
+                    serverWall + RUN_MARGIN_MS + CONTAINER_LIFECYCLE_MS));
         }
         // Interprétés/SQL/vues : UNE place et UN conteneur PAR UNITÉ — chaque unité paie
         // l'attente de file et le mur du runner (75 s, miroir de WALL_OVERHEAD_MS : démarrage
         // du conteneur et compilation exec, tsc compris) en plus de son temps limite.
         long perUnit = Math.max(perTestReadTimeoutMs, run + RUN_MARGIN_MS)
                 + EXEC_WALL_SLACK_MS + CONTAINER_LIFECYCLE_MS;
-        long perUnitWithQueue = perUnit + internalQueueWaitMs;
+        long perUnitWithQueue = add(perUnit, internalQueueWaitMs);
         // Plafonné par le BUDGET GLOBAL du serveur (app.exec.interpreted-budget-ms) : passé son
         // échéance, les harnais restants ne sont plus lancés. Le budget est consulté AVANT
         // chaque harnais, donc un harnais déjà parti le dépasse d'une unité — de DEUX en SQL
         // (phases isolées) ; ce dépassement est AJOUTÉ, sans quoi le client renoncerait avant le
         // serveur et supprimerait une tentative encore en correction (le bug de #216).
-        // Sans ce plafond, 100 harnais Python donnaient près de 7 h de délai, pendant lesquelles
+        // Sans ce plafond, 100 harnais Python donnaient de l'ordre d'une journée de délai, pendant lesquelles
         // un fil de correction restait épinglé si execution-service pendait sans fermer la socket — le
         // chemin compilé, lui, était déjà borné par EVAL_MAX_WALL_MS.
         long overshootUnits = sqlLanguage(language) ? 2 : 1;
-        long serverWork = Math.min((long) Math.max(workUnits, 1) * perUnitWithQueue,
-                interpretedBudgetMs + overshootUnits * perUnitWithQueue);
-        return baseReadTimeoutMs + serverWork;
+        long serverWork = Math.min(multiply(Math.max(workUnits, 1), perUnitWithQueue),
+                add(interpretedBudgetMs, multiply(overshootUnits, perUnitWithQueue)));
+        return httpReadTimeout(add(baseReadTimeoutMs, serverWork));
+    }
+
+    /**
+     * Plus long délai de lecture applicable : {@code SimpleClientHttpRequestFactory} le convertit
+     * en {@code int} (millisecondes) pour {@code HttpURLConnection}. Un délai au-delà était
+     * TRONQUÉ (conversion l2i) — un budget serveur de {@code Long.MAX_VALUE}, qu'execution-service
+     * accepte, donnait quelques minutes de délai pour une correction qui peut durer bien plus,
+     * et core supprimait la tentative pendant qu'elle tournait (#216). ~24,8 jours : en pratique
+     * « attendre la réponse du serveur ».
+     */
+    static final long MAX_READ_TIMEOUT_MS = Integer.MAX_VALUE;
+
+    /** Délai borné à {@link #MAX_READ_TIMEOUT_MS} (jamais tronqué par la conversion en int). */
+    private static long httpReadTimeout(long ms) {
+        return Math.min(ms, MAX_READ_TIMEOUT_MS);
+    }
+
+    /**
+     * Addition SATURÉE : les réglages partagés avec execution-service (budget interprété, attente
+     * de file) acceptent des valeurs énormes, jusqu'à {@code Long.MAX_VALUE} ; une addition qui
+     * déborde rendait un délai NÉGATIF ou minuscule au lieu d'« illimité ». Tout débordement
+     * sature vers le HAUT : surestimer le délai est sans danger (correction asynchrone), le
+     * sous-estimer est le bug de #216.
+     */
+    private static long add(long a, long b) {
+        try {
+            return Math.addExact(a, b);
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /** Multiplication SATURÉE vers le haut (cf. {@link #add}). */
+    private static long multiply(long a, long b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
     }
 
     /** Marge par unité au-delà du temps limite du prof (collecte, va-et-vient). */
@@ -271,11 +310,18 @@ public class ExecutionClient {
 
     /**
      * Appels au démon HORS mur dans {@code DockerSandbox.run}, chacun borné par
-     * {@code CONNECTION_TIMEOUT} + {@code RESPONSE_TIMEOUT} : {@code info} (plafond des CPU, relu
-     * tant qu'il est illisible), {@code create}, copie du job, {@code start}, puis après le mur
-     * {@code exitCodeIfStopped} et {@code oomKilled}, et la suppression du {@code finally}, qui
-     * précède la réponse HTTP. L'attente {@code /wait} tombe dans le mur, la connexion des
-     * journaux dans {@code logReadTimeout}.
+     * {@code CONNECTION_TIMEOUT} + {@code RESPONSE_TIMEOUT} : {@code info} (plafond des CPU),
+     * {@code create}, copie du job, {@code start}, puis après le mur {@code exitCodeIfStopped} et
+     * {@code oomKilled}, et la suppression du {@code finally}, qui précède la réponse HTTP.
+     * L'attente {@code /wait} tombe dans le mur, la connexion des journaux dans
+     * {@code logReadTimeout}.
+     *
+     * <p>{@code info} : AU PLUS UN par exécution, en général aucun — la lecture est préchauffée
+     * au démarrage ({@code DockerSandbox.warmUpCpuLimit}, par {@code OrphanSweeper}), puis gardée ;
+     * après un échec, nouvel essai au plus toutes les 60 s ({@code DockerSandbox.CPU_READ_RETRY}),
+     * et une exécution n'attend jamais une lecture déjà en cours ailleurs. Ce compte de 7 repose
+     * sur cette garantie de {@code DockerSandbox} : une lecture qui se répéterait ou se
+     * sérialiserait entre exécutions le rendrait faux.
      */
     private static final int DAEMON_CALLS_OUTSIDE_WALL = 7;
 

@@ -328,6 +328,23 @@ describe('QuizView — pied de navigation', () => {
     });
     rerender(<QuizView {...props} attemptOutcome={{ quizId: 55, attemptId: 9, ok: true }} />);
     await waitFor(() => expect(screen.getByText('RESULTAT_VUE')).toBeTruthy());
+    // Titre propre au cas (pas « Soumission impossible » : ce n'est pas un échec de l'envoi).
+    expect(screen.getByText('Résultat indisponible')).toBeTruthy();
+    expect(screen.queryByText('Soumission impossible')).toBeNull();
+  });
+
+  it('attente non conclue (plafond) : titre « Correction en cours », pas « Soumission impossible »', async () => {
+    // Marqueur d'un envoi expiré : l'attente conclut dès le montage.
+    localStorage.setItem(
+      'moodit:quiz-pending-submission:55',
+      JSON.stringify({ answers: {}, attemptsBefore: 0, attemptId: 9, submittedAt: Date.now() - 50 * 60_000 })
+    );
+    renderView({ onSubmitQuiz: vi.fn(async () => ({ attemptId: 9 })) });
+    await waitFor(() =>
+      expect(screen.getByText('La correction prend plus de temps que prévu', { exact: false })).toBeTruthy()
+    );
+    expect(screen.getByText('Correction en cours')).toBeTruthy();
+    expect(screen.queryByText('Soumission impossible')).toBeNull();
   });
 
   it('attente de la correction : texte d’état, contenu inerte, « Soumettre » désactivé', async () => {

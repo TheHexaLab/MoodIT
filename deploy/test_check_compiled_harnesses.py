@@ -192,9 +192,8 @@ class ClassifyTest(unittest.TestCase):
         for detail in ("Erreur interne du noteur (serveur RPC)",
                        "Erreur interne du noteur",
                        "Aucun fichier de code soumis",
-                       "Retirez la ligne « package … ; » en tête du fichier : la notation attend la "
-                       "classe dans le paquet par défaut. (Le bouton « Exécuter » l'accepte, pas "
-                       "la notation.)",
+                       "Retirez la ligne « package … ; » en tête du fichier : la notation, comme le "
+                       "bouton « Exécuter », attend la classe dans le paquet par défaut.",
                        "Nom de classe réservé : class Math déjà fourni au harnais",
                        "Notation incomplète (cas sans verdict)",
                        "Échec de compilation :\nMain.java:1: error",
